@@ -1,0 +1,328 @@
+% =============================================================================
+% collegebeamer.sty — TeXDeck-modified derivative of college-beamer
+%
+% Source package : college-beamer (https://github.com/liu-qilong/college-beamer)
+% Original author: Qilong Liu
+% License        : CC BY 4.0
+%                  https://creativecommons.org/licenses/by/4.0/
+% Upstream theme : Federico Zenith, SINTEF Presentation (CC BY 4.0)
+%
+% This file has been modified by TeXDeck. Modifications include (non-exhaustive):
+%   - removed multi-institution package options; single theme path retained
+%   - theme maincolorRGB customized per template pack
+%   - CJK fonts unified to Fandol family available in TeX Live
+%   - QA / thank-you page copy rewritten
+%   - some packs add deck-headline helpers (\deckheadlinecontent etc.)
+%   - brand image paths retargeted to local src/brand/ placeholders
+%
+% You must retain this attribution when redistributing the .sty file.
+% =============================================================================
+
+% required packages
+\RequirePackage{etoolbox}
+\RequirePackage{tikz}
+\RequirePackage{listings}
+\RequirePackage{graphicx}
+\RequirePackage{geometry}
+\RequirePackage{amsfonts, amsmath, bm, oldgerm, lmodern}
+\RequirePackage{verbatim}
+\RequirePackage{animate}
+\RequirePackage{xcolor}
+\RequirePackage{ifplatform}
+\usepackage{fontspec}
+% --- package options ---
+% languages
+\newcommand{\tocStr}{Table of Contents}
+\newcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+
+\DeclareOption{en}{
+    \renewcommand{\tocStr}{Table of Contents}
+    \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+}
+
+\newif\ifcollegebeamer@zh
+
+% Chinese option
+\DeclareOption{zh}{%
+  \collegebeamer@zhtrue
+  \AtEndOfPackage{%
+    \RequirePackage{ifxetex}
+    \RequirePackage{xeCJK}
+
+    \setmainfont[Path=./font/]{texgyrepagella-regular.otf}
+    \setsansfont[Path=./font/]{texgyrepagella-regular.otf}
+
+    % Dark broker-report typography: Song for body, Hei for headings.
+    \setCJKmainfont{FandolSong-Regular}[
+      Extension    = .otf,
+      AutoFakeBold = true
+    ]
+    \setCJKsansfont{FandolSong-Regular}[
+      Extension    = .otf,
+      AutoFakeBold = true
+    ]
+
+    \renewcommand{\tocStr}{目录}
+    \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+    \ifxetex
+    \else
+      \PackageError{collegeBeamer}{请使用 XeLaTeX 编译此模板！}{}
+    \fi
+  }
+}
+
+% colleges & institutes
+\newcommand{\maincolorRGB}{25,25,28}
+\newcommand{\colorlogoPath}{src/brand/color-logo.png}
+\newcommand{\translogoPath}{src/brand/trans-logo.png}
+\newcommand{\backgroundPath}{src/brand/background.png}
+
+\DeclareOption{bjtu}{
+  \renewcommand{\maincolorRGB}{25,25,28}
+  \renewcommand{\colorlogoPath}{src/brand/color-logo.png}
+  \renewcommand{\translogoPath}{src/brand/trans-logo.png}
+  \renewcommand{\backgroundPath}{src/brand/background.png}
+}
+
+\ProcessOptions\relax
+
+% --- typeset & elements settings ---
+\geometry{paperwidth=16cm,paperheight=9cm}
+
+% logo
+\pgfdeclareimage[width=0.082\paperwidth]{colorlogo}{\colorlogoPath}
+\pgfdeclareimage[width=0.082\paperwidth]{translogo}{\translogoPath}
+\newcommand{\@makelogo}{colorlogo}
+
+\setbeamertemplate{headline}{\hspace{0.06\textwidth}\pgfuseimage{\@makelogo}}
+
+% color
+\definecolor{maincolor}{RGB}{\maincolorRGB}
+\definecolor{airforceblue}{RGB}{122, 98, 106}
+\definecolor{morelightgray}{RGB}{245, 242, 243}
+\definecolor{reporttext}{RGB}{46, 38, 41}
+\definecolor{reportmuted}{RGB}{118, 104, 109}
+\definecolor{reportline}{RGB}{216, 205, 208}
+
+\newcommand{\themecolor}[1]{
+    \ifstrequal{#1}{colorbg}{
+        \renewcommand{\@makelogo}{translogo}
+        \setbeamercolor{normal text}{fg=white, bg=maincolor}
+        \setbeamercolor{structure}{fg=white}
+    }{
+        \renewcommand{\@makelogo}{colorlogo}
+        \setbeamercolor{normal text}{fg=reporttext, bg=white}
+        \setbeamercolor{structure}{fg=maincolor}
+    }
+}
+\themecolor{white}
+
+\setbeamercolor{title}{fg=maincolor}
+\setbeamercolor{alerted text}{fg=maincolor}
+\setbeamercolor{author}{fg=reporttext}
+\setbeamercolor{date}{fg=reportmuted}
+\setbeamercolor{frametitle}{fg=maincolor}
+\setbeamercolor{framesubtitle}{fg=reportmuted}
+
+% font
+\renewcommand{\familydefault}{\rmdefault}
+\usefonttheme{professionalfonts}
+
+\AtEndOfPackage{%
+  \ifcollegebeamer@zh
+    \setbeamerfont{title}{series=\bfseries, size=\LARGE}
+  \else
+    \setbeamerfont{title}{series=\bfseries, size=\LARGE}
+  \fi
+}
+
+\setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
+\setbeamerfont{author}{size=\small}
+\setbeamerfont{date}{size=\footnotesize}
+\setbeamerfont{frametitle}{series=\bfseries, size=\large}
+\setbeamerfont{framesubtitle}{series=\mdseries, size=\small}
+\setbeamerfont{footline}{size=\tiny}
+\setbeamerfont{block title}{series=\bfseries, size=\small}
+\setbeamerfont{block body}{size=\footnotesize}
+
+\setbeamertemplate{navigation symbols}{}
+
+% footline
+\newcommand{\@footlinepayoff}{\@SINTEFmotto}
+\setbeamertemplate{footline}{
+    \begin{beamercolorbox}[wd=\textwidth, ht=4.8mm, dp=2.5mm, leftskip=0.9cm, rightskip=0.9cm]{footline}
+    \color{reportmuted}\rule{\textwidth}{0.25pt}\par\vspace{-0.15ex}
+    \usebeamerfont{footline}\color{reportmuted}\hfill\@footlinepayoff
+    \end{beamercolorbox}
+}
+
+\newcommand{\footlinecolor}[1]{
+    \ifstrempty{#1}{
+        \renewcommand{\@footlinepayoff}{}
+        \setbeamercolor{footline}{bg=}
+    }{
+        \renewcommand{\@footlinepayoff}{\@SINTEFmotto}
+        \setbeamercolor{footline}{fg=white, bg=#1}
+    }
+}
+\footlinecolor{}
+
+% block
+\setbeamertemplate{blocks}[rounded]
+\setbeamercolor{block title}{fg=maincolor, bg=morelightgray}
+\setbeamercolor{block body}{fg=reporttext, bg=morelightgray}
+
+% bullets
+\setbeamertemplate{itemize item}{\raisebox{0.18ex}{\scriptsize\textcolor{maincolor}{$\blacklozenge$}}}
+\setbeamertemplate{itemize subitem}{\raisebox{0.16ex}{\scriptsize\textcolor{airforceblue}{$\triangleright$}}}
+\setbeamertemplate{itemize subsubitem}{\textcolor{reportmuted}{\tiny$\circ$}}
+
+% table of contents
+\setbeamertemplate{section in toc}{\textcolor{maincolor}{$\blacktriangleright$}~\inserttocsection}
+\setbeamertemplate{subsection in toc}{}
+
+% code block setting
+\definecolor{codegreen}{RGB}{101,218,120}
+\definecolor{darkgreen}{RGB}{93,158,82}
+\definecolor{darkyellow}{RGB}{245,194,105}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{airforceblue},
+    keywordstyle=\color{maincolor},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=4,
+    xleftmargin=10pt,
+    xrightmargin=10pt,
+    frame=single,
+    rulecolor=\color{reportline},
+}
+
+\lstset{style=mystyle}
+
+% --- section & frame setting ---
+\newcommand{\strsubsec}{Section \thesection.\thesubsection}
+
+\makeatletter
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\thesection \, \secname}}{}
+\makeatother
+
+\setbeamertemplate{frametitle continuation}{}
+
+\AtBeginSection[]
+{
+    \begingroup
+    \setbeamertemplate{footline}{}
+    \themecolor{colorbg}
+    \begin{frame}{\tocStr}
+        \tableofcontents[currentsection]
+    \end{frame}
+    \endgroup
+}
+
+\AtBeginSubsection[]
+{
+    \begin{frame}{\,}{\thesection \, \secname}
+        \fontfamily{\rmdefault}\selectfont
+        \centering\textbf{\textcolor{maincolor}{
+            \large Section \thesection.\thesubsection
+            \vskip12pt
+            \LARGE \subsecname
+        }}
+    \end{frame}
+}
+
+% --- page elements ---
+\setbeamertemplate{frametitle}{
+    \vspace*{-3.1ex}
+    \begin{beamercolorbox}[leftskip=2cm, sep=0.75ex]{frametitle}
+    \usebeamerfont{frametitle}\insertframetitle\\
+    \usebeamerfont{framesubtitle}\insertframesubtitle
+    \end{beamercolorbox}
+}
+
+\setbeamertemplate{title page}{
+    \hspace{-12mm}
+    \begin{beamercolorbox}[wd=0.9\textwidth, sep=10pt, leftskip=8mm]{title}
+        {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle}\\
+        \vskip7pt{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}\\
+        \vskip9pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
+        \vskip4pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \end{beamercolorbox}
+}
+
+\renewcommand{\maketitle}{
+    \begingroup
+        \setbeamertemplate{footline}{}
+        \setbeamertemplate{background}{
+          \includegraphics[height=\paperheight]{\backgroundPath}
+        }
+        \begin{frame}
+            \titlepage
+        \end{frame}
+    \endgroup
+}
+
+\newcommand{\QApage}{
+    \begingroup
+        \setbeamertemplate{footline}{}
+        \themecolor{colorbg}
+        \begin{frame}{}
+            \centering
+            \begin{minipage}{\textwidth}
+                \usebeamercolor[fg]{normal text}
+                \centering
+                \textcolor{white}{\Huge Q \& A}
+                \vskip10pt
+                \textcolor{white}{\Large \qaStr}
+            \end{minipage}
+        \end{frame}
+    \endgroup
+}
+
+\newcommand{\bibliographpage}{
+    \section{References}
+    \begingroup
+    \themecolor{colorbg}
+    \begin{frame}[allowframebreaks]{References}{\,}
+        \tiny
+        \printbibliography[heading=none]
+    \end{frame}
+\endgroup
+}
+
+% --- commands ---
+\newcommand{\bhref}[2]{\textcolor{airforceblue}{\href{#1}{#2}}}
+
+\newcommand{\centerstate}[1]{
+    \centering
+    \begin{columns}
+        \begin{column}{0.8\textwidth}
+            #1
+        \end{column}
+    \end{columns}
+}
+
+\newcommand{\tbf}[1]{\texttt{\textcolor{airforceblue}{[#1]}}}
+\newcommand{\ctextbf}[1]{\textbf{\textcolor{maincolor}{#1}}}
+\newcommand{\btextbf}[1]{\textbf{\textcolor{airforceblue}{#1}}}
+\newcommand{\ctextsl}[1]{\textsl{\textcolor{maincolor}{#1}}}
+\newcommand{\btextsl}[1]{\textsl{\textcolor{airforceblue}{#1}}}
+\newcommand{\cemph}[1]{\emph{\textcolor{maincolor}{#1}}}
+\newcommand{\bemph}[1]{\emph{\textcolor{airforceblue}{#1}}}
+\newcommand{\ctexttt}[1]{\texttt{\textcolor{maincolor}{#1}}}
+\newcommand{\btexttt}[1]{\texttt{\textcolor{airforceblue}{#1}}}

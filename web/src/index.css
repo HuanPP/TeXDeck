@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: hsl(215, 30%, 55%);
+  --color-primary-hover: hsl(215, 30%, 45%);
+  --color-accent: hsl(200, 60%, 72%);
+  --color-surface: #f4f6f8;
+  --color-surface-container: #ffffff;
+  --color-on-surface: #1e293b;
+  --color-heading: #334155;
+  --color-border: #e2e8f0;
+  --font-serif: "Palatino Linotype", Palatino, "Book Antiqua", "Times New Roman", Times, serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Source Code Pro", monospace;
+}
+
+body {
+  font-family: var(--font-serif);
+  background-color: var(--color-surface);
+  color: var(--color-on-surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 { line-height: 1.2; color: var(--color-heading); }
+p { line-height: 1.7; }
+
+.app-surface {
+  background-color: var(--color-surface-container);
+  border: 1px solid var(--color-border);
+}
+
+.input-field {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  padding: 0.75rem 1rem;
+  width: 100%;
+  color: var(--color-on-surface);
+  font-family: inherit;
+}
+.input-field:focus { outline: none; border-color: var(--color-primary); }
+
+.btn-primary, .btn-secondary {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+}
+.btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.btn-primary:disabled, .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary {
+  background: transparent;
+  color: var(--color-on-surface);
+  border: 1px solid var(--color-border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: #cbd5e1;
+}

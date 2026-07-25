@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Runtime artifacts (never commit)
+artifacts/
+
+# Environment (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# LaTeX intermediates
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
+
+# Local prototype (not part of the published tree)
+ppt_bjtu_overleaf/

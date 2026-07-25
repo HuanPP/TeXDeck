@@ -1,0 +1,77 @@
+import type { FrameItem, GenerationMeta, TemplateItem } from "./types";
+
+async function readError(res: Response): Promise<string> {
+  const text = await res.text();
+  if (!text.trim()) return `Request failed (HTTP ${res.status})`;
+  try {
+    const data = JSON.parse(text) as { detail?: unknown; message?: string };
+    if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
+    if (Array.isArray(data.detail)) {
+      const parts = data.detail
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object" && "msg" in item) {
+            const msg = (item as { msg: unknown }).msg;
+            return typeof msg === "string" ? msg : null;
+          }
+          return null;
+        })
+        .filter((x): x is string => Boolean(x?.trim()));
+      if (parts.length) return parts.join("; ");
+    }
+    if (data.message?.trim()) return data.message;
+  } catch {
+    /* non-JSON: return raw text */
+  }
+  return text.trim();
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) throw new Error(await readError(res));
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const listTemplates = () => requestJson<TemplateItem[]>("/api/templates");
+export const listGenerations = () => requestJson<GenerationMeta[]>("/api/generations");
+export const getGeneration = (id: string) =>
+  requestJson<GenerationMeta>(`/api/generations/${id}`);
+export const deleteGeneration = (id: string) =>
+  requestJson<void>(`/api/generations/${id}`, { method: "DELETE" });
+export const getFrames = (id: string) =>
+  requestJson<FrameItem[]>(`/api/generations/${id}/frames`);
+
+export function createGeneration(input: {
+  title: string;
+  template_key: string;
+  instruction: string;
+  author?: string;
+  institute?: string;
+  file?: File | null;
+  source_text?: string;
+}): Promise<{ id: string }> {
+  const form = new FormData();
+  form.append("title", input.title);
+  form.append("template_key", input.template_key);
+  form.append("instruction", input.instruction);
+  form.append("author", input.author ?? "");
+  form.append("institute", input.institute ?? "");
+  if (input.file) form.append("file", input.file);
+  else if (input.source_text !== undefined) form.append("source_text", input.source_text);
+  return requestJson("/api/generations", { method: "POST", body: form });
+}
+
+export function editFrame(id: string, index: number, instruction: string): Promise<void> {
+  return requestJson(`/api/generations/${id}/frames/${index}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instruction }),
+  });
+}
+
+export const pdfUrl = (id: string, bust = 0) =>
+  `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
+export const texUrl = (id: string) => `/api/generations/${id}/tex`;
+export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
+export const logUrl = (id: string) => `/api/generations/${id}/log`;

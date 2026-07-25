@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+import json
+from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, AsyncIterator
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel
+
+from . import deck, pdf, store, tasks
+from .config import settings
+from .deck import DeckError, DeckRequest
+from .edit import (
+    EditError,
+    build_frame_edit_messages,
+    extract_frame,
+    parse_frames,
+    replace_frame,
+    resolve_frame_pages,
+)
+from .llm import ProgressCallback, create_client
+from .store import GenerationMeta
+
+
+class FrameEditBody(BaseModel):
+    instruction: str
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    settings.artifact_root.mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="TeXDeck", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _load(gen_id: str) -> GenerationMeta:
+    try:
+        store.generation_dir(gen_id)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    try:
+        return store.load_meta(gen_id)
+    except KeyError as e:
+        raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
+
+
+def _file(gen_id: str, name: str, missing: str) -> Path:
+    p = store.generation_dir(gen_id) / name
+    if not p.is_file():
+        raise HTTPException(404, detail=missing)
+    return p
+
+
+def _sanitize(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    n = 0
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            out.append(msg)
+            continue
+        parts: list[Any] = []
+        for part in content:
+            img = isinstance(part, dict) and part.get("type") == "image_url"
+            if img and isinstance(part.get("image_url"), dict):
+                n += 1
+                parts.append({"type": "image_url", "image_url": {"url": f"<image:page_{n:03d}>"}})
+            else:
+                parts.append(part)
+        out.append({**msg, "content": parts})
+    return out
+
+
+def _dump_llm(gdir: Path, stem: str, messages: list[dict[str, Any]], response: str) -> None:
+    d = gdir / "llm"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{stem}_prompt.json").write_text(
+        json.dumps(_sanitize(messages), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    (d / f"{stem}_response.txt").write_text(response, encoding="utf-8")
+
+
+def _fail(meta: GenerationMeta, exc: BaseException) -> None:
+    meta.status = "failed"
+    meta.error = str(exc)
+    store.save_meta(meta)
+
+
+def _edit_fail(meta: GenerationMeta, exc: BaseException) -> None:
+    # Edit rolled back; finished PDF still usable; keep status (usually succeeded)
+    meta.error = f"This edit failed and was rolled back: {exc}"
+    store.save_meta(meta)
+
+
+def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -> None:
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    try:
+        template = deck.get_template(meta.template_key)
+        deck.copy_template_bundle(template, gdir)
+        progress("Preparing template", 2)
+        document = None
+        if meta.source_kind == "pdf":
+            source_pdf = gdir / "source.pdf"
+            if not source_pdf.is_file():
+                raise RuntimeError("Uploaded PDF is missing")
+
+            def pdf_progress(stage: str, percent: int) -> None:
+                progress(stage, 5 + percent * 40 // 100)
+
+            document = pdf.load_pdf(source_pdf, gdir, progress=pdf_progress)
+            meta.page_count = len(document.pages)
+            store.save_meta(meta)
+        request = DeckRequest(
+            template_key=template.key,
+            title=meta.title,
+            author=meta.author,
+            institute=meta.institute,
+            instruction=meta.instruction,
+            source_text=source_text if meta.source_kind == "text" else "",
+        )
+        messages = deck.build_generation_messages(template, request, document)
+        progress("Generating slides with the model", 50)
+        client = create_client()
+        response = client.complete(messages)
+        _dump_llm(gdir, "generate", messages, response)
+        progress("Validating model output", 70)
+        try:
+            tex = deck.extract_tex(response, template)
+        except DeckError as first_err:
+            retry = messages + [
+                {"role": "assistant", "content": response},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Previous output was invalid: {first_err}\n"
+                        "Re-output a complete, compilable XeLaTeX Beamer document. "
+                        "No explanation, no markdown fences."
+                    ),
+                },
+            ]
+            response = client.complete(retry)
+            _dump_llm(gdir, "generate_retry", retry, response)
+            tex = deck.extract_tex(response, template)
+        tex_path = gdir / "main.tex"
+        tex_path.write_text(tex, encoding="utf-8")
+
+        def compile_progress(_stage: str, percent: int) -> None:
+            progress("Compiling", 75 + percent * 20 // 100)
+
+        deck.compile_tex(
+            tex_path,
+            client=client,
+            progress=compile_progress,
+            llm_dump_dir=gdir / "llm",
+        )
+        meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        progress("Done", 100)
+    except Exception as exc:
+        _fail(meta, exc)
+        raise
+
+
+def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallback) -> None:
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    tex_path = gdir / "main.tex"
+    try:
+        progress("Preparing edit", 5)
+        original = tex_path.read_text(encoding="utf-8")
+        frame = next((f for f in parse_frames(original) if f.index == index), None)
+        if frame is None:
+            raise RuntimeError(f"Slide index not found: {index}")
+        template = deck.get_template(meta.template_key)
+        messages = build_frame_edit_messages(frame, instruction, template.main_tex)
+        progress("Editing one slide with the model", 30)
+        client = create_client()
+        response = client.complete(messages)
+        _dump_llm(gdir, f"edit_{index}", messages, response)
+        new_tex = replace_frame(original, frame, extract_frame(response))
+        edit_dir = store.next_edit_dir(gen_id)
+        (edit_dir / "main.tex").write_text(new_tex, encoding="utf-8")
+        (edit_dir / "edit.json").write_text(
+            json.dumps(
+                {
+                    "instruction": instruction,
+                    "index": index,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        tex_path.write_text(new_tex, encoding="utf-8")
+        progress("Compiling", 70)
+        try:
+            deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
+        except Exception as compile_exc:
+            tex_path.write_text(original, encoding="utf-8")
+            try:
+                deck.compile_tex(tex_path, client=None)
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    f"Compile failed after edit: {compile_exc}; "
+                    f"restore of original also failed: {restore_exc}"
+                ) from compile_exc
+            raise
+        meta.edit_count += 1
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        progress("Done", 100)
+    except Exception as exc:
+        _edit_fail(meta, exc)
+        raise
+
+
+def _plain(gen_id: str, name: str, missing: str) -> FileResponse:
+    _load(gen_id)
+    return FileResponse(_file(gen_id, name, missing), media_type="text/plain; charset=utf-8", filename=name)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/templates")
+def api_list_templates() -> list[dict[str, str]]:
+    return [{"key": t.key, "name": t.name} for t in deck.list_templates()]
+
+
+@app.get("/api/generations")
+def api_list_generations() -> list[dict[str, Any]]:
+    return [asdict(m) for m in store.list_generations()]
+
+
+@app.post("/api/generations")
+async def api_create_generation(
+    title: str = Form(...),
+    template_key: str = Form(...),
+    instruction: str = Form(""),
+    source_text: str = Form(""),
+    author: str = Form(""),
+    institute: str = Form(""),
+    file: UploadFile | None = File(None),
+) -> JSONResponse:
+    try:
+        template = deck.get_template(template_key)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    if not title.strip():
+        raise HTTPException(400, detail="Title must not be empty")
+    has_file = file is not None and bool(file.filename)
+    if has_file:
+        assert file is not None
+        content = await file.read()
+        if not content:
+            raise HTTPException(400, detail="Uploaded PDF is empty")
+        kind, name, text_body = "pdf", (file.filename or "source.pdf"), ""
+    elif source_text.strip():
+        content, kind, name, text_body = None, "text", "", source_text
+    else:
+        raise HTTPException(400, detail="Upload a PDF or provide pasted text")
+    meta = store.new_generation(
+        title=title.strip(),
+        template_key=template.key,
+        template_name=template.name,
+        instruction=instruction or "",
+        source_kind=kind,
+        source_name=name,
+        author=(author or "").strip(),
+        institute=(institute or "").strip(),
+    )
+    if content is not None:
+        (store.generation_dir(meta.id) / "source.pdf").write_bytes(content)
+    gen_id, text_for_job = meta.id, text_body
+
+    def job(progress: ProgressCallback) -> None:
+        _run_generation(gen_id, text_for_job, progress)
+
+    tasks.start(gen_id, job)
+    return JSONResponse({"id": gen_id}, status_code=202)
+
+
+@app.get("/api/generations/{gen_id}")
+def api_get_generation(gen_id: str) -> dict[str, Any]:
+    return asdict(_load(gen_id))
+
+
+@app.delete("/api/generations/{gen_id}", status_code=204)
+def api_delete_generation(gen_id: str) -> Response:
+    _load(gen_id)
+    try:
+        store.delete_generation(gen_id)
+    except KeyError as e:
+        raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
+    return Response(status_code=204)
+
+
+@app.get("/api/generations/{gen_id}/pdf")
+def api_get_pdf(gen_id: str) -> FileResponse:
+    _load(gen_id)
+    return FileResponse(
+        _file(gen_id, "main.pdf", "PDF not generated yet"),
+        media_type="application/pdf",
+        filename="main.pdf",
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/api/generations/{gen_id}/tex")
+def api_get_tex(gen_id: str) -> FileResponse:
+    return _plain(gen_id, "main.tex", "TeX not generated yet")
+
+
+@app.get("/api/generations/{gen_id}/log")
+def api_get_log(gen_id: str) -> FileResponse:
+    return _plain(gen_id, "main.log", "Compile log not found")
+
+
+@app.get("/api/generations/{gen_id}/bundle.zip")
+def api_get_bundle(gen_id: str) -> FileResponse:
+    meta = _load(gen_id)
+    try:
+        path = store.bundle_zip(gen_id)
+    except KeyError as e:
+        raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
+    return FileResponse(
+        path, media_type="application/zip", filename=(meta.title or gen_id).replace("/", "_") + ".zip"
+    )
+
+
+@app.get("/api/generations/{gen_id}/frames")
+def api_list_frames(gen_id: str) -> list[dict[str, Any]]:
+    _load(gen_id)
+    tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
+    try:
+        frames = resolve_frame_pages(parse_frames(tex_path.read_text(encoding="utf-8")), tex_path)
+    except EditError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return [{"index": f.index, "title": f.title, "page": f.page, "tex": f.tex} for f in frames]
+
+
+@app.post("/api/generations/{gen_id}/frames/{index}/edit")
+def api_edit_frame(gen_id: str, index: int, body: FrameEditBody) -> Response:
+    _load(gen_id)
+    if not body.instruction.strip():
+        raise HTTPException(400, detail="Edit instruction must not be empty")
+    tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
+    if not any(f.index == index for f in parse_frames(tex_path.read_text(encoding="utf-8"))):
+        raise HTTPException(400, detail=f"Slide index not found: {index}")
+    instruction = body.instruction
+
+    def job(progress: ProgressCallback) -> None:
+        _run_edit(gen_id, index, instruction, progress)
+
+    tasks.start(gen_id, job)
+    return Response(status_code=202)
+
+
+@app.websocket("/ws/generations/{gen_id}")
+async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
+    try:
+        store.generation_dir(gen_id)
+    except ValueError:
+        await websocket.close(code=1008, reason="Invalid generation ID")
+        return
+    await websocket.accept()
+    async for state in tasks.watch(gen_id):
+        await websocket.send_json(asdict(state))

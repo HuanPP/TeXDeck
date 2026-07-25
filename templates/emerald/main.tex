@@ -1,0 +1,388 @@
+% =============================================================================
+% SYSTEM INSTRUCTION TO LLM:
+% This file is a PROMPT TEMPLATE.
+% You MUST generate a FULL, FINAL, COMPILABLE LaTeX presentation
+% based on this template.
+%
+% CRITICAL RULES:
+% 1. DO NOT change anything in the Preamble.
+% 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
+% 3. You MUST replace all placeholder texts with real content.
+% 4. You MUST preserve the collegeBeamer theme and visual style.
+% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
+%    diagram and table with tikz / pgfplots / booktabs instead.
+% 7. Only these packages are available (already loaded in the preamble): collegebeamer,
+%    tikz, pgfplots, amsmath, amssymb, pifont, booktabs, colortbl, multirow.
+%    Do NOT add \usepackage lines.
+% =============================================================================
+
+\documentclass[aspectratio=169,10pt]{beamer}
+
+% -----------------------------------------------------------------------------
+% 1. Preamble & Theme (DO NOT CHANGE)
+% -----------------------------------------------------------------------------
+\usepackage[zh,bjtu]{collegebeamer}
+
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage{amsmath,amssymb}
+\usepackage{pifont}
+\usepackage{booktabs}
+\usepackage{colortbl}
+\usepackage{multirow}
+
+% --- Font Setup ---
+% English/Numbers -> Times New Roman
+
+% Disable collegeBeamer auto TOC insertion
+\AtBeginSection[]{}
+
+% -----------------------------------------------------------------------------
+% 1.1 Make "subtitle under each slide title" show FULL and stable
+% -----------------------------------------------------------------------------
+% Some collegeBeamer variants put only \insertsectionnumber under the title,
+% which may appear as "0" or look incomplete.
+% Here we redefine framesubtitle so it always shows:
+%   "Section number  Section name"
+% and avoids showing anything before the first \section is defined.
+\setbeamertemplate{framesubtitle}{%
+  \vspace{-0.6ex}%
+  {\scriptsize\color{maincolor}%
+    \ifnum\value{section}>0
+      \thesection\quad\insertsectionhead
+    \fi
+  }\par
+  \vspace{-0.4ex}%
+}
+
+% Keep title page compilable when subtitle/author/institute are left empty.
+\setbeamertemplate{title page}{
+    \hspace{-12mm}
+    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
+        {\usebeamerfont{title}\inserttitle}\\
+        \vskip5pt{\usebeamerfont{subtitle}\leavevmode\insertsubtitle}\\
+        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\leavevmode\insertauthor}\\
+        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \end{beamercolorbox}
+}
+
+% -----------------------------------------------------------------------------
+% 2. Metadata (LLM MUST FILL)
+% -----------------------------------------------------------------------------
+\title[Short Title]{Full Presentation Title}
+% Caller fills these three fields. Leave empty when unknown; never invent placeholders.
+\subtitle{}
+\author{}
+\institute{}
+\date{\today}
+
+\begin{document}
+
+% =============================================================================
+% FRAME 1: TITLE PAGE
+% =============================================================================
+\maketitle
+
+% =============================================================================
+% FRAME 2: MANUAL TABLE OF CONTENTS
+% =============================================================================
+\begin{frame}{Outline}
+\large
+\renewcommand{\baselinestretch}{1.8}\selectfont
+
+01 \quad Title of Part One
+
+02 \quad Title of Part Two
+
+03 \quad Title of Part Three
+
+04 \quad Title of Part Four
+
+05 \quad Summary \& Q\&A
+\end{frame}
+
+% =============================================================================
+% SECTION 1 (EXAMPLE)
+% IMPORTANT: define \section{...} before any content frames of that section
+% so the subtitle line is complete (no "0").
+% =============================================================================
+\section{Title of Part One}
+
+% =============================================================================
+% FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
+% LLM MUST generate one such page before EACH section
+% =============================================================================
+\begin{frame}{Outline}
+\large
+\renewcommand{\baselinestretch}{1.8}\selectfont
+
+\textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
+
+02 \quad Title of Part Two
+
+03 \quad Title of Part Three
+
+04 \quad Title of Part Four
+
+05 \quad Summary \& Q\&A
+\end{frame}
+
+% =============================================================================
+% CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
+% =============================================================================
+% Content page example 1: Text-left, figure-right layout
+\begin{frame}{Content Example: Text Left, Figure Right}
+\framesubtitle{} % keep empty; framesubtitle template will show section info automatically
+\small
+\begin{columns}[T]
+\column{0.55\textwidth}
+Write the core analysis content on the left side here.
+This area is used for background description, problem definition,
+logical reasoning, or methodology explanation.
+Text should be concise and conclusion-oriented; avoid vague descriptions.
+
+\vspace{0.6em}
+\textbf{Key Takeaway:}
+State the central message of this slide in one sentence.
+
+\column{0.40\textwidth}
+\centering
+% Side panel: FEW categories only (4--6 short labels). Compact width. No xlabel.
+% For 12-month / many-label series use the full-width chart on the next example page.
+\begin{tikzpicture}
+\begin{axis}[
+    width=5.4cm,
+    height=3.6cm,
+    ybar,
+    bar width=9pt,
+    enlarge x limits=0.15,
+    ymin=0, ymax=100,
+    symbolic x coords={Q1,Q2,Q3,Q4},
+    xtick=data,
+    ylabel={Sample index},
+    tick label style={font=\tiny},
+    label style={font=\scriptsize},
+    axis y line=left,
+    axis x line=bottom,
+    axis line style={maincolor},
+    grid=major,
+    grid style={maincolor!12},
+]
+\addplot[fill=maincolor!40, draw=maincolor] coordinates {
+    (Q1,42) (Q2,55) (Q3,61) (Q4,78)
+};
+\end{axis}
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
+% Content page example 2: Text-top, figure-bottom layout
+\begin{frame}{Content Example: Text Top, Figure Bottom}
+\framesubtitle{} % automatically inherits section info
+\small
+
+% Upper text area
+When a series has many categories (for example 12 months), use this
+full-width layout below -- not the narrow side-panel chart.
+Keep the text concise so the wide chart remains readable.
+
+\vspace{1em}
+
+% Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=11.5cm, height=4.2cm,
+    enlarge x limits=0.04,
+    x tick label style={rotate=45, anchor=east, font=\tiny},
+    ylabel style={font=\scriptsize},
+    xlabel style={font=\scriptsize, yshift=-2pt},
+    ymin=1900, ymax=2900,
+    symbolic x coords={Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec},
+    xtick=data,
+    ylabel={Sample level},
+    xlabel={Month (illustrative)},
+    legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
+    yticklabel style={font=\tiny},
+    axis y line=left,
+    axis x line=bottom,
+    grid=major,
+    grid style={maincolor!12},
+    axis line style={maincolor},
+]
+\addplot[
+    thick,
+    mark=*,
+    maincolor,
+    mark options={fill=white, draw=maincolor, scale=0.7},
+] coordinates {
+    (Jan,2040) (Feb,2085) (Mar,2160) (Apr,2330) (May,2345) (Jun,2320)
+    (Jul,2420) (Aug,2505) (Sep,2630) (Oct,2740) (Nov,2655) (Dec,2620)
+};
+\addplot[
+    thick,
+    dashed,
+    maincolor!55,
+    mark=square*,
+    mark options={fill=white, draw=maincolor!55, scale=0.55},
+] coordinates {
+    (Jan,2010) (Feb,2050) (Mar,2120) (Apr,2280) (May,2300) (Jun,2290)
+    (Jul,2380) (Aug,2460) (Sep,2580) (Oct,2700) (Nov,2620) (Dec,2590)
+};
+\legend{Series A (sample), Series B (sample)}
+\end{axis}
+\end{tikzpicture}
+
+\vspace{0.3em}
+\centerstate{
+    \tiny \emph{Source: data compiled from the source document.}
+}
+\end{frame}
+
+
+% Content page example 3: Figure-left, text-right layout
+\begin{frame}{Content Example: Figure Left, Text Right}
+\framesubtitle{} 
+\small
+\begin{columns}[c] % [c] = vertically centered; use [T] for top alignment if text is long
+
+% Left: real TikZ structure diagram (layered pipeline)
+\column{0.45\textwidth}
+    \centering
+    \begin{tikzpicture}[
+        font=\scriptsize,
+        box/.style={
+            draw=maincolor, fill=maincolor!12, rounded corners=2pt,
+            minimum height=0.62cm, text width=1.35cm, align=center
+        },
+        layer title/.style={font=\tiny\bfseries, text=maincolor}
+    ]
+        % Data layer
+        \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.45);
+        \node[layer title, anchor=north west] at (-0.15,2.40) {Data layer};
+        \node[box] (s1) at (0.7,1.55) {Sensors};
+        \node[box] (s2) at (2.5,1.55) {Ingest};
+        \node[box] (s3) at (4.2,1.55) {Store};
+        % Decision layer
+        \fill[maincolor!6, rounded corners=3pt] (-0.25,-0.95) rectangle (4.85,0.70);
+        \node[layer title, anchor=north west] at (-0.15,0.65) {Decision layer};
+        \node[box] (p1) at (0.7,-0.15) {Feature};
+        \node[box] (p2) at (2.5,-0.15) {Model};
+        \node[box] (p3) at (4.2,-0.15) {Act};
+        % Edges
+        \draw[->, thick, maincolor] (s1) -- (s2);
+        \draw[->, thick, maincolor] (s2) -- (s3);
+        \draw[->, thick, maincolor] (s2) -- (p1);
+        \draw[->, thick, maincolor] (p1) -- (p2);
+        \draw[->, thick, maincolor] (p2) -- (p3);
+        \draw[->, thick, maincolor, dashed]
+            (p3.south) -- ++(0,-0.28) -| (p1.south)
+            node[pos=0.25, below, font=\tiny, text=maincolor] {feedback};
+    \end{tikzpicture}
+
+% Right: text analysis area (50\% width)
+\column{0.50\textwidth}
+    \textbf{Figure / Object Analysis:}
+    
+    This section provides a detailed interpretation of the visual element
+    on the left. Suitable for presenting:
+    \begin{itemize}
+        \item Physical structure of experimental apparatus
+        \item Specific module details of an algorithm or model
+        \item Domain-specific data analysis
+    \end{itemize}
+
+    \vspace{1em}
+    \textbf{Key Findings:}
+    \begin{enumerate}
+        \item \ctextbf{Observation 1}: The figure on the left shows\ldots
+        \item \ctextbf{Observation 2}: Compared to expectations, the results exhibit\ldots
+    \end{enumerate}
+\end{columns}
+\end{frame}
+
+% =============================================================================
+% [STYLE REF] TABLE PAGE (DELETE IN FINAL OUTPUT)
+% =============================================================================
+\begin{frame}{[STYLE REF] Table Style Example}
+\framesubtitle{}
+\small
+\centering
+\renewcommand{\arraystretch}{1.15}
+\footnotesize
+\rowcolors{2}{maincolor!10}{white}
+\begin{tabular}{p{0.2\textwidth} c c c}
+\toprule
+Metric & A & B & Conclusion \\
+\midrule
+Item 1 & 12 & 15 & Room for improvement \\
+Item 2 & 20 & 18 & Stable \\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+% =============================================================================
+% [STYLE REF] TIKZ FLOW PAGE (DELETE IN FINAL OUTPUT)
+% =============================================================================
+\begin{frame}{[STYLE REF] Flowchart Style Example}
+\framesubtitle{}
+\centering
+\begin{tikzpicture}[
+node distance=0.9cm and 0.7cm,
+process/.style={rectangle,draw=maincolor,fill=maincolor!10,
+minimum height=0.95cm,text width=1.9cm,align=center}
+]
+\node[process] (a) {Collect};
+\node[process,right=of a] (b) {Analyze};
+\node[process,right=of b] (c) {Decide};
+\node[process,below=of b] (d) {Revise};
+\draw[->,thick,maincolor] (a)--(b);
+\draw[->,thick,maincolor] (b)--(c);
+\draw[->,thick,maincolor] (b)--(d)
+    node[midway,right,font=\tiny,text=maincolor] {gap};
+\draw[->,thick,maincolor,dashed] (d.west) -| (a.south)
+    node[near end,left,font=\tiny,text=maincolor] {retry};
+\end{tikzpicture}
+\end{frame}
+
+% =============================================================================
+% [STYLE REF] TWO-COLUMN ANALYSIS (DELETE IN FINAL OUTPUT)
+% =============================================================================
+\begin{frame}{[STYLE REF] Two-Column Analysis Example}
+\framesubtitle{}
+\small
+\begin{columns}
+\column{0.52\textwidth}
+Left column for argumentation, definitions, and derivations.
+
+\column{0.43\textwidth}
+Right column for action items, illustrations, or comparisons.
+\end{columns}
+\end{frame}
+
+% =============================================================================
+% AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
+% =============================================================================
+\begin{frame}[allowframebreaks]{AI GENERATION INSTRUCTIONS}
+\framesubtitle{}
+You MUST:
+\begin{itemize}
+\item Delete all [STYLE REF] frames and this instruction frame
+\item Replace all placeholders with real content
+\item Insert a highlighted TOC transition page before each section
+\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
+\item Use columns layout for all content pages
+\item Keep information density high (no empty slides)
+\item Output FULL LaTeX code only
+\end{itemize}
+\end{frame}
+
+% =============================================================================
+% FINAL PAGE
+% =============================================================================
+\QApage
+
+\end{document}

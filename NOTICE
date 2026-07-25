@@ -1,0 +1,90 @@
+TeXDeck — Third-Party Notices
+=============================
+
+1. TeXDeck application code
+---------------------------
+The TeXDeck application code under server/ and web/ is licensed under the MIT
+License. See the LICENSE file in this repository.
+
+
+2. Presentation templates (collegebeamer.sty and derivatives)
+-------------------------------------------------------------
+The files templates/*/collegebeamer.sty under the packs:
+
+    academic, emerald, graphite, navy
+
+(and their visual/theme derivatives in the same directories) are based on:
+
+    college-beamer
+    Author : Qilong Liu
+    Source : https://github.com/liu-qilong/college-beamer
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+             https://creativecommons.org/licenses/by/4.0/
+
+That project is itself derived from:
+
+    SINTEF Presentation
+    Author : Federico Zenith
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+These four packs share that common ancestor. They are separate design treatments
+(palette, typography, chrome), not four independent theme designs.
+
+TeXDeck's modifications to the college-beamer style (non-exhaustive) include:
+
+  - Stripped multi-institution package options down to a single retained theme path
+  - Changed theme colors: each pack uses its own maincolorRGB / layout tweaks
+  - Unified CJK fonts to the Fandol family (typically FandolKai / FandolFang as
+    available in TeX Live; no system-specific Chinese fonts required)
+  - Rewrote QA / thank-you page copy
+  - Layout and typography variants per pack (e.g. academic: Palatino + newtxmath;
+    graphite: report-style itemize / footer rule / greyscale treatment)
+  - Replaced third-party trademark logo/background assets with neutral
+    placeholders under src/brand/ and retargeted image paths accordingly
+
+Per CC BY 4.0, you must give appropriate credit, provide a link to the license,
+and indicate if changes were made when you redistribute these style files.
+
+
+3. SimplePlus Beamer theme
+--------------------------
+The style files under templates/simpleplus/ (beamer*SimplePlus.sty) come from:
+
+    SimplePlus-BeamerTheme
+    Author : Pin-Yen Huang (pm25)
+    Source : https://github.com/pm25/SimplePlus-BeamerTheme
+    License: Unlicense (public domain dedication)
+
+The original license text is shipped at templates/simpleplus/LICENSE.
+
+
+4. Execushares Beamer theme
+---------------------------
+The file templates/execushares/beamerthemeExecushares.sty comes from:
+
+    Beamer-Theme-Execushares
+    Author : Kenton Hamaluik
+    Source : https://github.com/hamaluik/Beamer-Theme-Execushares
+    License: MIT
+    Copyright (c) 2014 Kenton Hamaluik
+
+The original license text is shipped at templates/execushares/LICENSE.
+
+TeXDeck's only modification to Execushares: the upstream theme loaded fonts with
+\setmainfont{Source Serif Pro} (and similar) by system font name. On machines
+where those fonts are not registered with the OS fontconfig, compilation fails.
+TeXDeck changed the loads to fontspec Extension / UprightFont style file-name
+lookups for SourceSerifPro / SourceSansPro / SourceCodePro so the theme compiles
+on a standard TeX Live install. The font files themselves are not distributed
+with this repository (they ship with TeX Live).
+
+
+5. Brand assets; no third-party marks
+-------------------------------------
+This repository does not contain any trademarks or logos of third-party
+institutions. Image files shipped under templates/*/src/brand/ are neutral,
+programmatically generated placeholders created for TeXDeck. They are intended
+for end users to replace with their own brand assets (same file names).
+
+End users who need branded output must supply their own logo and background
+images by replacing the files in src/brand/ (see templates/README.md).

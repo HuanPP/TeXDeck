@@ -1,0 +1,26 @@
+[project]
+name = "texdeck-server"
+version = "0.1.0"
+description = "TeXDeck server: PDF/text research reports to Beamer slides"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.0",
+    "pymupdf==1.26.0",
+    "openai==1.76.0",
+    "pydantic-settings==2.8.1",
+    "python-multipart==0.0.20",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: real xelatex compile of each template (deselect with -m 'not slow')",
+]
