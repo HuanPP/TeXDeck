@@ -46,7 +46,7 @@
 你需要 Python 3.12+、Node 20+、带 XeLaTeX 的 TeX Live 安装（若要用单页编辑，还需要 `synctex`），以及一个支持视觉的模型 API 密钥。
 
 ```bash
-git clone https://github.com/<you>/texdeck.git && cd texdeck
+git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
 
 uv venv .venv --python 3.12
 uv pip install -e server --python .venv/bin/python
@@ -71,8 +71,10 @@ cd web && npm install && npm run dev  # UI on :5173
 
 ```
 TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-TEXDECK_LLM_MODEL=gemini-2.5-pro
+TEXDECK_LLM_MODEL=gemini-pro-latest
 ```
+
+`gemini-pro-latest` 是一个别名，始终指向 Google 当前的 Pro 模型，所以这份配置不会随着新模型发布而过期。如果你希望它永远不变，改成固定版本即可（`gemini-2.5-pro`、`gemini-3.1-pro-preview`）。
 
 Moonshot 的 Kimi 也能用，本项目就是对着它开发的：
 

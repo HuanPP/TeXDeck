@@ -49,6 +49,10 @@
     \RequirePackage{ifxetex}
     \RequirePackage{xeCJK}
 
+    % TeXDeck: xeCJK otherwise treats curly quotes as CJK punctuation and pads
+    % them to full width, which looks wrong in English text (dollar's -> dollar ' s).
+    \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
+
     \setmainfont[Path=./font/]{texgyrepagella-regular.otf}
     \setsansfont[Path=./font/]{texgyrepagella-regular.otf}
 

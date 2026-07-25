@@ -10,6 +10,8 @@ Point it at a PDF. Get back a finished Beamer deck.
 
 Group meetings, conference talks, thesis proposals, project updates. Point it at a quarterly report instead and it won't complain, but slides for research work are what it was built around.
 
+The document on the left of that picture is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), shipped with the repo so you can run the same thing yourself.
+
 You upload a paper, a report, a set of notes — or just paste text — pick a template, and a vision model reads the pages and writes a complete `main.tex` against that template. XeLaTeX compiles it. About thirty to sixty seconds later you have a PDF, the `.tex` behind it, and a zip you can drop straight into Overleaf.
 
 ## Six templates
@@ -46,7 +48,7 @@ Two smaller rules follow from the same instinct. Source pages go to the model as
 You need Python 3.12+, Node 20+, a TeX Live install with XeLaTeX (`synctex` too, if you want per-slide editing), and an API key for a vision-capable model.
 
 ```bash
-git clone https://github.com/<you>/texdeck.git && cd texdeck
+git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
 
 uv venv .venv --python 3.12
 uv pip install -e server --python .venv/bin/python
@@ -71,8 +73,10 @@ Gemini is the recommendation if you have a key. Its multimodal reading is the be
 
 ```
 TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-TEXDECK_LLM_MODEL=gemini-3.1-pro
+TEXDECK_LLM_MODEL=gemini-pro-latest
 ```
+
+`gemini-pro-latest` is an alias that tracks Google's current Pro model, so this keeps working as they ship new ones. Pin a specific version instead (`gemini-2.5-pro`, `gemini-3.1-pro-preview`) if you would rather it never change under you.
 
 Moonshot's Kimi works too, and is what this was developed against:
 
