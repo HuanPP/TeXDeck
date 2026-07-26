@@ -11,7 +11,7 @@ License. See the LICENSE file in this repository.
 -------------------------------------------------------------
 The files templates/*/collegebeamer.sty under the packs:
 
-    academic, emerald, graphite, navy
+    academic, emerald, graphite, navy, scholar
 
 (and their visual/theme derivatives in the same directories) are based on:
 
@@ -27,8 +27,9 @@ That project is itself derived from:
     Author : Federico Zenith
     License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 
-These four packs share that common ancestor. They are separate design treatments
-(palette, typography, chrome), not four independent theme designs.
+These five packs share that common ancestor. Four are separate design
+treatments (layout, palette, typography, chrome); `scholar` retains the
+upstream layout with neutral placeholder artwork.
 
 TeXDeck's modifications to the college-beamer style (non-exhaustive) include:
 

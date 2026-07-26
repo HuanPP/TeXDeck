@@ -2,22 +2,24 @@ English | [简体中文](README.zh-CN.md)
 
 # TeXDeck
 
-Point it at a PDF. Get back a finished Beamer deck.
-
 <p align="center">
-  <img src="docs/hero.png" alt="A source PDF page on the left, the generated Beamer slides on the right" width="100%">
+  <img src="docs/social-preview.png" alt="TeXDeck — point it at a PDF, get back a finished Beamer deck" width="100%">
 </p>
 
 Group meetings, conference talks, thesis proposals, project updates. Point it at a quarterly report instead and it won't complain, but slides for research work are what it was built around.
 
+<p align="center">
+  <img src="docs/hero.png" alt="A source PDF page on the left, the generated Beamer slide on the right" width="100%">
+</p>
+
 The document on the left of that picture is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), shipped with the repo so you can run the same thing yourself.
 
-You upload a paper, a report, a set of notes — or just paste text — pick a template, and a vision model reads the pages and writes a complete `main.tex` against that template. XeLaTeX compiles it. About thirty to sixty seconds later you have a PDF, the `.tex` behind it, and a zip you can drop straight into Overleaf.
+You upload a paper — or several PDFs that read in order as one pack — or just paste text, pick a template, and a vision model reads the pages and writes a complete `main.tex` against that template. XeLaTeX compiles it. About thirty to sixty seconds later you have a PDF, the `.tex` behind it, and a zip you can drop straight into Overleaf. Slides come back in English whatever language the source is in; ask for another language in the instructions and you get that instead.
 
-## Six templates
+## Seven templates
 
 <p align="center">
-  <img src="docs/templates.png" alt="Title pages of the six bundled templates" width="100%">
+  <img src="docs/templates.png" alt="Title pages of the seven bundled templates" width="100%">
 </p>
 
 | Key | Name | Origin | License |
@@ -26,10 +28,11 @@ You upload a paper, a report, a set of notes — or just paste text — pick a t
 | `emerald` | Emerald | collegeBeamer derivative | CC BY 4.0 |
 | `graphite` | Graphite | collegeBeamer derivative | CC BY 4.0 |
 | `navy` | Navy | collegeBeamer derivative | CC BY 4.0 |
+| `scholar` | Scholar | collegeBeamer derivative | CC BY 4.0 |
 | `simpleplus` | SimplePlus | [pm25/SimplePlus-BeamerTheme](https://github.com/pm25/SimplePlus-BeamerTheme) | Unlicense |
 | `execushares` | Execushares | [hamaluik/Beamer-Theme-Execushares](https://github.com/hamaluik/Beamer-Theme-Execushares) | MIT |
 
-The first four share a collegeBeamer ancestor but have since been redesigned into distinct families: Academic is a university-press book plate (centered small caps between double hairlines, roman-numeral dividers), Emerald is editorial (display serif over flowing curves, full-bleed part pages with ghost numerals), Graphite is Swiss typographic (sans-first Heros, hard grid, monochrome charts), and Navy is a boardroom deck (banded white-on-navy headers, split-panel agendas, a footer progress line). SimplePlus and Execushares keep their own upstream identities. All six are verified to compile with XeLaTeX on a plain TeX Live install with no extra fonts registered — the faces each theme needs ship inside its pack. None of them ship anyone's logo — the images under `src/brand/` are neutral placeholders meant to be replaced.
+The collegeBeamer packs share an ancestor but are distinct families now: Academic is a university-press book plate (centered small caps between double hairlines, roman-numeral dividers), Emerald is editorial (display serif over flowing curves, full-bleed part pages with ghost numerals), Graphite is Swiss typographic (sans-first Heros, hard grid, monochrome charts), Navy is a boardroom deck (banded white-on-navy headers, split-panel agendas, a footer progress line), and Scholar keeps the line's original composition — a full-page engraved plate beside the title block. SimplePlus and Execushares keep their own upstream identities. All seven compile with XeLaTeX on a plain TeX Live install with no extra fonts registered — the faces each theme needs ship inside its pack or resolve from TeX Live by name. Chinese input works in every pack. None of them ship anyone's logo — the images under `src/brand/` are neutral placeholders meant to be replaced.
 
 ## The template file is the prompt
 
@@ -95,11 +98,13 @@ If you want it to look like something else entirely, edit `main.tex` — the lay
 
 ## Things worth knowing
 
-Generation can fail. The model occasionally writes LaTeX that will not compile — a table row with one cell too many is the classic — and while there is an automatic repair pass, it does not always land. When that happens you get the error and the compile log rather than a half-broken deck. Running it again usually works. Better models fail less.
+Generation can fail. The model occasionally writes LaTeX that will not compile — a table row with one cell too many is the classic — and while there is an automatic repair pass, it does not always land. When that happens you get the error and the compile log rather than a half-broken deck. Running it again usually works — the Regenerate button re-runs the same inputs in one click. Better models fail less.
+
+Editing comes in two sizes. Per-slide edit rewrites one frame from one instruction. Deck-wide refine takes one instruction against the whole deck — "cut it to ten slides", "make the charts bigger", "switch it to Chinese" — through the same validate-compile-repair machinery, and rolls back if the result will not build.
 
 Slide count is a request, not a guarantee. Ask for eight and you will often get ten.
 
-PDFs are capped at 200 pages. Past 40, the model is shown thumbnails of the whole document first and asked which pages carry the argument; only those are sent at full resolution.
+PDFs are capped at 200 pages combined, up to ten files per run. Past 40, the model is shown thumbnails of everything first and asked which pages carry the argument; only those are sent at full resolution.
 
 Per-slide editing maps a PDF page back to its `\begin{frame}` using synctex. If your TeX installation does not have synctex, that feature tells you so instead of guessing.
 

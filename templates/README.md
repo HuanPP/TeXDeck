@@ -9,16 +9,19 @@ at least `template.json` and `main.tex`.
 | `emerald` | Emerald | collegeBeamer derivative | CC-BY-4.0 |
 | `graphite` | Graphite | collegeBeamer derivative | CC-BY-4.0 |
 | `navy` | Navy | collegeBeamer derivative | CC-BY-4.0 |
+| `scholar` | Scholar | collegeBeamer derivative (upstream layout) | CC-BY-4.0 |
 | `simpleplus` | SimplePlus | [pm25/SimplePlus-BeamerTheme](https://github.com/pm25/SimplePlus-BeamerTheme) | Unlicense |
 | `execushares` | Execushares | [hamaluik/Beamer-Theme-Execushares](https://github.com/hamaluik/Beamer-Theme-Execushares) | MIT |
 
-`academic` / `emerald` / `graphite` / `navy` share one ancestor
+`academic` / `emerald` / `graphite` / `navy` / `scholar` share one ancestor
 ([college-beamer](https://github.com/liu-qilong/college-beamer) by Qilong Liu,
-upstream SINTEF Presentation by Federico Zenith), but each has since been
-redesigned into its own family: book-plate scholarly (academic), editorial
-serif (emerald), Swiss typographic (graphite), and banded boardroom (navy).
-The shared ancestry survives in `collegebeamer.sty` plumbing and licensing,
-not in how the decks look.
+upstream SINTEF Presentation by Federico Zenith). Four have been redesigned
+into their own families: book-plate scholarly (academic), editorial serif
+(emerald), Swiss typographic (graphite), and banded boardroom (navy);
+`scholar` keeps the line's original composition — a full-page plate
+illustration beside the title block — with neutral placeholder art. The
+shared ancestry survives in `collegebeamer.sty` plumbing and licensing, not
+in how the decks look.
 
 These packs ship **neutral placeholder brand assets only** where a brand path
 is used. They do **not** contain any real institutional logos, trademarks, or

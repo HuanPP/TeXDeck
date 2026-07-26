@@ -5,17 +5,21 @@
 丢给它一份 PDF，拿回一套写完的 Beamer。
 
 <p align="center">
-  <img src="docs/hero.png" alt="左侧是源 PDF 页，右侧是生成的 Beamer 幻灯片" width="100%">
+  <img src="docs/social-preview.png" alt="TeXDeck——丢给它一份 PDF，拿回一套写完的 Beamer" width="100%">
 </p>
 
 组会汇报、会议 talk、开题答辩、课题进展。你也可以拿季报去试，它不会拒绝，但科研工作里的幻灯片才是它围绕着做出来的。
 
-你上传一篇论文、一份报告、一叠笔记——或者直接粘贴文本——选一套模板，视觉模型读页图，按该模板写出完整的 `main.tex`，再由 XeLaTeX 编译。大约三十到六十秒后，你得到 PDF、背后的 `.tex`，以及一个可以直接丢进 Overleaf 的 zip。
+<p align="center">
+  <img src="docs/hero.png" alt="左侧是源 PDF 页，右侧是生成的 Beamer 幻灯片" width="100%">
+</p>
 
-## 六套模板
+你上传一篇论文——或者好几份 PDF，按顺序当一摞材料读——或者直接粘贴文本，选一套模板，视觉模型读页图，按该模板写出完整的 `main.tex`，再由 XeLaTeX 编译。大约三十到六十秒后，你得到 PDF、背后的 `.tex`，以及一个可以直接丢进 Overleaf 的 zip。无论源文档什么语言，幻灯片默认用英文写；想要中文（或任何语言），在附加要求里说一句即可。
+
+## 七套模板
 
 <p align="center">
-  <img src="docs/templates.png" alt="六套内置模板的标题页" width="100%">
+  <img src="docs/templates.png" alt="七套内置模板的标题页" width="100%">
 </p>
 
 | Key | Name | Origin | License |
@@ -24,10 +28,11 @@
 | `emerald` | Emerald | collegeBeamer derivative | CC BY 4.0 |
 | `graphite` | Graphite | collegeBeamer derivative | CC BY 4.0 |
 | `navy` | Navy | collegeBeamer derivative | CC BY 4.0 |
+| `scholar` | Scholar | collegeBeamer derivative | CC BY 4.0 |
 | `simpleplus` | SimplePlus | [pm25/SimplePlus-BeamerTheme](https://github.com/pm25/SimplePlus-BeamerTheme) | Unlicense |
 | `execushares` | Execushares | [hamaluik/Beamer-Theme-Execushares](https://github.com/hamaluik/Beamer-Theme-Execushares) | MIT |
 
-前四套虽同出 collegeBeamer 一脉，但各自已被重新设计成独立的版式家族：Academic 是大学出版社的书籍扉页风（双细线框、居中小型大写、罗马数字节页）；Emerald 是杂志编辑风（大号衬线展示标题、流线纹理、带幽灵数字的满幅章节页）；Graphite 是瑞士排印风（Heros 无衬线、硬网格、单色图表）；Navy 是董事会报告风（藏青通栏题头带、左右分栏议程页、页脚进度线）。SimplePlus 与 Execushares 保持各自上游的身份。六套都已在干净的 TeX Live 上用 XeLaTeX 编译通过，主题所需字体随包自带，无需另行注册。没有一套自带别人的 logo——`src/brand/` 下的图是中性占位，本来就打算被替换掉。
+collegeBeamer 一脉虽同源，如今已是各自独立的版式家族：Academic 是大学出版社的书籍扉页风（双细线框、居中小型大写、罗马数字节页）；Emerald 是杂志编辑风（大号衬线展示标题、流线纹理、带幽灵数字的满幅章节页）；Graphite 是瑞士排印风（Heros 无衬线、硬网格、单色图表）；Navy 是董事会报告风（藏青通栏题头带、左右分栏议程页、页脚进度线）；Scholar 保留了这一脉原始的构图——标题块旁一整幅版画式插图。SimplePlus 与 Execushares 保持各自上游的身份。七套都能在干净的 TeX Live 上用 XeLaTeX 编译，主题所需字体随包自带或按名解析自 TeX Live；每套都支持中文输入。没有一套自带别人的 logo——`src/brand/` 下的图是中性占位，本来就打算被替换掉。
 
 ## 模板文件本身就是提示词
 
@@ -93,11 +98,13 @@ TEXDECK_LLM_MODEL=moonshot-v1-128k-vision-preview
 
 ## 值得知道的事
 
-生成可能失败。模型偶尔会写出编不过的 LaTeX——多一格的表格行是经典例子——虽然有自动修复，但不总能修好。那种时候你拿到的是错误和编译日志，而不是半残的幻灯片。再跑一次通常就过了。更好的模型失败更少。
+生成可能失败。模型偶尔会写出编不过的 LaTeX——多一格的表格行是经典例子——虽然有自动修复，但不总能修好。那种时候你拿到的是错误和编译日志，而不是半残的幻灯片。再跑一次通常就过了——Regenerate 按钮一键复用同样的输入重跑。更好的模型失败更少。
+
+编辑有两个粒度。逐页编辑按一条指令重写一页；整稿精修按一条指令处理整套——"压到十页""图表放大""改成中文"——走同一套校验-编译-修复机器，编不过就整体回滚。
 
 页数是请求，不是保证。你要八页，经常会得到十页。
 
-PDF 上限 200 页。超过 40 页时，模型会先看到整份文档的缩略图，并被要求指出哪些页承载论证；只有那些页会以全分辨率送入。
+PDF 合计上限 200 页，一次最多十个文件。超过 40 页时，模型会先看到全部材料的缩略图，并被要求指出哪些页承载论证；只有那些页会以全分辨率送入。
 
 单页编辑用 synctex 把 PDF 页映射回对应的 `\begin{frame}`。若 TeX 安装里没有 synctex，该功能会明确告诉你，而不是靠猜。
 
