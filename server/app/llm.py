@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,21 @@ import openai
 from .config import settings
 
 ProgressCallback = Callable[[str, int], None]  # (stage description, percent 0-100)
+UsageCallback = Callable[[int, int], None]  # (prompt_tokens, completion_tokens)
+
+
+@dataclass(slots=True)
+class UsageTally:
+    """Per-job token accumulator; wire .add as an on_usage callback."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls: int = 0
+
+    def add(self, prompt_tokens: int, completion_tokens: int) -> None:
+        self.calls += 1
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
 
 
 class LlmError(RuntimeError):
@@ -32,14 +48,18 @@ def image_block(image_path: Path) -> dict[str, Any]:
 
 
 class LlmClient:
-    def __init__(self, client: openai.OpenAI) -> None:
+    def __init__(self, client: openai.OpenAI, on_usage: UsageCallback | None = None) -> None:
+        # on_usage is per-instance and clients are created per job (create_client),
+        # so no usage state leaks across jobs.
         self._client = client
+        self._on_usage = on_usage
 
     def complete(
         self,
         messages: list[dict[str, Any]],
         *,
         temperature: float = 0.2,
+        on_usage: UsageCallback | None = None,
     ) -> str:
         try:
             response = self._client.chat.completions.create(
@@ -61,6 +81,16 @@ class LlmClient:
         except openai.OpenAIError as exc:
             raise LlmError(f"Request rejected: {exc}") from exc
 
+        # Report usage as soon as the call returns: tokens are billed even when
+        # the content below turns out to be empty. Some OpenAI-compatible
+        # providers omit usage entirely — count the call with zero tokens then.
+        callback = on_usage if on_usage is not None else self._on_usage
+        if callback is not None:
+            usage = getattr(response, "usage", None)
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            callback(prompt_tokens, completion_tokens)
+
         if not response.choices:
             raise LlmError("Model returned no choices")
         content = response.choices[0].message.content
@@ -69,7 +99,7 @@ class LlmClient:
         return str(content)
 
 
-def create_client() -> LlmClient:
+def create_client(on_usage: UsageCallback | None = None) -> LlmClient:
     if not settings.llm_api_key:
         raise LlmError(
             "TEXDECK_LLM_API_KEY is not set; put it in server/.env"
@@ -80,4 +110,4 @@ def create_client() -> LlmClient:
         timeout=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
     )
-    return LlmClient(client)
+    return LlmClient(client, on_usage=on_usage)

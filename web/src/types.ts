@@ -17,6 +17,12 @@ export type GenerationMeta = {
   page_count: number;
   frame_count: number;
   edit_count: number;
+  // Optional-defaulted server-side; keep optional for older cached payloads.
+  refine_count?: number;
+  llm_model?: string;
+  llm_prompt_tokens?: number;
+  llm_completion_tokens?: number;
+  llm_calls?: number;
 };
 
 export type TemplateItem = { key: string; name: string };

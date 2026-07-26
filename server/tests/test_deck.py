@@ -225,6 +225,8 @@ def test_build_generation_messages_order_and_verbatim_template() -> None:
     assert "Author: Jane Doe" in title_msg
     assert "Institute: Dept. of Physics, MIT" in title_msg
     assert "Requirements: Focus on risks" in title_msg
+    # English is the default output language; only Requirements may override it.
+    assert "Output language: English" in title_msg
     assert "No author was provided" not in title_msg
     assert "No institute was provided" not in title_msg
     assert messages[4]["content"] == title_msg  # title requirement repeated

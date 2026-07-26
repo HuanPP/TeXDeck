@@ -8,7 +8,7 @@ from typing import Any
 import fitz
 
 from .config import settings
-from .llm import ProgressCallback, create_client, image_block, text_block
+from .llm import ProgressCallback, UsageCallback, create_client, image_block, text_block
 
 # Hard cap: refuse above this page count (independent of vision selection limit)
 _PDF_HARD_MAX_PAGES = 200
@@ -177,6 +177,7 @@ def _select_pages_with_llm(
     fitz_docs: list[fitz.Document],
     *,
     progress: ProgressCallback | None,
+    on_usage: UsageCallback | None = None,
 ) -> None:
     """Pick the pages sent to generation; writes each document's selected_numbers.
 
@@ -226,7 +227,7 @@ def _select_pages_with_llm(
     if progress is not None:
         progress("Selecting key pages with the model", 90)
 
-    response = create_client().complete(messages, temperature=0.0)
+    response = create_client().complete(messages, temperature=0.0, on_usage=on_usage)
 
     llm_dir = work_dir / "llm"
     llm_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +248,7 @@ def load_pdfs(
     work_dir: Path,
     *,
     progress: ProgressCallback | None = None,
+    on_usage: UsageCallback | None = None,
 ) -> list[PdfDocument]:
     """Load PDFs in reading order and pick the pages sent to generation.
 
@@ -304,7 +306,9 @@ def load_pdfs(
             for document in documents:
                 document.selected_numbers = [p.number for p in document.pages]
         else:
-            _select_pages_with_llm(documents, work_dir, fitz_docs, progress=progress)
+            _select_pages_with_llm(
+                documents, work_dir, fitz_docs, progress=progress, on_usage=on_usage
+            )
 
         if progress is not None:
             progress("PDF processing complete", 100)

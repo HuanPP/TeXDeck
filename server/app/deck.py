@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import fitz
 
 from .config import settings
 from .llm import LlmClient, ProgressCallback, image_block, text_block
@@ -141,6 +146,13 @@ def build_generation_messages(
         )
     if request.instruction.strip():
         title_parts.append(f"Requirements: {request.instruction}")
+    # Default output language is English regardless of the source document;
+    # the user flips it by asking in Requirements ("write it in Chinese", ...).
+    title_parts.append(
+        "Output language: English. Write every slide in English even when the "
+        "source document is in another language, unless the Requirements "
+        "explicitly ask for a different language."
+    )
     title_message = "\n".join(title_parts)
 
     if documents:
@@ -592,6 +604,108 @@ def _dump_repair_llm(
         encoding="utf-8",
     )
     (dump_dir / f"{stem}_response.txt").write_text(response, encoding="utf-8")
+
+
+# ---- template previews ---------------------------------------------------------
+
+# Rendered title-page PNG width for the template picker.
+_PREVIEW_WIDTH_PX = 640
+
+# One build at a time per template key; a second request for the same key waits
+# and then finds the cached file instead of compiling again.
+_preview_locks: dict[str, threading.Lock] = {}
+_preview_locks_guard = threading.Lock()
+
+
+def _preview_lock(key: str) -> threading.Lock:
+    with _preview_locks_guard:
+        return _preview_locks.setdefault(key, threading.Lock())
+
+
+def preview_cache_dir() -> Path:
+    # Underscore name can never collide with generation ids (hex + hyphen only),
+    # and it has no meta.json, so list_generations skips it.
+    return settings.artifact_root / "_previews"
+
+
+def template_fingerprint(template: Template) -> str:
+    """First 12 hex chars of sha256 over the whole template pack (names + bytes)."""
+    h = hashlib.sha256()
+    files: list[Path] = [template.dir / "template.json", template.dir / "main.tex"]
+    files.extend(sorted(template.dir.glob("*.sty")))
+    for folder_name in ("src", "font"):
+        folder = template.dir / folder_name
+        if folder.is_dir():
+            files.extend(sorted(p for p in folder.rglob("*") if p.is_file()))
+    for path in files:
+        h.update(path.relative_to(template.dir).as_posix().encode("utf-8"))
+        h.update(b"\0")
+        h.update(path.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
+def _compile_preview(tex_path: Path, work_dir: Path) -> None:
+    """Compile the template's own main.tex twice; raise CompileError on failure.
+
+    Kept as a small seam so tests can substitute a fake PDF writer.
+    """
+    if not shutil.which(settings.xelatex_command):
+        raise CompileError("xelatex not found; please install TeX Live", "")
+    log = ""
+    for _ in range(2):
+        ok, log = _run_xelatex(tex_path, work_dir)
+        if not ok:
+            raise CompileError("Template preview compilation failed", log)
+    if not tex_path.with_suffix(".pdf").is_file():
+        raise CompileError("Template preview compilation produced no PDF", log)
+
+
+def render_template_preview(template: Template) -> Path:
+    """Return a cached PNG of the template's own title page, building on miss.
+
+    Cache key is the template-pack fingerprint, so editing any template file
+    invalidates the old image; stale hashes for the same key are deleted.
+    """
+    cache_dir = preview_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fingerprint = template_fingerprint(template)
+    cache_path = cache_dir / f"{template.key}-{fingerprint}.png"
+    if cache_path.is_file():
+        return cache_path
+
+    with _preview_lock(template.key):
+        if cache_path.is_file():  # built while we waited for the lock
+            return cache_path
+        with tempfile.TemporaryDirectory(prefix="texdeck-preview-") as tmp:
+            work_dir = Path(tmp)
+            copy_template_bundle(template, work_dir)
+            tex_path = work_dir / "main.tex"
+            # The template's own main.tex verbatim: its title page IS the preview.
+            tex_path.write_text(template.main_tex, encoding="utf-8")
+            _compile_preview(tex_path, work_dir)
+
+            doc = fitz.open(work_dir / "main.pdf")
+            try:
+                page = doc.load_page(0)
+                zoom = _PREVIEW_WIDTH_PX / max(page.rect.width, 1.0)
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                tmp_png = cache_dir / f"{template.key}-{fingerprint}.png.tmp"
+                # Explicit output: the .tmp suffix must not confuse format detection
+                pixmap.save(str(tmp_png), output="png")
+            finally:
+                doc.close()
+            # Atomic publish; readers never see a half-written PNG.
+            tmp_png.replace(cache_path)
+
+        # Drop images of older template revisions (exact key + 12-hex-hash names
+        # only, so a key that happens to be a prefix of another is never hit).
+        for sibling in cache_dir.glob(f"{template.key}-*.png"):
+            if sibling == cache_path:
+                continue
+            if re.fullmatch(r"[0-9a-f]{12}", sibling.stem[len(template.key) + 1 :]):
+                sibling.unlink(missing_ok=True)
+    return cache_path
 
 
 def _strip_markdown_fences(text: str) -> str:

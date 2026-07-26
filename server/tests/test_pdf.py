@@ -207,3 +207,31 @@ def test_selection_single_doc_prompt_is_byte_identical(
     for number, caption in enumerate(texts[1:], start=1):
         assert caption.startswith(f"Page {number} | ")
         assert "Doc" not in caption
+
+
+def test_selection_threads_on_usage_to_the_llm_call(
+    tmp_path: Path,
+    make_pdf: Callable[[str, int], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """load_pdfs(on_usage=...) must reach the page-selection complete() call."""
+    monkeypatch.setattr(settings, "pdf_max_vision_pages", 2)
+
+    class _UsageAwareClient:
+        def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+            callback = kwargs.get("on_usage")
+            assert callback is not None, "on_usage was not threaded through"
+            callback(123, 45)
+            return json.dumps({"pages": [1, 3], "reason": "pick"})
+
+    monkeypatch.setattr(pdf, "create_client", lambda: _UsageAwareClient())
+
+    seen: list[tuple[int, int]] = []
+    source = make_pdf("solo.pdf", 3)
+    work = tmp_path / "work"
+    work.mkdir()
+    documents = load_pdfs(
+        [(source, "solo.pdf")], work, on_usage=lambda p, c: seen.append((p, c))
+    )
+    assert documents[0].selected_numbers == [1, 3]
+    assert seen == [(123, 45)]

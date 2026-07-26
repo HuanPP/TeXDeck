@@ -4,11 +4,61 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import fitz
 import pytest
 
 from app.config import settings
+
+
+class FakeLlm:
+    """Stand-in for app.llm.LlmClient: scripted responses + on_usage semantics.
+
+    Mirrors the real client's usage reporting: the per-call on_usage wins,
+    otherwise the constructor-level callback fires, once per complete() call.
+    """
+
+    def __init__(
+        self,
+        responses: list[str],
+        on_usage: Callable[[int, int], None] | None = None,
+        usage: tuple[int, int] = (0, 0),
+    ) -> None:
+        self._responses = list(responses)
+        self._on_usage = on_usage
+        self._usage = usage
+        self.calls: list[list[dict[str, Any]]] = []
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        on_usage: Callable[[int, int], None] | None = None,
+    ) -> str:
+        self.calls.append(messages)
+        if not self._responses:
+            raise AssertionError(f"FakeLlm ran out of responses after {len(self.calls)} calls")
+        callback = on_usage if on_usage is not None else self._on_usage
+        if callback is not None:
+            callback(*self._usage)
+        return self._responses.pop(0)
+
+
+@pytest.fixture
+def fake_xelatex_ok(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Replace the real xelatex with an instant success that writes a fake PDF."""
+    counter = {"runs": 0}
+
+    def fake_run(tex_path: Path, work_dir: Path) -> tuple[bool, str]:
+        counter["runs"] += 1
+        (work_dir / f"{tex_path.stem}.pdf").write_bytes(b"%PDF-fake")
+        return True, "ok"
+
+    monkeypatch.setattr("app.deck._run_xelatex", fake_run)
+    monkeypatch.setattr("app.deck.shutil.which", lambda _cmd: "/usr/bin/xelatex")
+    return counter
 
 
 @pytest.fixture

@@ -34,6 +34,11 @@ class GenerationMeta:
     edit_count: int
     author: str = ""  # optional; missing in older meta.json
     institute: str = ""  # optional; missing in older meta.json
+    refine_count: int = 0  # whole-deck refine passes; missing in older meta.json
+    llm_model: str = ""  # model used by the most recent job; "" in older meta.json
+    llm_prompt_tokens: int = 0  # cumulative across all jobs on this generation
+    llm_completion_tokens: int = 0
+    llm_calls: int = 0  # every LLM call, including repairs and page selection
 
 
 def _now_iso() -> str:

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     max_upload_bytes: int = 100 * 1024 * 1024  # reject uploads larger than this
 
+    # Keep pages/ and thumbs/ renders after a SUCCESSFUL generation (they are
+    # always kept on failure for debugging). Env: TEXDECK_KEEP_PAGE_RENDERS.
+    keep_page_renders: bool = False
+
     xelatex_command: str = "xelatex"
     xelatex_timeout_seconds: float = 120.0
     max_compile_repairs: int = 2

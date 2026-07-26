@@ -67,12 +67,24 @@ def test_new_save_load_meta_roundtrip(artifact_root: Path) -> None:
 
 
 def test_load_meta_missing_author_institute_defaults(artifact_root: Path) -> None:
-    """Older meta.json without author/institute must still load (schema evolution)."""
+    """Older meta.json without the post-launch fields must still load (schema evolution).
+
+    Covers author/institute plus the refine/usage batch: refine_count, llm_model,
+    llm_prompt_tokens, llm_completion_tokens, llm_calls.
+    """
     meta = _make_gen(title="Legacy")
     path = artifact_root / meta.id / "meta.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    data.pop("author", None)
-    data.pop("institute", None)
+    for legacy_missing in (
+        "author",
+        "institute",
+        "refine_count",
+        "llm_model",
+        "llm_prompt_tokens",
+        "llm_completion_tokens",
+        "llm_calls",
+    ):
+        data.pop(legacy_missing, None)
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -80,6 +92,11 @@ def test_load_meta_missing_author_institute_defaults(artifact_root: Path) -> Non
     loaded = load_meta(meta.id)
     assert loaded.author == ""
     assert loaded.institute == ""
+    assert loaded.refine_count == 0
+    assert loaded.llm_model == ""
+    assert loaded.llm_prompt_tokens == 0
+    assert loaded.llm_completion_tokens == 0
+    assert loaded.llm_calls == 0
 
 
 def test_load_meta_legacy_source_name_becomes_source_names(artifact_root: Path) -> None:

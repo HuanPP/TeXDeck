@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Download, FileText, Package } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Download, FileText, Package, RotateCw } from "lucide-react";
 import {
   bundleUrl,
   editFrame,
@@ -8,6 +8,8 @@ import {
   getGeneration,
   logUrl,
   pdfUrl,
+  refineGeneration,
+  regenerateGeneration,
   texUrl,
 } from "../api";
 import PdfViewer from "../components/PdfViewer";
@@ -16,23 +18,24 @@ import { useTaskWs } from "../hooks/useTaskWs";
 import type { FrameItem, TaskEvent, GenerationMeta } from "../types";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/**
- * The frames API also returns a synctex-resolved PDF `page` per frame (index
- * and page diverge with section splash pages, \pause, allowframebreaks…).
- * `page` maps the viewer page to a frame; `index` is the key for the edit API.
- */
-type FrameWithPage = FrameItem & { page?: number };
+const fmtTokens = (n?: number) => {
+  const v = n ?? 0;
+  return v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
+};
 
 export default function Generation() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const [meta, setMeta] = useState<GenerationMeta | null>(null);
-  const [frames, setFrames] = useState<FrameWithPage[]>([]);
+  const [frames, setFrames] = useState<FrameItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pdfBust, setPdfBust] = useState(0);
   const [editText, setEditText] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [refineText, setRefineText] = useState("");
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [progress, setProgress] = useState<TaskEvent | null>(null);
   // Attach the WS on mount: a reload during a running generation or edit then
@@ -102,6 +105,7 @@ export default function Generation() {
           await loadFrames();
           setPdfBust(Date.now());
           setEditText("");
+          setRefineText("");
         }
         if (wasActive || changed) {
           setLogText(null);
@@ -138,6 +142,7 @@ export default function Generation() {
             await loadFrames();
             setPdfBust(Date.now());
             setEditText("");
+            setRefineText("");
           }
           setLogText(null);
           setLogOpen(false);
@@ -153,8 +158,10 @@ export default function Generation() {
     return () => window.clearInterval(timer);
   }, [id, metaStatus, metaUpdated, editing, progressRunning, loadMeta, loadFrames]);
 
-  // Map the viewer's PDF page to its frame; falls back to index for safety.
-  const frame = frames.find((f) => (f.page ?? f.index) === page);
+  // The frames API returns a synctex-resolved PDF `page` per frame (index and
+  // page diverge with section splash pages, \pause, allowframebreaks…).
+  // `page` maps the viewer page to a frame; `index` is the key for the edit API.
+  const frame = frames.find((f) => f.page === page);
 
   async function handleEdit(e: FormEvent) {
     e.preventDefault();
@@ -172,6 +179,36 @@ export default function Generation() {
       setEditing(false);
       setProgress(null);
       setEditError(errMsg(err));
+    }
+  }
+
+  async function handleRefine(e: FormEvent) {
+    e.preventDefault();
+    if (!id || !refineText.trim()) return setRefineError("Please enter refine instructions");
+    setRefineError(null);
+    setEditing(true);
+    setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting refine…", error: "" });
+    try {
+      await refineGeneration(id, refineText.trim());
+      // Same flow as slide edits: the task state is registered before the 202
+      // returns, so re-attaching the WS now cannot pick up a stale snapshot.
+      setWatch(true);
+    } catch (err) {
+      setEditing(false);
+      setProgress(null);
+      setRefineError(errMsg(err));
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!id || regenerating) return;
+    setRegenerating(true);
+    try {
+      const result = await regenerateGeneration(id);
+      navigate(`/g/${result.id}`);
+    } catch (err) {
+      setError(errMsg(err));
+      setRegenerating(false);
     }
   }
 
@@ -211,6 +248,9 @@ export default function Generation() {
   const succeeded = meta.status === "succeeded";
   const percent = Math.min(100, Math.max(0, progress?.percent ?? 0));
   const editFailedError = succeeded && !busy && !errorDismissed ? (meta.error || "").trim() : "";
+  // Refine failures roll back like edits but carry their own message prefix.
+  const refineFailed = editFailedError.startsWith("This refine failed");
+  const llmCalls = meta.llm_calls ?? 0;
 
   const logBlock = (tone: string) => (
     <div className="space-y-2">
@@ -240,20 +280,39 @@ export default function Generation() {
             {meta.institute?.trim() ? ` · Institute: ${meta.institute}` : ""}
             {meta.frame_count > 0 ? ` · ${meta.frame_count} pages` : ""}
           </p>
+          {meta.source_names.length > 0 && (
+            <p className="truncate text-xs text-slate-400" title={meta.source_names.join(", ")}>
+              Sources: {meta.source_names.join(", ")}
+            </p>
+          )}
+          {llmCalls > 0 && (
+            <p className="text-xs text-slate-400">
+              {meta.llm_model || "LLM"} · {llmCalls} {llmCalls === 1 ? "call" : "calls"} ·{" "}
+              {fmtTokens(meta.llm_prompt_tokens)} in / {fmtTokens(meta.llm_completion_tokens)} out
+            </p>
+          )}
         </div>
-        {succeeded && (
-          <div className="flex flex-wrap gap-2">
-            <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
-              <Download className="h-4 w-4" /> PDF
-            </a>
-            <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
-              <FileText className="h-4 w-4" /> main.tex
-            </a>
-            <a className="btn-secondary text-sm" href={bundleUrl(id)} download>
-              <Package className="h-4 w-4" /> Overleaf zip
-            </a>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {succeeded && (
+            <>
+              <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
+                <Download className="h-4 w-4" /> PDF
+              </a>
+              <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
+                <FileText className="h-4 w-4" /> main.tex
+              </a>
+              <a className="btn-secondary text-sm" href={bundleUrl(id)} download>
+                <Package className="h-4 w-4" /> Overleaf zip
+              </a>
+            </>
+          )}
+          <button type="button" className="btn-secondary text-sm"
+            disabled={busy || meta.status === "running" || regenerating}
+            onClick={() => void handleRegenerate()}>
+            <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -280,7 +339,11 @@ export default function Generation() {
       {editFailedError && (
         <section role="alert" className="space-y-3 border border-red-300 bg-red-50 p-6">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="text-lg text-red-800">Edit failed — your deck was not changed</h2>
+            <h2 className="text-lg text-red-800">
+              {refineFailed
+                ? "Refine failed — your deck was not changed"
+                : "Edit failed — your deck was not changed"}
+            </h2>
             <button type="button" className="text-sm text-red-800 underline"
               onClick={() => setErrorDismissed(true)}>
               Dismiss
@@ -336,6 +399,27 @@ export default function Generation() {
               )}
               <button type="submit" className="btn-primary w-full" disabled={busy || !frame}>
                 {busy ? "Editing…" : "Submit edit"}
+              </button>
+            </form>
+            <form onSubmit={handleRefine}
+              className="space-y-3 border-t-2 border-[var(--color-border)] pt-4">
+              <div>
+                <label className="block text-sm text-slate-600" htmlFor="refine-instruction">
+                  Refine whole deck
+                </label>
+                <p className="mt-1 text-xs text-slate-500">
+                  Applies one instruction across every slide (a failed refine is rolled back).
+                </p>
+              </div>
+              <textarea id="refine-instruction" className="input-field min-h-24 text-sm"
+                value={refineText} onChange={(e) => setRefineText(e.target.value)}
+                placeholder="e.g. Tighten all bullet points to one line and unify tense"
+                disabled={busy} />
+              {refineError && (
+                <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{refineError}</div>
+              )}
+              <button type="submit" className="btn-primary w-full" disabled={busy}>
+                {busy ? "Working…" : "Refine deck"}
               </button>
             </form>
           </aside>

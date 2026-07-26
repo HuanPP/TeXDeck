@@ -74,6 +74,19 @@ export function editFrame(id: string, index: number, instruction: string): Promi
   });
 }
 
+export const regenerateGeneration = (id: string) =>
+  requestJson<{ id: string }>(`/api/generations/${id}/regenerate`, { method: "POST" });
+
+export function refineGeneration(id: string, instruction: string): Promise<void> {
+  return requestJson(`/api/generations/${id}/refine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instruction }),
+  });
+}
+
+export const templatePreviewUrl = (key: string) =>
+  `/api/templates/${encodeURIComponent(key)}/preview.png`;
 export const pdfUrl = (id: string, bust = 0) =>
   `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;

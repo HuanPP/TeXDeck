@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 
 from . import deck, pdf, store, tasks
 from .config import settings
-from .deck import DeckError, DeckRequest
+from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
     EditError,
     build_frame_edit_messages,
@@ -23,11 +24,15 @@ from .edit import (
     replace_frame,
     resolve_frame_pages,
 )
-from .llm import ProgressCallback, create_client
+from .llm import ProgressCallback, UsageTally, create_client
 from .store import GenerationMeta
 
 
 class FrameEditBody(BaseModel):
+    instruction: str
+
+
+class RefineBody(BaseModel):
     instruction: str
 
 
@@ -113,14 +118,32 @@ def _edit_fail(meta: GenerationMeta, exc: BaseException) -> None:
     store.save_meta(meta)
 
 
-def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -> None:
+def _refine_fail(meta: GenerationMeta, exc: BaseException) -> None:
+    # Refine rolled back; finished PDF still usable; keep status (usually succeeded)
+    meta.error = f"This refine failed and was rolled back: {exc}"
+    store.save_meta(meta)
+
+
+def _apply_usage(meta: GenerationMeta, usage: UsageTally) -> None:
+    """Fold one job's token tally into the meta (caller persists via save_meta)."""
+    if usage.calls == 0:
+        return
+    meta.llm_model = settings.llm_model
+    meta.llm_calls += usage.calls
+    meta.llm_prompt_tokens += usage.prompt_tokens
+    meta.llm_completion_tokens += usage.completion_tokens
+
+
+def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
+    usage = UsageTally()
     try:
         template = deck.get_template(meta.template_key)
         deck.copy_template_bundle(template, gdir)
         progress("Preparing template", 2)
         documents: list[pdf.PdfDocument] = []
+        source_text = ""
         if meta.source_kind == "pdf":
             paths = sorted(gdir.glob("source_*.pdf"))
             if not paths:
@@ -132,21 +155,31 @@ def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -
                 progress(stage, 5 + percent * 40 // 100)
 
             documents = pdf.load_pdfs(
-                list(zip(paths, meta.source_names, strict=True)), gdir, progress=pdf_progress
+                list(zip(paths, meta.source_names, strict=True)),
+                gdir,
+                progress=pdf_progress,
+                on_usage=usage.add,
             )
             meta.page_count = sum(len(d.pages) for d in documents)
             store.save_meta(meta)
+        else:
+            # Pasted text lives on disk so the generation stays re-runnable
+            # after a server restart (and regenerate can copy it).
+            source_path = gdir / "source.txt"
+            if not source_path.is_file():
+                raise RuntimeError("Pasted text source is missing")
+            source_text = source_path.read_text(encoding="utf-8")
         request = DeckRequest(
             template_key=template.key,
             title=meta.title,
             author=meta.author,
             institute=meta.institute,
             instruction=meta.instruction,
-            source_text=source_text if meta.source_kind == "text" else "",
+            source_text=source_text,
         )
         messages = deck.build_generation_messages(template, request, documents)
         progress("Generating slides with the model", 50)
-        client = create_client()
+        client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, "generate", messages, response)
         progress("Validating model output", 70)
@@ -180,10 +213,17 @@ def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -
             llm_dump_dir=gdir / "llm",
         )
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
+        _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
         store.save_meta(meta)
+        if not settings.keep_page_renders:
+            # Page renders only feed the LLM; on success they are dead weight.
+            # Failures keep them for debugging.
+            shutil.rmtree(gdir / "pages", ignore_errors=True)
+            shutil.rmtree(gdir / "thumbs", ignore_errors=True)
         progress("Done", 100)
     except Exception as exc:
+        _apply_usage(meta, usage)
         _fail(meta, exc)
         raise
 
@@ -192,6 +232,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
     tex_path = gdir / "main.tex"
+    usage = UsageTally()
     try:
         progress("Preparing edit", 5)
         original = tex_path.read_text(encoding="utf-8")
@@ -201,7 +242,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         template = deck.get_template(meta.template_key)
         messages = build_frame_edit_messages(frame, instruction, template.main_tex)
         progress("Editing one slide with the model", 30)
-        client = create_client()
+        client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, f"edit_{index}", messages, response)
         new_tex = replace_frame(original, frame, extract_frame(response))
@@ -235,11 +276,98 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
                 ) from compile_exc
             raise
         meta.edit_count += 1
+        _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
+        _apply_usage(meta, usage)
         _edit_fail(meta, exc)
+        raise
+
+
+def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> None:
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    tex_path = gdir / "main.tex"
+    usage = UsageTally()
+    try:
+        progress("Preparing refine", 5)
+        original = tex_path.read_text(encoding="utf-8")
+        template = deck.get_template(meta.template_key)
+        stem = f"refine_{meta.refine_count + 1}"
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are revising a complete XeLaTeX Beamer deck. "
+                    "Output only the full revised, compilable document. "
+                    "No explanation, no markdown fences."
+                ),
+            },
+            {"role": "user", "content": template.main_tex},
+            {"role": "user", "content": original},
+            {"role": "user", "content": "Revision request:\n" + instruction},
+        ]
+        progress("Revising the whole deck with the model", 30)
+        client = create_client(on_usage=usage.add)
+        response = client.complete(messages)
+        _dump_llm(gdir, stem, messages, response)
+        progress("Validating model output", 55)
+        try:
+            tex = deck.extract_tex(response, template)
+        except DeckError as first_err:
+            retry = messages + [
+                {"role": "assistant", "content": response},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Previous output was invalid: {first_err}\n"
+                        "Re-output a complete, compilable XeLaTeX Beamer document. "
+                        "No explanation, no markdown fences."
+                    ),
+                },
+            ]
+            response = client.complete(retry)
+            _dump_llm(gdir, f"{stem}_retry", retry, response)
+            tex = deck.extract_tex(response, template)
+        edit_dir = store.next_edit_dir(gen_id)
+        (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
+        (edit_dir / "refine.json").write_text(
+            json.dumps(
+                {
+                    "instruction": instruction,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        tex_path.write_text(tex, encoding="utf-8")
+        progress("Compiling", 70)
+        try:
+            deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
+        except Exception as compile_exc:
+            tex_path.write_text(original, encoding="utf-8")
+            try:
+                deck.compile_tex(tex_path, client=None)
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    f"Compile failed after refine: {compile_exc}; "
+                    f"restore of original also failed: {restore_exc}"
+                ) from compile_exc
+            raise
+        meta.refine_count += 1
+        meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
+        _apply_usage(meta, usage)
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        progress("Done", 100)
+    except Exception as exc:
+        _apply_usage(meta, usage)
+        _refine_fail(meta, exc)
         raise
 
 
@@ -256,6 +384,24 @@ def health() -> dict[str, str]:
 @app.get("/api/templates")
 def api_list_templates() -> list[dict[str, str]]:
     return [{"key": t.key, "name": t.name} for t in deck.list_templates()]
+
+
+@app.get("/api/templates/{key}/preview.png")
+def api_template_preview(key: str) -> FileResponse:
+    try:
+        template = deck.get_template(key)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    try:
+        path = deck.render_template_preview(template)
+    except CompileError as e:
+        tail = e.log[-2000:] if e.log else ""
+        detail = f"Template preview build failed: {e}"
+        if tail:
+            detail += f"\n{tail}"
+        raise HTTPException(503, detail=detail) from e
+    # Content hash lives server-side in the filename; clients must revalidate.
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/generations")
@@ -323,10 +469,13 @@ async def api_create_generation(
     # source_XX.pdf index encodes reading order; original names live in meta.source_names
     for i, data in enumerate(contents, start=1):
         (gdir / f"source_{i:02d}.pdf").write_bytes(data)
-    gen_id, text_for_job = meta.id, text_body
+    if kind == "text":
+        # Persisted so the job (and any later regenerate) reads it from disk.
+        (gdir / "source.txt").write_text(text_body, encoding="utf-8")
+    gen_id = meta.id
 
     def job(progress: ProgressCallback) -> None:
-        _run_generation(gen_id, text_for_job, progress)
+        _run_generation(gen_id, progress)
 
     tasks.start(gen_id, job)
     return JSONResponse({"id": gen_id}, status_code=202)
@@ -415,6 +564,62 @@ def api_edit_frame(gen_id: str, index: int, body: FrameEditBody) -> Response:
     except tasks.TaskBusy as e:
         raise HTTPException(409, detail=str(e)) from e
     return Response(status_code=202)
+
+
+@app.post("/api/generations/{gen_id}/refine")
+def api_refine_deck(gen_id: str, body: RefineBody) -> Response:
+    _load(gen_id)
+    if not body.instruction.strip():
+        raise HTTPException(400, detail="Refine instruction must not be empty")
+    _file(gen_id, "main.tex", "TeX not generated yet")
+    instruction = body.instruction
+
+    def job(progress: ProgressCallback) -> None:
+        _run_refine(gen_id, instruction, progress)
+
+    try:
+        tasks.start(gen_id, job)
+    except tasks.TaskBusy as e:
+        raise HTTPException(409, detail=str(e)) from e
+    return Response(status_code=202)
+
+
+@app.post("/api/generations/{gen_id}/regenerate")
+def api_regenerate(gen_id: str) -> JSONResponse:
+    old_meta = _load(gen_id)
+    old_dir = store.generation_dir(gen_id)
+    if old_meta.source_kind == "pdf":
+        sources = sorted(old_dir.glob("source_*.pdf"))
+        if not sources or len(sources) != len(old_meta.source_names):
+            raise HTTPException(
+                400, detail="Source PDFs of this generation are missing; cannot regenerate"
+            )
+    else:
+        sources = [old_dir / "source.txt"]
+        if not sources[0].is_file():
+            raise HTTPException(
+                400, detail="Pasted text of this generation is missing; cannot regenerate"
+            )
+    meta = store.new_generation(
+        title=old_meta.title,
+        template_key=old_meta.template_key,
+        template_name=old_meta.template_name,
+        instruction=old_meta.instruction,
+        source_kind=old_meta.source_kind,
+        source_names=list(old_meta.source_names),
+        author=old_meta.author,
+        institute=old_meta.institute,
+    )
+    new_dir = store.generation_dir(meta.id)
+    for source in sources:
+        shutil.copy2(source, new_dir / source.name)
+    new_id = meta.id
+
+    def job(progress: ProgressCallback) -> None:
+        _run_generation(new_id, progress)
+
+    tasks.start(new_id, job)
+    return JSONResponse({"id": new_id}, status_code=202)
 
 
 @app.websocket("/ws/generations/{gen_id}")

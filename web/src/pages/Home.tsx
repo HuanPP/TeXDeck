@@ -1,11 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileUp, Trash2 } from "lucide-react";
+import { FileUp, RotateCw, Trash2 } from "lucide-react";
 import {
   createGeneration,
   deleteGeneration,
   listGenerations,
   listTemplates,
+  regenerateGeneration,
+  templatePreviewUrl,
 } from "../api";
 import StatusBadge from "../components/StatusBadge";
 import type { GenerationMeta, TemplateItem } from "../types";
@@ -35,6 +37,13 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [sourceText, setSourceText] = useState("");
+  // Preview thumbnails that returned non-200: fall back to a name tile, no retry.
+  const [previewFailed, setPreviewFailed] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const confirmTimerRef = useRef(0);
 
   useEffect(() => {
     void (async () => {
@@ -60,6 +69,19 @@ export default function Home() {
       window.removeEventListener("drop", prevent);
     };
   }, []);
+
+  // While any listed generation is still running, poll the list so statuses
+  // update in place; the interval goes away as soon as none are running.
+  const anyRunning = items.some((g) => g.status === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = window.setInterval(() => {
+      listGenerations().then(setItems).catch(() => undefined);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [anyRunning]);
+
+  useEffect(() => () => window.clearTimeout(confirmTimerRef.current), []);
 
   const addFiles = (list: FileList | File[] | null) => {
     if (!list) return;
@@ -105,15 +127,41 @@ export default function Home() {
     }
   }
 
-  async function handleDelete(id: string, itemTitle: string) {
-    if (!window.confirm(`Delete "${itemTitle}"? This cannot be undone.`)) return;
+  function armDelete(id: string) {
+    window.clearTimeout(confirmTimerRef.current);
+    setConfirmDeleteId(id);
+    confirmTimerRef.current = window.setTimeout(() => setConfirmDeleteId(null), 4_000);
+  }
+
+  async function handleDelete(id: string) {
+    window.clearTimeout(confirmTimerRef.current);
+    setConfirmDeleteId(null);
     try {
       await deleteGeneration(id);
       setItems((prev) => prev.filter((g) => g.id !== id));
     } catch (e) {
-      alert(errMsg(e));
+      setHistoryError(errMsg(e));
     }
   }
+
+  async function handleRegenerate(id: string) {
+    setHistoryError(null);
+    setRegeneratingId(id);
+    try {
+      const result = await regenerateGeneration(id);
+      navigate(`/g/${result.id}`);
+    } catch (e) {
+      setHistoryError(errMsg(e));
+      setRegeneratingId(null);
+    }
+  }
+
+  const q = query.trim().toLowerCase();
+  const visibleItems = q
+    ? items.filter((g) =>
+        `${g.title} ${g.template_name || g.template_key}`.toLowerCase().includes(q),
+      )
+    : items;
 
   return (
     <div className="space-y-10">
@@ -122,15 +170,36 @@ export default function Home() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="mb-2 block text-sm text-slate-600">Select template</label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-              {templates.map((t) => (
-                <button key={t.key} type="button" onClick={() => setTemplateKey(t.key)}
-                  className={`border px-3 py-3 text-left text-sm ${
-                    t.key === templateKey
-                      ? "border-[var(--color-primary)] bg-sky-50"
-                      : "border-[var(--color-border)] bg-white hover:border-slate-300"
-                  }`}>{t.name}</button>
-              ))}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {templates.map((t) => {
+                const selected = t.key === templateKey;
+                return (
+                  <button key={t.key} type="button" aria-pressed={selected}
+                    onClick={() => setTemplateKey(t.key)}
+                    className={`overflow-hidden border bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
+                      selected
+                        ? "border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]"
+                        : "border-[var(--color-border)] hover:border-slate-300"
+                    }`}>
+                    <div className="aspect-video w-full bg-slate-100">
+                      {previewFailed.has(t.key) ? (
+                        <div className="flex h-full items-center justify-center px-2 text-center text-xs text-slate-500">
+                          {t.name}
+                        </div>
+                      ) : (
+                        <img src={templatePreviewUrl(t.key)} alt="" loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={() =>
+                            setPreviewFailed((prev) => new Set(prev).add(t.key))
+                          } />
+                      )}
+                    </div>
+                    <div className={`truncate px-2 py-1.5 text-sm ${selected ? "bg-sky-50" : ""}`}>
+                      {t.name}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -171,7 +240,7 @@ export default function Home() {
             {sourceTab === "pdf" ? (
               <>
                 <label
-                  className={`flex cursor-pointer flex-col items-center border border-dashed px-4 py-8 text-sm text-slate-600 ${
+                  className={`flex cursor-pointer flex-col items-center border border-dashed px-4 py-8 text-sm text-slate-600 focus-within:ring-2 focus-within:ring-[var(--color-primary)] ${
                     dragOver
                       ? "border-[var(--color-primary)] bg-sky-50"
                       : "border-[var(--color-border)] bg-slate-50"
@@ -190,7 +259,7 @@ export default function Home() {
                   <FileUp className="mb-2 h-5 w-5" />
                   {files.length ? "Add another PDF" : "Click to select or drop PDFs"}
                   <span className="mt-1 text-xs text-slate-400">Order below = reading order</span>
-                  <input type="file" multiple accept="application/pdf,.pdf" className="hidden"
+                  <input type="file" multiple accept="application/pdf,.pdf" className="sr-only"
                     onChange={(e) => {
                       addFiles(e.target.files);
                       e.target.value = "";
@@ -250,11 +319,23 @@ export default function Home() {
         {loadError && (
           <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div>
         )}
+        {historyError && (
+          <div role="alert" className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {historyError}
+          </div>
+        )}
+        {items.length > 0 && (
+          <input type="search" className="input-field mb-3" aria-label="Search history"
+            placeholder="Search by title or template…" value={query}
+            onChange={(e) => setQuery(e.target.value)} />
+        )}
         {items.length === 0 && !loadError ? (
           <p className="text-sm text-slate-500">No generations yet</p>
+        ) : visibleItems.length === 0 ? (
+          <p className="text-sm text-slate-500">No generations match “{query.trim()}”</p>
         ) : (
           <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] bg-white">
-            {items.map((g) => (
+            {visibleItems.map((g) => (
               <li key={g.id} className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50">
                 <button type="button" className="min-w-0 flex-1 text-left"
                   onClick={() => navigate(`/g/${g.id}`)}>
@@ -264,14 +345,37 @@ export default function Home() {
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-slate-500">
                     <span>{g.template_name || g.template_key}</span>
+                    {g.source_names.length > 0 && (
+                      <span className="max-w-56 truncate" title={g.source_names.join(", ")}>
+                        {g.source_names[0]}
+                        {g.source_names.length > 1 ? ` +${g.source_names.length - 1} more` : ""}
+                      </span>
+                    )}
                     <span>{fmt(g.created_at)}</span>
                     {g.frame_count > 0 && <span>{g.frame_count} pages</span>}
                   </div>
                 </button>
-                <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-red-600"
-                  title="Delete" onClick={() => void handleDelete(g.id, g.title)}>
-                  <Trash2 className="h-4 w-4" />
+                <button type="button" className="btn-secondary shrink-0 px-2 py-1"
+                  title="Regenerate" aria-label={`Regenerate "${g.title}"`}
+                  disabled={g.status === "running" || regeneratingId !== null}
+                  onClick={() => void handleRegenerate(g.id)}>
+                  <RotateCw className={`h-4 w-4 ${regeneratingId === g.id ? "animate-spin" : ""}`} />
                 </button>
+                {confirmDeleteId === g.id ? (
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-red-600">
+                    Confirm delete?
+                    <button type="button" className="btn-secondary px-2 py-1 text-red-600"
+                      aria-label="Confirm delete" onClick={() => void handleDelete(g.id)}>✓</button>
+                    <button type="button" className="btn-secondary px-2 py-1"
+                      aria-label="Cancel delete" onClick={() => setConfirmDeleteId(null)}>✕</button>
+                  </span>
+                ) : (
+                  <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-red-600"
+                    title="Delete" aria-label={`Delete "${g.title}"`}
+                    onClick={() => armDelete(g.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
