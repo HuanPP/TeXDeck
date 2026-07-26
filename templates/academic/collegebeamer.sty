@@ -34,11 +34,11 @@
 % --- package options ---
 % languages
 \newcommand{\tocStr}{Table of Contents}
-\newcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+\newcommand{\qaStr}{\textit{Thank you for your attention. \\ Questions and discussion are welcome.}}
 
 \DeclareOption{en}{
     \renewcommand{\tocStr}{Table of Contents}
-    \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+    \renewcommand{\qaStr}{\textit{Thank you for your attention. \\ Questions and discussion are welcome.}}
 }
 
 % colleges & institutes
@@ -60,27 +60,44 @@
 % force 16:9 aspect ratio
 \geometry{paperwidth=16cm,paperheight=9cm}
 
-% logo
+% logo (title page only -- content pages carry no logo in this pack)
 \pgfdeclareimage[width=0.09\paperwidth]{colorlogo}{\colorlogoPath}
 \pgfdeclareimage[width=0.09\paperwidth]{translogo}{\translogoPath}
+\pgfdeclareimage[width=0.05\paperwidth]{titlelogo}{\colorlogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-\setbeamertemplate{headline}{\hspace{0.06\textwidth}\pgfuseimage{\@makelogo}} % put the logo in each slide's top left area
+\setbeamertemplate{headline}{} % no per-slide logo: classic university-press restraint
+
+% one classic text margin shared by frame titles and body
+\setbeamersize{text margin left=1.6cm, text margin right=1.6cm}
 
 % color
 \definecolor{maincolor}{RGB}{\maincolorRGB}
 \definecolor{airforceblue}{rgb}{0.36, 0.54, 0.66}
 \definecolor{morelightgray}{rgb}{0.9, 0.9, 0.9}
 
+% double hairline rule ornament: #1 = colour, #2 = width
+% (two 0.4pt rules 1.5pt apart -- the pack's signature classic ornament)
+\newcommand{\deckrules}[2]{%
+    \leavevmode\vbox{\color{#1}%
+        \hrule width #2 height 0.4pt
+        \vskip1.5pt
+        \hrule width #2 height 0.4pt}%
+}
+
 \newcommand{\themecolor}[1]{
     \ifstrequal{#1}{colorbg}{
         \renewcommand{\@makelogo}{translogo}
         \setbeamercolor{normal text}{fg=white, bg=maincolor}
         \setbeamercolor{structure}{fg=white}
+        \setbeamercolor{frametitle}{fg=white}
+        \setbeamercolor{framesubtitle}{fg=white}
     }{
         \renewcommand{\@makelogo}{colorlogo}
         \setbeamercolor{normal text}{fg=darkgray, bg=white}
         \setbeamercolor{structure}{fg=maincolor}
+        \setbeamercolor{frametitle}{fg=black!78}
+        \setbeamercolor{framesubtitle}{fg=black!45}
     }
 }
 \themecolor{white} % default: white theme
@@ -95,58 +112,67 @@
 % \renewcommand{\familydefault}{\sfdefault}  % sans-serif
 \usefonttheme{serif}
 
-\setbeamerfont{title}{series=\bfseries, size=\fontsize{22}{27}\selectfont}
+% title is set as letterspaced small caps by the title-page template, so the
+% weight stays medium (bold letterspaced caps would read heavy, not bookish)
+\setbeamerfont{title}{series=\mdseries, size=\fontsize{24}{30}\selectfont}
 
 \setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
-\setbeamerfont{author}{size=\normalsize}
-\setbeamerfont{date}{size=\normalsize}
+\setbeamerfont{author}{size=\small}
+\setbeamerfont{institute}{size=\small}
+\setbeamerfont{date}{size=\small}
 
-\setbeamerfont{frametitle}{series=\bfseries}
-\setbeamerfont{framesubtitle}{series=\mdseries}
+\setbeamerfont{frametitle}{series=\bfseries, size=\fontsize{15}{18}\selectfont}
+\setbeamerfont{framesubtitle}{series=\mdseries, size=\footnotesize}
 \setbeamerfont{footline}{size=\scriptsize}
 
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
 
-% footline: page counter, right-aligned (suppressed on title/section/QA pages
-% via the \begingroup overrides around those frames)
-\newcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
+% footline: centered book-style folio "– n / N –" (suppressed on title/section/
+% QA pages via the \begingroup overrides around those frames)
+\newcommand{\@footlinepayoff}{%
+    \textendash\enspace\insertframenumber\,/\,\inserttotalframenumber\enspace\textendash}
 \setbeamertemplate{footline}{
-    \begin{beamercolorbox}[wd=\textwidth, ht=5mm, dp=3mm, rightskip=1cm]{footline}
-    \usebeamerfont{footline}\hfill\@footlinepayoff
+    \begin{beamercolorbox}[wd=\textwidth, ht=4.5mm, dp=3.5mm, center]{footline}
+    \usebeamerfont{footline}\@footlinepayoff
     \end{beamercolorbox}
 }
 
 \newcommand{\footlinecolor}[1]{
     % if #1 is empty, resets the footline to its plain (no background) look
     \ifstrempty{#1}{
-        \renewcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
+        \renewcommand{\@footlinepayoff}{%
+            \textendash\enspace\insertframenumber\,/\,\inserttotalframenumber\enspace\textendash}
         \setbeamercolor{footline}{fg=darkgray!70, bg=}
     }{
-        \renewcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
+        \renewcommand{\@footlinepayoff}{%
+            \textendash\enspace\insertframenumber\,/\,\inserttotalframenumber\enspace\textendash}
         \setbeamercolor{footline}{fg=white, bg=#1}
     }
 }
 \setbeamercolor{footline}{fg=darkgray!70, bg=}  % default: subtle page numbers
 
-% block (kept strictly on the maincolor palette)
-\setbeamertemplate{blocks}[rounded]
+% block (kept strictly on the maincolor palette; squared corners + maroon
+% title on a light strip -- bookish, deliberately NOT a solid banded header)
+\setbeamertemplate{blocks}[default]
 \setbeamerfont{block title}{series=\bfseries, size=\small}
 \setbeamerfont{block body}{size=\scriptsize}
-\setbeamercolor{block title}{fg=white, bg=maincolor}
-\setbeamercolor{block body}{fg=darkgray, bg=maincolor!8}
-\setbeamercolor{block title alerted}{fg=white, bg=maincolor!80!black}
-\setbeamercolor{block body alerted}{fg=darkgray, bg=maincolor!10}
-\setbeamercolor{block title example}{fg=white, bg=maincolor!60!black}
-\setbeamercolor{block body example}{fg=darkgray, bg=maincolor!60!black!8}
+\setbeamercolor{block title}{fg=maincolor, bg=maincolor!12}
+\setbeamercolor{block body}{fg=darkgray, bg=maincolor!4}
+\setbeamercolor{block title alerted}{fg=maincolor!75!black, bg=maincolor!16}
+\setbeamercolor{block body alerted}{fg=darkgray, bg=maincolor!5}
+\setbeamercolor{block title example}{fg=maincolor!60!black, bg=maincolor!60!black!10}
+\setbeamercolor{block body example}{fg=darkgray, bg=maincolor!60!black!4}
 
-% bullets
-\setbeamertemplate{itemize item}{\textbullet}
-\setbeamertemplate{itemize subitem}{\textemdash}
-\setbeamertemplate{itemize subsubitem}{\ensuremath{\circ}}
+% bullets: classic round bullet in maroon; open circle, then centred dot, in gray
+\setbeamertemplate{itemize item}{\textcolor{maincolor}{\textbullet}}
+\setbeamertemplate{itemize subitem}{\textcolor{black!50}{\ensuremath{\circ}}}
+\setbeamertemplate{itemize subsubitem}{\textcolor{black!50}{\textperiodcentered}}
 
-% table of cotents
-\setbeamertemplate{section in toc}{$\blacktriangleright$~\inserttocsection}  % section name format
+% table of contents: maroon roman numerals, dark entry text, book style
+\setbeamertemplate{section in toc}{%
+    {\color{maincolor}\makebox[2em][r]{\MakeUppercase{\romannumeral\inserttocsectionnumber}.}}%
+    \hskip0.8em{\color{black!75}\inserttocsection}}
 \setbeamertemplate{subsection in toc}{}  % don't present subsection
 
 % code bolck setting
@@ -183,48 +209,78 @@
 % subsection
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
-% presents subtitle on each frame; suppressed before the first \section so no
-% stray "0" appears under early frame titles (e.g. the Outline page)
+% presents a section label on each frame (roman numeral + section name, shown
+% right-aligned in small caps on the title line); suppressed before the first
+% \section so no stray label appears on early frames (e.g. the Outline page)
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 \thesection\,\secname\fi}}
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 \Roman{section}\,\textperiodcentered\,\secname\fi}}
 \makeatother
 
 % avoid numbering of frames that are breaked into multiply slides
 \setbeamertemplate{frametitle continuation}{}
 
-% section page with the current section highlighted
+% section divider: full-bleed maroon page -- small roman numeral over a short
+% centered rule, section name in centered letterspaced small caps, second rule
+% below (the same symmetric double-rule ornament language as the title page)
 \AtBeginSection[]
 {
     \begingroup
     \setbeamertemplate{footline}{}
     \themecolor{colorbg}
-    \begin{frame}{\tocStr}
-        \tableofcontents[currentsection]
+    \begin{frame}
+        \centering
+        {\fontsize{13}{16}\selectfont\color{white!85!maincolor}\Roman{section}\par}
+        \vskip3.5mm
+        \deckrules{white!70!maincolor}{28mm}\par
+        \vskip6mm
+        {\fontsize{20}{27}\selectfont\scshape
+         \ifdefined\addfontfeatures\addfontfeatures{LetterSpace=8.0}\fi
+         \color{white}\secname\par}
+        \vskip6mm
+        \deckrules{white!70!maincolor}{28mm}\par
     \end{frame}
     \endgroup
 }
 
-% subsection title page
+% subsection title page (same ornament language, on paper)
 \AtBeginSubsection[]
 {
-    \begin{frame}{\,}{\thesection \, \secname}
-        \fontfamily{ptm}\selectfont
-        \centering\textsl{\textbf{\textcolor{maincolor}{
-            \large Section \thesection.\thesubsection
-            \vskip15pt
-            \LARGE \subsecname
-        }}}
+    \begin{frame}{\,}
+        \centering
+        {\small\color{maincolor}Section \thesection.\thesubsection\par}
+        \vskip3mm
+        \deckrules{maincolor!60}{28mm}\par
+        \vskip5mm
+        {\LARGE\scshape\color{maincolor}\subsecname\par}
     \end{frame}
 }
 
 % --- page elements ---
-% frame title & subtitle layout
+% frame title: dark serif bold, section label right-aligned in letterspaced
+% small caps, and a full-text-width double hairline (0.4pt + 0.4pt, 1.5pt
+% apart) beneath -- the pack's signature rule ornament, repeated per frame
+\newbox\decklabelbox
 \setbeamertemplate{frametitle}{
-    \vspace*{-3.5ex}
-    \begin{beamercolorbox}[leftskip=2cm]{frametitle}
-    \usebeamerfont{frametitle}\insertframetitle\\
-    \usebeamerfont{framesubtitle}\insertframesubtitle
+    \vskip1.6ex
+    \begin{beamercolorbox}[wd=\textwidth]{frametitle}
+        % measure the section label first so a long frame title wraps inside
+        % the remaining width instead of overflowing the line
+        \setbox\decklabelbox=\hbox{%
+            \usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}%
+            \scshape\ifdefined\addfontfeatures\addfontfeatures{LetterSpace=6.0}\fi
+            \strut\insertframesubtitle}%
+        \hbox to \textwidth{%
+            \begin{minipage}[b]{\dimexpr\textwidth-\wd\decklabelbox-0.8em\relax}
+                \raggedright\usebeamerfont{frametitle}\strut\insertframetitle\strut
+            \end{minipage}%
+            \hfil\box\decklabelbox}%
+        \vskip0.9ex
+        {\color{maincolor!60}%
+            \hrule height 0.4pt
+            \vskip1.5pt
+            \hrule height 0.4pt}%
     \end{beamercolorbox}
+    \vskip1.2ex
 }
 
 % title page: the layout template lives in main.tex (it guards empty
@@ -248,15 +304,19 @@
         \setbeamertemplate{footline}{}
         \themecolor{colorbg}
         
-        \begin{frame}{}
+        \begin{frame}
+            % normal-text fg does not propagate mid-document; force white here
+            \usebeamercolor[fg]{normal text}%
             \centering
-            \begin{minipage}{\textwidth}
-                \usebeamercolor[fg]{normal text}
-                \centering
-                {\fontsize{30}{36}\selectfont\bfseries Q\,\&\,A\par}
-                \vspace{1em}
-                {\Large \qaStr\par}
-            \end{minipage}
+            \deckrules{white!70!maincolor}{28mm}\par
+            \vskip6mm
+            {\fontsize{26}{32}\selectfont\scshape
+             \ifdefined\addfontfeatures\addfontfeatures{LetterSpace=8.0}\fi
+             Q\,\&\,A\par}
+            \vskip5mm
+            {\large \qaStr\par}
+            \vskip6mm
+            \deckrules{white!70!maincolor}{28mm}\par
         \end{frame}
     \endgroup
 }
@@ -295,8 +355,8 @@
 \newcommand{\btextbf}[1]{\textbf{\textcolor{airforceblue}{#1}}}
 
 % coloured textsl
-\newcommand{\ctextsl}[1]{\textsl{\textcolor{maincolor}{#1}}}
-\newcommand{\btextsl}[1]{\textsl{\textcolor{airforceblue}{#1}}}
+\newcommand{\ctextsl}[1]{\textit{\textcolor{maincolor}{#1}}}
+\newcommand{\btextsl}[1]{\textit{\textcolor{airforceblue}{#1}}}
 
 % coloured emph
 \newcommand{\cemph}[1]{\emph{\textcolor{maincolor}{#1}}}

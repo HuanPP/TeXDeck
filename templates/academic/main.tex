@@ -56,27 +56,42 @@
 \let\mathbf\relax % avoid a redefinition clash between bm/beamer and newpxmath
 \usepackage{newpxmath}
 
-% NOTE: the theme auto-inserts a highlighted-TOC divider page at every
-% \section, and prints "<number> <section name>" under each frame title
-% (suppressed automatically before the first \section). Do not redefine these.
+% NOTE: the theme auto-inserts a full-bleed maroon section divider page
+% (roman numeral over a short rule + section name in small caps) at every
+% \section, and prints "<roman numeral> · <section name>" in small caps at
+% the right end of each frame-title line (suppressed automatically before
+% the first \section). Do not redefine these.
 
-% Title page: skips subtitle/author/institute lines cleanly when left empty.
+% Title page: classic book title page -- centered, letterspaced small caps
+% between short double-hairline ornaments, on the framed warm-paper
+% background. Skips subtitle/author/institute lines cleanly when left empty.
 \makeatletter
 \def\academic@emptyauthor{\def\inst{\beamer@insttitle}\def\and{\beamer@andtitle}}
 \setbeamertemplate{title page}{
-    \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.72\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\color{maincolor}\rule{2cm}{0.6pt}\par}
-        \vskip10pt
-        {\usebeamerfont{title}\inserttitle\par}
-        \ifx\insertsubtitle\@empty\else
-            \vskip8pt{\usebeamerfont{subtitle}\insertsubtitle\par}\fi
-        \ifx\insertauthor\academic@emptyauthor\else
-            \vskip14pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}\fi
-        \ifx\insertinstitute\@empty\else
-            \vskip4pt{\usebeamerfont{institute}\usebeamercolor[fg]{author}\insertinstitute\par}\fi
-        \vskip10pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
-    \end{beamercolorbox}
+    % fixed 13mm minimum top/bottom margins keep every line inside the 12mm
+    % double-rule border frame of the background, whatever fields are filled
+    \vbox to \dimexpr\textheight-3pt\relax{%
+        \vskip13mm plus 0.55fill
+        \begingroup\centering
+            \pgfuseimage{titlelogo}\par
+            \vskip2.5mm
+            \deckrules{maincolor!70}{50mm}\par
+            \vskip4.5mm
+            {\usebeamerfont{title}\usebeamercolor[fg]{title}%
+             \addfontfeatures{LetterSpace=7.0}\scshape\inserttitle\par}
+            \ifx\insertsubtitle\@empty\else
+                \vskip2mm{\usebeamerfont{subtitle}\itshape\color{black!60}\insertsubtitle\par}\fi
+            \vskip4.5mm
+            \deckrules{maincolor!70}{50mm}\par
+            \vskip3.5mm
+            \ifx\insertauthor\academic@emptyauthor\else
+                {\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}\vskip1mm\fi
+            \ifx\insertinstitute\@empty\else
+                {\usebeamerfont{institute}\scshape\color{black!60}\insertinstitute\par}\vskip1mm\fi
+            {\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
+        \endgroup
+        \vskip13mm plus 0.75fill minus 8pt
+    }%
 }
 \makeatother
 
@@ -109,8 +124,9 @@
 % =============================================================================
 % SECTION 1 (EXAMPLE)
 % IMPORTANT: declare \section{...} BEFORE the content frames of each part.
-% The theme then automatically inserts a full-color divider page with the
-% current section highlighted -- do NOT build any manual transition frames.
+% The theme then automatically inserts a full-bleed maroon divider page
+% (roman numeral + section name between short rules) -- do NOT build any
+% manual transition frames.
 % =============================================================================
 \section{Title of Part One}
 
@@ -118,7 +134,7 @@
 % CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
 % =============================================================================
 % Content page example 1: Text-left, figure-right layout
-\begin{frame}{Content Example: Text Left, Figure Right}
+\begin{frame}{Text Left, Figure Right}
 \framesubtitle{} % keep empty; framesubtitle template will show section info automatically
 \small
 \begin{columns}[T]
@@ -167,7 +183,7 @@ State the central message of this slide in one sentence.
 \end{frame}
 
 % Content page example 2: Text-top, figure-bottom layout
-\begin{frame}{Content Example: Text Top, Figure Bottom}
+\begin{frame}{Text Top, Figure Bottom}
 \framesubtitle{} % automatically inherits section info
 \small
 
@@ -227,12 +243,14 @@ Keep the text concise so the wide chart remains readable.
 \end{tikzpicture}\par}
 
 \vspace{0.2em}
-\hspace*{1.9cm}{\scriptsize\color{darkgray!80}\emph{Source: data compiled from the source document.}}
+% Classic centered figure caption -- REQUIRED under every full-width chart:
+% italic "Figure" + em-dash + one short sentence, centered, scriptsize.
+{\centering\scriptsize\color{black!55}\emph{Figure} --- Monthly sample level, compiled from the source document.\par}
 \end{frame}
 
 
 % Content page example 3: Figure-left, text-right layout
-\begin{frame}{Content Example: Figure Left, Text Right}
+\begin{frame}{Figure Left, Text Right}
 \framesubtitle{} 
 \small
 \begin{columns}[c] % [c] = vertically centered; use [T] for top alignment if text is long
@@ -243,19 +261,19 @@ Keep the text concise so the wide chart remains readable.
     \begin{tikzpicture}[
         font=\scriptsize,
         box/.style={
-            draw=maincolor, fill=maincolor!12, rounded corners=2pt,
+            draw=maincolor, fill=maincolor!12,   % squared corners: bookish, not app-like
             minimum height=0.62cm, text width=1.35cm, align=center
         },
         layer title/.style={font=\scriptsize\bfseries, text=maincolor}
     ]
         % Data layer (panel top leaves reserved space for the caption)
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.60);
+        \fill[maincolor!6] (-0.25,1.05) rectangle (4.85,2.60);
         \node[layer title, anchor=north west] at (-0.15,2.55) {Data layer};
         \node[box] (s1) at (0.7,1.50) {Sensors};
         \node[box] (s2) at (2.5,1.50) {Ingest};
         \node[box] (s3) at (4.2,1.50) {Store};
         % Decision layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,-1.25) rectangle (4.85,0.70);
+        \fill[maincolor!6] (-0.25,-1.25) rectangle (4.85,0.70);
         \node[layer title, anchor=north west] at (-0.15,0.65) {Decision layer};
         \node[box] (p1) at (0.7,-0.30) {Feature};
         \node[box] (p2) at (2.5,-0.30) {Model};
@@ -264,7 +282,7 @@ Keep the text concise so the wide chart remains readable.
         % they never slice through captions or other boxes)
         \draw[->, thick, maincolor] (s1) -- (s2);
         \draw[->, thick, maincolor] (s2) -- (s3);
-        \draw[->, thick, maincolor, rounded corners=2pt]
+        \draw[->, thick, maincolor]
             (s2.south) -- (2.5,0.875) -- (-0.65,0.875) -- (-0.65,-0.30) -- (p1.west);
         \draw[->, thick, maincolor] (p1) -- (p2);
         \draw[->, thick, maincolor] (p2) -- (p3);
@@ -285,7 +303,7 @@ Keep the text concise so the wide chart remains readable.
         \item Domain-specific data analysis
     \end{itemize}
 
-    \vspace{1em}
+    \vspace{0.2em}
     \textbf{Key Findings:}
     \begin{enumerate}
         \item \ctextbf{Observation 1}: The figure on the left shows\ldots
@@ -296,7 +314,7 @@ Keep the text concise so the wide chart remains readable.
 
 % Content page example 4: Definition block + displayed equation
 % Use this pattern whenever the source document is math-heavy.
-\begin{frame}{Content Example: Definition and Key Equation}
+\begin{frame}{Definition and Key Equation}
 \framesubtitle{}
 \small
 \begin{block}{Definition (state the core assumption or theorem here)}
@@ -329,16 +347,19 @@ The key relation then follows directly:
 \centering
 \renewcommand{\arraystretch}{1.3}
 \footnotesize
-% Header: maincolor fill + white bold text; body: plain rows + \bottomrule.
-% Use \rowcolors zebra striping ONLY for tables with 6+ rows, and then add
-% \noalign{\vskip2pt} before \bottomrule to keep the stripe off the rule.
-\begin{tabular}{p{0.2\textwidth} c c c}
-\rowcolor{maincolor}
-\textcolor{white}{\textbf{Metric}} & \textcolor{white}{\textbf{A}} &
-\textcolor{white}{\textbf{B}} & \textcolor{white}{\textbf{Conclusion}} \\
+% Classic scholarly table -- NO colored fills anywhere: double hairline
+% (2 x 0.4pt) above and below, maroon bold header text, \midrule under the
+% header. Use \rowcolors{...}{maincolor!5}{white} zebra ONLY for 6+ rows.
+% Columns: l/c with natural widths; switch a column to p{0.3\textwidth}
+% only when its cells must wrap.
+\begin{tabular}{l c c l}
+\specialrule{0.4pt}{0pt}{1.5pt}\specialrule{0.4pt}{0pt}{3pt}
+{\color{maincolor}\textbf{Metric}} & {\color{maincolor}\textbf{A}} &
+{\color{maincolor}\textbf{B}} & {\color{maincolor}\textbf{Conclusion}} \\
+\midrule
 Item 1 & 12 & 15 & Room for improvement \\
 Item 2 & 20 & 18 & Stable \\
-\bottomrule
+\specialrule{0.4pt}{3pt}{1.5pt}\specialrule{0.4pt}{0pt}{0pt}
 \end{tabular}
 \end{frame}
 
@@ -376,6 +397,15 @@ minimum height=0.95cm,text width=1.9cm,align=center}
 \column{0.52\textwidth}
 Left column for argumentation, definitions, and derivations.
 
+% List hierarchy demo: round maroon bullets, open-circle subitems.
+\begin{itemize}
+    \item Main point set with the round maroon bullet
+    \begin{itemize}
+        \item Supporting detail set with the open-circle subitem
+    \end{itemize}
+    \item Second main point, kept to a single line
+\end{itemize}
+
 \column{0.43\textwidth}
 Right column for action items, illustrations, or comparisons.
 \end{columns}
@@ -391,16 +421,27 @@ You MUST:
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
 \item Declare \texttt{\textbackslash section\{...\}} before the content frames of each
-      part; the theme auto-inserts a highlighted divider page at every
-      \texttt{\textbackslash section} -- NEVER build manual transition or outline frames
+      part; the theme auto-inserts a maroon divider page (roman numeral +
+      section name) at every \texttt{\textbackslash section} -- NEVER build manual
+      transition or outline frames
 \item PAGE BUDGET: 12--18 PDF pages total = title + outline + Q\&A (3 pages)
       + one auto divider per section + 2--4 content frames per section,
       for 3--5 sections
 \item Lay out every content page with one of the demonstrated example layouts;
       full-width (no columns) is REQUIRED for charts with more than 6 categories
+\item Keep frame titles short (roughly 35 characters or fewer) so they stay on
+      one line beside the small-caps section label
+\item Close every full-width chart with the demonstrated centered caption
+      line: italic \texttt{\textbackslash emph\{Figure\}} + em-dash + one short
+      sentence, centered, scriptsize (copy the example exactly)
+\item Set every table in the classic style shown: double hairline
+      (\texttt{\textbackslash specialrule}) above and below, maroon bold header text,
+      \texttt{\textbackslash midrule} under the header -- NEVER a colored header fill
 \item In every chart, each \texttt{\textbackslash addplot} coordinate must reuse exactly
       the labels declared in \texttt{symbolic x coords}, and keep
       \texttt{enlarge x limits} AFTER the axis-line keys
+\item Keep TikZ boxes square-cornered (no \texttt{rounded corners}) to match the
+      pack's classic look
 \item Keep information density high (no empty slides)
 \item Output FULL LaTeX code only
 \end{itemize}
