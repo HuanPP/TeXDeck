@@ -48,6 +48,23 @@ collegeBeamer 一脉虽同源，如今已是各自独立的版式家族：Academ
 
 ## 快速开始
 
+最省事的是 Docker——除了一个 API 密钥什么都不用装：
+
+```bash
+git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
+cat > .env <<'ENV'
+TEXDECK_LLM_API_KEY=你的密钥
+# 任何 OpenAI 兼容的视觉模型端点都可以；以下是默认值：
+TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+TEXDECK_LLM_MODEL=gemini-pro-latest
+ENV
+docker compose up --build
+```
+
+首次构建要下载 TeX Live，耐心一点；之后打开 http://localhost:8000 即可。生成的 deck 落在 `./artifacts`。镜像内置 Noto CJK，中文输出开箱就是思源字体。
+
+### 从源码运行
+
 你需要 Python 3.12+、Node 20+、带 XeLaTeX 的 TeX Live 安装（若要用单页编辑，还需要 `synctex`），以及一个支持视觉的模型 API 密钥。
 
 ```bash

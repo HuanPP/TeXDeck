@@ -48,6 +48,23 @@ Two smaller rules follow from the same instinct. Source pages go to the model as
 
 ## Getting started
 
+The quickest way is Docker — nothing to install but a key:
+
+```bash
+git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
+cat > .env <<'ENV'
+TEXDECK_LLM_API_KEY=your-key-here
+# Any OpenAI-compatible vision endpoint works; these are the defaults:
+TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+TEXDECK_LLM_MODEL=gemini-pro-latest
+ENV
+docker compose up --build
+```
+
+The first build downloads TeX Live, so it takes a while; after that, open http://localhost:8000. Finished decks land in `./artifacts`. The image bundles Noto CJK, so Chinese output uses Source Han faces out of the box.
+
+### Running from source
+
 You need Python 3.12+, Node 20+, a TeX Live install with XeLaTeX (`synctex` too, if you want per-slide editing), and an API key for a vision-capable model.
 
 ```bash

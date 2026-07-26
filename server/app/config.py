@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"
+    web_dist_dir: Path = REPO_ROOT / "web" / "dist"  # SPA build; served when present
 
     pdf_render_dpi: int = 150  # high-res page images sent to generation
     pdf_thumbnail_dpi: int = 60  # thumbnails for page selection

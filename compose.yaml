@@ -1,0 +1,11 @@
+services:
+  texdeck:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      TEXDECK_LLM_API_KEY: ${TEXDECK_LLM_API_KEY:?put TEXDECK_LLM_API_KEY in .env next to this file}
+      TEXDECK_LLM_BASE_URL: ${TEXDECK_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      TEXDECK_LLM_MODEL: ${TEXDECK_LLM_MODEL:-gemini-pro-latest}
+    volumes:
+      - ./artifacts:/data/artifacts

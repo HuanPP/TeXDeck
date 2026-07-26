@@ -1,0 +1,14 @@
+.git
+.venv
+artifacts
+docs
+node_modules
+web/node_modules
+web/dist
+server/.env
+server/.pytest_cache
+server/findeck_server.egg-info
+templates/bjtu
+ppt_bjtu_overleaf
+*.log
+.DS_Store

@@ -655,3 +655,18 @@ async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
         return
     async for state in tasks.watch(gen_id):
         await websocket.send_json(asdict(state))
+
+
+# ---- Optional static frontend (single-container / Docker deployments) ----
+# When a web build exists (web/dist, or TEXDECK_WEB_DIST_DIR), serve the SPA
+# from the same origin. Registered last, so /api, /ws and /health always win;
+# unknown paths fall back to index.html for client-side routes like /g/<id>.
+if settings.web_dist_dir.is_dir():
+    _web_root = settings.web_dist_dir.resolve()
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        candidate = (_web_root / path).resolve()
+        if path and candidate.is_file() and candidate.is_relative_to(_web_root):
+            return FileResponse(candidate)
+        return FileResponse(_web_root / "index.html")
