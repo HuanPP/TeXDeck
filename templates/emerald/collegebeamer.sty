@@ -76,14 +76,24 @@
     ]{EBGaramond12-Regular.otf}
 
 
-    % FandolKai: TeX Live / Overleaf 自带，按文件名加载，跨平台通用
+    % FandolKai: TeX Live / Overleaf 自带，按文件名加载，跨平台通用。
+    % AutoFakeSlant: the editorial theme sets subtitles/section names in
+    % \itshape; Kai has no italic cut, so fake-slant it instead of letting
+    % LaTeX warn and fall back. SmallCapsFont maps \scshape (kicker lines)
+    % to the upright cut — CJK has no small caps, silence the substitution.
     \setCJKmainfont{FandolKai-Regular}[
       Extension   = .otf,
-      AutoFakeBold = true
+      AutoFakeBold = true,
+      AutoFakeSlant = 0.15,
+      SmallCapsFont = FandolKai-Regular,
+      SmallCapsFeatures = {}
     ]
     \setCJKsansfont{FandolKai-Regular}[
       Extension   = .otf,
-      AutoFakeBold = true
+      AutoFakeBold = true,
+      AutoFakeSlant = 0.15,
+      SmallCapsFont = FandolKai-Regular,
+      SmallCapsFeatures = {}
     ]
 
     
@@ -116,12 +126,16 @@
 \geometry{paperwidth=16cm,paperheight=9cm}
 
 % logo
+% EDITORIAL identity: the brand mark appears on the title page only (masthead
+% position, top-left). Content pages carry no logo — the oversized serif
+% frametitle and whitespace are the chrome.
 \pgfdeclareimage[width=0.055\paperwidth]{colorlogo}{\colorlogoPath}
 \pgfdeclareimage[width=0.055\paperwidth]{translogo}{\translogoPath}
+\pgfdeclareimage[width=0.045\paperwidth]{titlelogo}{\colorlogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-% logo top-right so frame titles can share the body text's left edge
-\setbeamertemplate{headline}{\vspace{2mm}\hfill\pgfuseimage{\@makelogo}\hspace{0.04\paperwidth}}
+% empty headline: frametitle template below owns the top whitespace
+\setbeamertemplate{headline}{}
 
 % one left edge for frame title and body text (see frametitle leftskip below)
 \setbeamersize{text margin left=10.5mm, text margin right=10.5mm}
@@ -132,6 +146,8 @@
 % (name kept for backwards compatibility with the b-command family)
 \definecolor{airforceblue}{RGB}{176, 141, 74}
 \definecolor{morelightgray}{rgb}{0.9, 0.9, 0.9}
+% warm near-black ink for display typography (editorial identity)
+\definecolor{inkblack}{RGB}{33, 32, 28}
 
 \newcommand{\themecolor}[1]{
     \ifstrequal{#1}{colorbg}{
@@ -147,22 +163,20 @@
 \themecolor{white} % default: white theme
 % P.S. Beamer colors should be set in the preamble. It often works fine in the document itself, but NOT for normal text foreground. Thus \themecolor should only be called from the preamble
 
-\setbeamercolor{title}{fg=maincolor}
+\setbeamercolor{title}{fg=inkblack}
 \setbeamercolor{alerted text}{fg=maincolor}
 \setbeamercolor{author}{fg=black}
 \setbeamercolor{date}{fg=black}
+\setbeamercolor{frametitle}{fg=inkblack}
+\setbeamercolor{framesubtitle}{fg=maincolor}
 
 % font
 % \renewcommand{\familydefault}{\sfdefault}  % sans-serif
 \usefonttheme{serif}
 
+% display-size title: oversized EB Garamond bold, book-jacket scale
 \AtEndOfPackage{%
-  \ifcollegebeamer@zh
-    \setbeamerfont{title}{series=\bfseries, size=\huge}
-  \else
-    \setbeamerfont{title}{series=\scshape, size=\huge}
-
-  \fi
+  \setbeamerfont{title}{series=\bfseries, size={\fontsize{30}{36}\selectfont}}
 }
 
 % lining tabular figures for data: EB Garamond defaults to oldstyle proportional
@@ -170,13 +184,18 @@
 % tikzpicture tick labels, tabulars and the outline numbers via \datafont.
 \newcommand{\datafont}{\addfontfeature{Numbers={Lining,Monospaced}}}
 
-\setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
+\setbeamerfont{subtitle}{series=\mdseries, shape=\itshape, size=\large}
 \setbeamerfont{author}{size=\normalsize}
 \setbeamerfont{date}{size=\normalsize}
 
-\setbeamerfont{frametitle}{series=\bfseries}
-\setbeamerfont{framesubtitle}{series=\mdseries}
+% oversized serif frametitle in near-black ink; section line in emerald italic
+\setbeamerfont{frametitle}{series=\bfseries, size={\fontsize{17.5}{21}\selectfont}}
+\setbeamerfont{framesubtitle}{series=\mdseries, shape=\itshape, size=\small}
 \setbeamerfont{footline}{size=\scriptsize}
+
+% letterspaced small-caps helper for kickers / bylines (EB Garamond has real
+% smcp); lining figures so digits sit flush with the caps
+\newcommand{\kickerfont}{\scshape\addfontfeature{LetterSpace=14, Numbers=Lining}}
 
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
@@ -184,7 +203,7 @@
 % footline: quiet page indicator bottom-right (title/TOC/QA pages suppress it)
 \newcommand{\@footlinepayoff}{}  % optional extra footline text, empty by default
 \setbeamertemplate{footline}{
-    \hfill{\usebeamerfont{footline}\color{maincolor!60}\@footlinepayoff\insertframenumber\,/\,\inserttotalframenumber}\hspace{6mm}\vskip3mm
+    \hfill{\usebeamerfont{footline}\datafont\color{maincolor!60}\@footlinepayoff\insertframenumber\,/\,\inserttotalframenumber}\hspace{6mm}\vskip3mm
 }
 
 \newcommand{\footlinecolor}[1]{
@@ -197,20 +216,23 @@
 }
 \footlinecolor{} % default: transparent footline background
 
-% block
-\setbeamertemplate{blocks}[rounded]
-\setbeamerfont{block title}{series=\centering, size=\small}
+% block: quiet editorial panel — small-caps emerald title over a faint tint,
+% squared corners, no heavy colored bar
+\setbeamertemplate{blocks}[default]
+\setbeamerfont{block title}{shape=\scshape, size=\small}
 \setbeamerfont{block body}{size=\scriptsize}
-\setbeamercolor{block title}{fg=white, bg=maincolor!85}
-\setbeamercolor{block body}{fg=darkgray, bg=maincolor!8}
+\setbeamercolor{block title}{fg=maincolor, bg=maincolor!12}
+\setbeamercolor{block body}{fg=darkgray, bg=maincolor!4}
 
-% bullets
-\setbeamertemplate{itemize item}{\textbullet}
-\setbeamertemplate{itemize subitem}{\textemdash}
-\setbeamertemplate{itemize subsubitem}{\ensuremath{\circ}}
+% lists: en-dash markers in emerald, loose editorial leading
+\setbeamertemplate{itemize item}{\color{maincolor}\textendash}
+\setbeamertemplate{itemize subitem}{\color{maincolor!65}\textendash}
+\setbeamertemplate{itemize subsubitem}{\color{maincolor!65}\ensuremath{\circ}}
+\setbeamertemplate{enumerate item}{{\color{maincolor}\datafont\insertenumlabel.}}
+\setbeamertemplate{itemize/enumerate body begin}{\linespread{1.15}\selectfont}
 
-% table of cotents
-\setbeamertemplate{section in toc}{$\blacktriangleright$~\inserttocsection}  % section name format
+% table of cotents (@ is a letter inside a package, so \two@digits is safe here)
+\setbeamertemplate{section in toc}{{\color{maincolor}\datafont\two@digits{\inserttocsectionnumber}}\;\;\inserttocsection}  % section name format
 \setbeamertemplate{subsection in toc}{}  % don't present subsection
 
 % code bolck setting
@@ -248,61 +270,104 @@
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
 % presents subtitle on each frame; guarded so nothing (not even a stray "0")
-% prints before the first \section is defined
+% prints before the first \section is defined.
+% Editorial form: "01 · Section Name" with lining figures.
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 \thesection \, \secname\fi}}
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 {\datafont\two@digits{\value{section}}}\;\textperiodcentered\;\secname\fi}}
 \makeatother
 
 % avoid numbering of frames that are breaked into multiply slides
 \setbeamertemplate{frametitle continuation}{}
 
-% section page with the current section highlighted
-\AtBeginSection[]
-{
+% --- section transition page (EDITORIAL identity) ---
+% Full-bleed emerald page: ghost section numeral (huge, 15% white) on the
+% right, letterspaced gold kicker + white display-italic section name low-left.
+\makeatletter
+\newcommand{\sectionframe}{%
     \begingroup
-    \setbeamertemplate{footline}{}
-    \themecolor{colorbg}
-    \begin{frame}{\tocStr}
-        \tableofcontents[currentsection]
+    \setbeamertemplate{footline}{}%
+    \begin{frame}[plain]
+        \begin{tikzpicture}[remember picture, overlay]
+            \fill[maincolor] (current page.south west) rectangle (current page.north east);
+            \node[anchor=east, inner sep=0pt]
+                at ([xshift=-9mm, yshift=4mm]current page.east)
+                {\color{white!15!maincolor}\fontsize{140}{140}\selectfont\itshape\datafont\two@digits{\value{section}}};
+            \node[anchor=south west, inner sep=0pt, text width=0.72\paperwidth, align=flush left]
+                at ([xshift=10.5mm, yshift=13mm]current page.south west) {%
+                    {\footnotesize\kickerfont\color{airforceblue}Part \two@digits{\value{section}}\par}%
+                    \vskip7pt
+                    {\color{white!60!maincolor}\rule{60pt}{0.8pt}\par}%
+                    \vskip11pt
+                    {\fontsize{25}{30}\selectfont\itshape\color{white}\insertsection\par}%
+                };
+        \end{tikzpicture}%
     \end{frame}
     \endgroup
 }
+\makeatother
 
-% subsection title page
+% default section behaviour when used standalone (the TeXDeck prompt template
+% disables this and calls \sectionframe explicitly after each \section)
+\AtBeginSection[]
+{
+    \sectionframe
+}
+
+% subsection title page: quiet paper page, gold kicker + emerald italic name
 \AtBeginSubsection[]
 {
-    \begin{frame}{\,}{\thesection \, \secname}
-        \fontfamily{ptm}\selectfont
-        \centering\textsl{\textbf{\textcolor{maincolor}{
-            \large Section \thesection.\thesubsection
-            \vskip15pt
-            \LARGE \subsecname
-        }}}
+    \begin{frame}[plain]
+        \vspace*{\fill}
+        {\footnotesize\kickerfont\color{airforceblue}\strsubsec\par}
+        \vskip6pt
+        {\color{maincolor}\rule{60pt}{0.8pt}\par}
+        \vskip10pt
+        {\fontsize{20}{25}\selectfont\itshape\color{maincolor}\subsecname\par}
+        \vspace*{\fill}\vspace*{\fill}
     \end{frame}
 }
 
 % --- page elements ---
-% frame title & subtitle layout
+% frame title & subtitle layout: oversized serif over emerald italic section
+% line, generous top whitespace, NO rule — whitespace is the chrome.
 \setbeamertemplate{frametitle}{
-    \vspace*{-3.5ex}
+    \vspace*{6.5mm}
     % leftskip=0: the box already starts at the 10.5mm text margin, so the
     % frame title shares one left edge with the body text
     \begin{beamercolorbox}[leftskip=0mm]{frametitle}
-    \usebeamerfont{frametitle}\insertframetitle\\
-    \usebeamerfont{framesubtitle}\insertframesubtitle
+    \usebeamerfont{frametitle}\insertframetitle\\[1.5pt]
+    {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\insertframesubtitle}
     \end{beamercolorbox}
+    \vspace*{1.5mm}
 }
 
-% title page
+% title page: asymmetric editorial composition anchored LOW-LEFT.
+% Thin emerald rule above a display-size title (max 0.62\paperwidth wide),
+% emerald italic subtitle, letterspaced small-caps byline. Empty
+% subtitle/author/institute rows vanish entirely (wave-1 guards preserved).
+% Brand mark sits alone in the masthead position (top-left).
+\makeatletter
 \setbeamertemplate{title page}{
-    \hspace{-12mm}  % pull back the box in an inelegant way - but it works!
-    \begin{beamercolorbox}[wd=0.9\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
-    \end{beamercolorbox}
+    \begin{tikzpicture}[remember picture, overlay]
+        \node[anchor=north west, inner sep=0pt]
+            at ([xshift=10.5mm, yshift=-7mm]current page.north west)
+            {\pgfuseimage{titlelogo}};
+        \node[anchor=south west, inner sep=0pt, text width=0.62\paperwidth, align=flush left]
+            at ([xshift=10.5mm, yshift=11mm]current page.south west) {%
+                {\color{maincolor}\rule{60pt}{1.2pt}\par}%
+                \vskip10pt
+                {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle\par}%
+                \ifdefempty{\insertsubtitle}{}{%
+                    \vskip8pt{\usebeamerfont{subtitle}\color{maincolor}\insertsubtitle\par}}%
+                \vskip13pt
+                {\footnotesize\kickerfont\color{inkblack!60}%
+                    \ifdefempty{\beamer@shortauthor}{}{\insertauthor\ \ \textperiodcentered\ \ }%
+                    \ifdefempty{\beamer@shortinstitute}{}{\insertinstitute\ \ \textperiodcentered\ \ }%
+                    \insertdate\par}%
+            };
+    \end{tikzpicture}%
 }
+\makeatother
 
 \renewcommand{\maketitle}{
     \begingroup
@@ -316,21 +381,26 @@
     \endgroup
 }
 
-% Q&A page
+% Q&A page: full-bleed emerald with a ghost ampersand, low-left thank-you
+% block — mirrors the title page composition to close the deck.
 \newcommand{\QApage}{
     \begingroup
         \setbeamertemplate{footline}{}
-        \themecolor{colorbg}
-        
-        \begin{frame}{}
-            \centering
-            \begin{minipage}{\textwidth}
-                \usebeamercolor[fg]{normal text}
-                \centering
-                {\Huge Q\,\&\,A\par}
-                \vskip10pt
-                {\Large \qaStr\par}
-            \end{minipage}
+        \begin{frame}[plain]
+            \begin{tikzpicture}[remember picture, overlay]
+                \fill[maincolor] (current page.south west) rectangle (current page.north east);
+                \node[anchor=east, inner sep=0pt]
+                    at ([xshift=-18mm, yshift=6mm]current page.east)
+                    {\color{white!15!maincolor}\fontsize{170}{170}\selectfont\itshape\&};
+                \node[anchor=south west, inner sep=0pt, text width=0.72\paperwidth, align=flush left]
+                    at ([xshift=10.5mm, yshift=13mm]current page.south west) {%
+                        {\color{white!60!maincolor}\rule{60pt}{0.8pt}\par}%
+                        \vskip11pt
+                        {\fontsize{25}{30}\selectfont\color{white}Q\,\&\,A\par}%
+                        \vskip9pt
+                        {\normalsize\color{white!80!maincolor}\qaStr\par}%
+                    };
+            \end{tikzpicture}%
         \end{frame}
     \endgroup
 }

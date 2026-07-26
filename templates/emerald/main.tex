@@ -45,26 +45,13 @@
 % -----------------------------------------------------------------------------
 % 1.1 Title page
 % -----------------------------------------------------------------------------
-% The theme prints "section number + section name" under every frame title
-% automatically (guarded inside collegebeamer.sty, so nothing shows before the
-% first \section). No framesubtitle overrides are needed here.
-
-% Title page: empty \subtitle{}/\author{} rows are skipped entirely, so an
-% unfilled field never leaves a blank gap between title and date.
-\makeatletter
-\setbeamertemplate{title page}{
-    \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.75\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle\par}
-        \vskip4pt\textcolor{maincolor}{\rule{28mm}{1.5pt}}\par
-        \ifdefempty{\insertsubtitle}{}{%
-            \vskip6pt{\usebeamerfont{subtitle}\insertsubtitle\par}}
-        \ifdefempty{\beamer@shortauthor}{}{%
-            \vskip6pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}}
-        \vskip6pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
-    \end{beamercolorbox}
-}
-\makeatother
+% The theme prints "01 · Section Name" under every frame title automatically
+% (guarded inside collegebeamer.sty, so nothing shows before the first
+% \section). No framesubtitle overrides are needed here.
+%
+% The editorial title page (low-left display title, emerald rule, letterspaced
+% byline) lives in collegebeamer.sty. Empty \subtitle{}/\author{}/\institute{}
+% rows are skipped entirely, so an unfilled field never leaves a blank gap.
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -85,21 +72,22 @@
 
 % =============================================================================
 % FRAME 2: MANUAL TABLE OF CONTENTS
+% Editorial styling: emerald lining numbers, generous leading.
 % =============================================================================
 \begin{frame}{Outline}
 \large\datafont
 \renewcommand{\baselinestretch}{1.8}\selectfont
 % \makebox keeps a fixed number column so all titles share one left edge
 
-\makebox[2.4em][l]{01} Title of Part One
+\makebox[2.4em][l]{\textcolor{maincolor}{01}} Title of Part One
 
-\makebox[2.4em][l]{02} Title of Part Two
+\makebox[2.4em][l]{\textcolor{maincolor}{02}} Title of Part Two
 
-\makebox[2.4em][l]{03} Title of Part Three
+\makebox[2.4em][l]{\textcolor{maincolor}{03}} Title of Part Three
 
-\makebox[2.4em][l]{04} Title of Part Four
+\makebox[2.4em][l]{\textcolor{maincolor}{04}} Title of Part Four
 
-\makebox[2.4em][l]{05} Summary \& Q\&A
+\makebox[2.4em][l]{\textcolor{maincolor}{05}} Summary \& Q\&A
 \end{frame}
 
 % =============================================================================
@@ -111,22 +99,11 @@
 
 % =============================================================================
 % FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
+% LLM MUST insert \sectionframe right after EACH \section{...} line.
+% It renders the full-bleed emerald transition page (ghost numeral + white
+% italic section name) automatically from the current section.
 % =============================================================================
-\begin{frame}{Outline}
-\large\datafont
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{maincolor}{\makebox[2.4em][l]{01} Title of Part One}}
-
-\makebox[2.4em][l]{02} Title of Part Two
-
-\makebox[2.4em][l]{03} Title of Part Three
-
-\makebox[2.4em][l]{04} Title of Part Four
-
-\makebox[2.4em][l]{05} Summary \& Q\&A
-\end{frame}
+\sectionframe
 
 % =============================================================================
 % CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
@@ -165,12 +142,13 @@ State the central message of this slide in one sentence.
     ylabel={Sample index},
     tick label style={font=\tiny\datafont},
     label style={font=\scriptsize},
-    axis line style={maincolor!50},
-    tick style={maincolor!50},
+    % hairline-weight axes: part of the editorial identity
+    axis line style={line width=0.3pt, maincolor!45},
+    tick style={line width=0.3pt, maincolor!45},
     grid=major,
-    grid style={maincolor!12},
+    grid style={line width=0.25pt, maincolor!12},
 ]
-\addplot[fill=maincolor!40, draw=maincolor] coordinates {
+\addplot[fill=maincolor!45, draw=maincolor] coordinates {
     (Q1,42) (Q2,55) (Q3,61) (Q4,78)
 };
 \end{axis}
@@ -207,9 +185,10 @@ Keep the text concise so the wide chart remains readable.
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
     yticklabel style={font=\tiny\datafont},
     grid=major,
-    grid style={maincolor!12},
-    axis line style={maincolor!50},
-    tick style={maincolor!50},
+    grid style={line width=0.25pt, maincolor!12},
+    % hairline-weight axes: part of the editorial identity
+    axis line style={line width=0.3pt, maincolor!45},
+    tick style={line width=0.3pt, maincolor!45},
 ]
 \addplot[
     thick,
@@ -220,12 +199,13 @@ Keep the text concise so the wide chart remains readable.
     (Jan,2040) (Feb,2085) (Mar,2160) (Apr,2330) (May,2345) (Jun,2320)
     (Jul,2420) (Aug,2505) (Sep,2630) (Oct,2740) (Nov,2655) (Dec,2620)
 };
+% second series ALWAYS takes the muted gold accent (airforceblue), never a
+% second shade of emerald
 \addplot[
-    thick,
-    dashed,
-    maincolor!55,
+    semithick,
+    airforceblue,
     mark=square*,
-    mark options={fill=white, draw=maincolor!55, scale=0.55},
+    mark options={fill=white, draw=airforceblue, scale=0.55},
 ] coordinates {
     (Jan,2010) (Feb,2050) (Mar,2120) (Apr,2280) (May,2300) (Jun,2290)
     (Jul,2380) (Aug,2460) (Sep,2580) (Oct,2700) (Nov,2620) (Dec,2590)
@@ -307,17 +287,16 @@ Keep the text concise so the wide chart remains readable.
 \begin{frame}{[STYLE REF] Table Style Example}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+% EDITORIAL tables: booktabs rules only, NO zebra striping / cell fills.
+% Header row in small caps (\textsc), generous row height, lining figures.
+\renewcommand{\arraystretch}{1.3}
 \footnotesize
 \datafont % lining tabular figures: numerals align and sit on the baseline
-% \multirow only in the (uncolored) header rows -- never inside zebra-striped
-% body rows, where the row color of the next row would paint over the text.
-\rowcolors{3}{maincolor!10}{white}
 \begin{tabular}{l c c l}
 \toprule
-\multirow{2}{*}{Metric} & \multicolumn{2}{c}{Phase} & \multirow{2}{*}{Conclusion} \\
+\multirow{2}{*}{\textsc{Metric}} & \multicolumn{2}{c}{\textsc{Phase}} & \multirow{2}{*}{\textsc{Conclusion}} \\
 \cmidrule(lr){2-3}
- & A & B & \\
+ & \textsc{a} & \textsc{b} & \\
 \midrule
 Throughput (req/s) & 120 & 158 & Room for improvement \\
 Latency (ms) & 340 & 210 & \textcolor{maincolor}{\ding{51}} improved \\
@@ -389,19 +368,25 @@ minimum height=0.95cm,text width=1.9cm,align=center}
 % AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{AI GENERATION INSTRUCTIONS}
+\footnotesize
 You MUST:
 \begin{itemize}
-\item Delete all [STYLE REF] frames and this instruction frame
-\item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
+\item Delete all [STYLE REF] frames and this instruction frame; replace all
+      placeholders with real content
+\item Define \texttt{\textbackslash section\{...\}} before the first frame of its
+      section and put \texttt{\textbackslash sectionframe} on the next line --
+      it draws the full-bleed emerald transition page automatically
 \item Use columns for side-by-side text+figure pages; switch to the full-width
       Example-2 layout whenever a chart has more than about 6 categories
+\item Charts: hairline axes as in the examples; a second data series ALWAYS
+      uses the muted gold accent (\texttt{airforceblue}), never a second green
+\item Tables: booktabs rules only, no cell fills; header cells in
+      \texttt{\textbackslash textsc\{...\}} small caps; use
+      \texttt{\textbackslash datafont} for numerals in charts and tables
 \item Page budget: 12--18 slides total, of which AT MOST 10 are content slides
       (title page, TOC, section transitions and the Q\&A page are not counted)
 \item Keep information density high (no empty slides); fill both columns of any
       two-column page to comparable depth
-\item Use \texttt{\textbackslash datafont} for numerals in charts and tables
 \item Output FULL LaTeX code only
 \end{itemize}
 \end{frame}
