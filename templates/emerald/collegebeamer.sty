@@ -81,27 +81,44 @@
     % \itshape; Kai has no italic cut, so fake-slant it instead of letting
     % LaTeX warn and fall back. SmallCapsFont maps \scshape (kicker lines)
     % to the upright cut — CJK has no small caps, silence the substitution.
-    \setCJKmainfont{FandolKai-Regular}[
-      Extension   = .otf,
-      AutoFakeBold = true,
-      AutoFakeSlant = 0.15,
-      SmallCapsFont = FandolKai-Regular,
-      SmallCapsFeatures = {}
-    ]
-    \setCJKsansfont{FandolKai-Regular}[
-      Extension   = .otf,
-      AutoFakeBold = true,
-      AutoFakeSlant = 0.15,
-      SmallCapsFont = FandolKai-Regular,
-      SmallCapsFeatures = {}
-    ]
+    % Prefer Noto/Source Han when installed (Docker ships fonts-noto-cjk);
+    % fall back to Fandol Kai so a plain TeX Live still compiles.
+    \IfFontExistsTF{Noto Serif CJK SC}{%
+      \setCJKmainfont{Noto Serif CJK SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15,
+        SmallCapsFont = {Noto Serif CJK SC}, SmallCapsFeatures = {}]%
+    }{\IfFontExistsTF{Source Han Serif SC}{%
+      \setCJKmainfont{Source Han Serif SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15,
+        SmallCapsFont = {Source Han Serif SC}, SmallCapsFeatures = {}]%
+    }{%
+      \setCJKmainfont{FandolKai-Regular}[
+        Extension   = .otf,
+        AutoFakeBold = true,
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = FandolKai-Regular,
+        SmallCapsFeatures = {}
+      ]
+    }}
+    \IfFontExistsTF{Noto Sans CJK SC}{%
+      \setCJKsansfont{Noto Sans CJK SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15,
+        SmallCapsFont = {Noto Sans CJK SC}, SmallCapsFeatures = {}]%
+    }{\IfFontExistsTF{Source Han Sans SC}{%
+      \setCJKsansfont{Source Han Sans SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15,
+        SmallCapsFont = {Source Han Sans SC}, SmallCapsFeatures = {}]%
+    }{%
+      \setCJKsansfont{FandolKai-Regular}[
+        Extension   = .otf,
+        AutoFakeBold = true,
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = FandolKai-Regular,
+        SmallCapsFeatures = {}
+      ]
+    }}
 
     
-    \renewcommand{\tocStr}{目录}
     \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
     \ifxetex
     \else
-      \PackageError{collegeBeamer}{请使用 XeLaTeX 编译此模板！}{}
+      \PackageError{collegeBeamer}{Compile this template with XeLaTeX}{}
     \fi
   }
 }

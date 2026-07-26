@@ -39,16 +39,30 @@
 % Keep curly quotes Latin: xeCJK otherwise treats them as CJK punctuation and
 % pads them to full width in English text (dollar's -> dollar ' s).
 \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
-\setCJKmainfont{FandolSong-Regular}[
-    Extension = .otf,
-    BoldFont = FandolSong-Bold.otf,
-    AutoFakeSlant = 0.15,
-]
-\setCJKsansfont{FandolHei-Regular}[
-    Extension = .otf,
-    BoldFont = FandolHei-Bold.otf,
-    AutoFakeSlant = 0.15,
-]
+% Prefer Noto/Source Han faces when installed (the Docker image ships
+% fonts-noto-cjk); fall back to TeX Live's Fandol so plain installs compile.
+\IfFontExistsTF{Noto Serif CJK SC}{%
+    \setCJKmainfont{Noto Serif CJK SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{\IfFontExistsTF{Source Han Serif SC}{%
+    \setCJKmainfont{Source Han Serif SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{%
+    \setCJKmainfont{FandolSong-Regular}[
+        Extension = .otf,
+        BoldFont = FandolSong-Bold.otf,
+        AutoFakeSlant = 0.15,
+    ]%
+}}
+\IfFontExistsTF{Noto Sans CJK SC}{%
+    \setCJKsansfont{Noto Sans CJK SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{\IfFontExistsTF{Source Han Sans SC}{%
+    \setCJKsansfont{Source Han Sans SC}[BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{%
+    \setCJKsansfont{FandolHei-Regular}[
+        Extension = .otf,
+        BoldFont = FandolHei-Bold.otf,
+        AutoFakeSlant = 0.15,
+    ]%
+}}
 
 \usepackage{tikz}
 \usetikzlibrary{positioning}

@@ -56,29 +56,60 @@
 \let\mathbf\relax % avoid a redefinition clash between bm/beamer and newpxmath
 \usepackage{newpxmath}
 
-% CJK: route Chinese characters through TeX Live's Fandol faces so zh
+% CJK: route Chinese characters through serif/sans CJK faces so zh
 % titles/authors/body never drop glyphs. Latin text keeps Pagella untouched --
-% xeCJK only switches fonts for CJK codepoints. FandolSong (real Bold cut)
-% matches the book-plate serif body; FandolHei covers bold-sans contexts.
-% AutoFakeSlant stands in for italic zh (Song has no italic cut); SmallCapsFont
+% xeCJK only switches fonts for CJK codepoints. Prefer the Noto/Source Han
+% faces (far better outlines and spacing) when installed -- the Docker image
+% ships fonts-noto-cjk -- and fall back to TeX Live's Fandol faces so a plain
+% TeX Live still compiles. Serif contexts take Song/Serif (real Bold cut) to
+% match the book-plate serif body; Hei/Sans covers bold-sans contexts.
+% AutoFakeSlant stands in for italic zh (no CJK italic cuts); SmallCapsFont
 % maps \scshape (the letterspaced title/institute lines) to the upright cut --
 % CJK has no small caps, so silence the substitution instead of warning.
 \usepackage{xeCJK}
 % Keep curly quotes Latin: xeCJK otherwise treats them as CJK punctuation and
 % pads them to full width in English text (dollar's -> dollar ' s).
 \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
-\setCJKmainfont{FandolSong-Regular}[
-    Extension = .otf,
-    BoldFont = FandolSong-Bold.otf,
-    AutoFakeSlant = 0.15,
-    SmallCapsFont = FandolSong-Regular,
-    SmallCapsFeatures = {},
-]
-\setCJKsansfont{FandolHei-Regular}[
-    Extension = .otf,
-    BoldFont = FandolHei-Bold.otf,
-    AutoFakeSlant = 0.15,
-]
+\IfFontExistsTF{Noto Serif CJK SC}{%
+    \setCJKmainfont{Noto Serif CJK SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = {Noto Serif CJK SC},
+        SmallCapsFeatures = {},
+    ]%
+}{\IfFontExistsTF{Source Han Serif SC}{%
+    \setCJKmainfont{Source Han Serif SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = {Source Han Serif SC},
+        SmallCapsFeatures = {},
+    ]%
+}{%
+    \setCJKmainfont{FandolSong-Regular}[
+        Extension = .otf,
+        BoldFont = FandolSong-Bold.otf,
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = FandolSong-Regular,
+        SmallCapsFeatures = {},
+    ]%
+}}
+\IfFontExistsTF{Noto Sans CJK SC}{%
+    \setCJKsansfont{Noto Sans CJK SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+    ]%
+}{\IfFontExistsTF{Source Han Sans SC}{%
+    \setCJKsansfont{Source Han Sans SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+    ]%
+}{%
+    \setCJKsansfont{FandolHei-Regular}[
+        Extension = .otf,
+        BoldFont = FandolHei-Bold.otf,
+        AutoFakeSlant = 0.15,
+    ]%
+}}
 
 % NOTE: the theme auto-inserts a full-bleed maroon section divider page
 % (roman numeral over a short rule + section name in small caps) at every

@@ -49,23 +49,54 @@
 \let\mathbf\relax % avoid a redefinition clash between bm/beamer and newpxmath
 \usepackage{newpxmath}
 
-% CJK: route Chinese characters through TeX Live's Fandol faces so zh
+% CJK: route Chinese characters through serif/sans CJK faces so zh
 % titles/authors/body never drop glyphs; Latin text keeps Pagella untouched.
+% Prefer the Noto/Source Han faces (far better outlines) when installed --
+% the Docker image ships fonts-noto-cjk -- and fall back to TeX Live's
+% Fandol faces so a plain TeX Live still compiles.
 \usepackage{xeCJK}
 % Keep curly quotes Latin: xeCJK otherwise pads them to full width in English.
 \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
-\setCJKmainfont{FandolSong-Regular}[
-    Extension = .otf,
-    BoldFont = FandolSong-Bold.otf,
-    AutoFakeSlant = 0.15,
-    SmallCapsFont = FandolSong-Regular,
-    SmallCapsFeatures = {},
-]
-\setCJKsansfont{FandolHei-Regular}[
-    Extension = .otf,
-    BoldFont = FandolHei-Bold.otf,
-    AutoFakeSlant = 0.15,
-]
+\IfFontExistsTF{Noto Serif CJK SC}{%
+    \setCJKmainfont{Noto Serif CJK SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = {Noto Serif CJK SC},
+        SmallCapsFeatures = {},
+    ]%
+}{\IfFontExistsTF{Source Han Serif SC}{%
+    \setCJKmainfont{Source Han Serif SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = {Source Han Serif SC},
+        SmallCapsFeatures = {},
+    ]%
+}{%
+    \setCJKmainfont{FandolSong-Regular}[
+        Extension = .otf,
+        BoldFont = FandolSong-Bold.otf,
+        AutoFakeSlant = 0.15,
+        SmallCapsFont = FandolSong-Regular,
+        SmallCapsFeatures = {},
+    ]%
+}}
+\IfFontExistsTF{Noto Sans CJK SC}{%
+    \setCJKsansfont{Noto Sans CJK SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+    ]%
+}{\IfFontExistsTF{Source Han Sans SC}{%
+    \setCJKsansfont{Source Han Sans SC}[
+        BoldFont = {* Bold},
+        AutoFakeSlant = 0.15,
+    ]%
+}{%
+    \setCJKsansfont{FandolHei-Regular}[
+        Extension = .otf,
+        BoldFont = FandolHei-Bold.otf,
+        AutoFakeSlant = 0.15,
+    ]%
+}}
 
 % Disable collegeBeamer auto TOC insertion
 \AtBeginSection[]{}
