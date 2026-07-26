@@ -8,10 +8,13 @@
 % 1. DO NOT change anything in the Preamble.
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
-% 4. You MUST preserve the collegeBeamer theme and visual style.
+% 4. You MUST preserve the collegeBeamer theme and visual style: this deck is
+%    SWISS / INTERNATIONAL TYPOGRAPHIC — bold sans (TeX Gyre Heros), stark
+%    near-black on white, flush-left, square geometry. NEVER introduce colors:
+%    everything is maincolor (near-black) plus gray tints.
 % 5a. Keep each slide's body text to at most 8--10 lines.
 % 5b. Total deck length: 12--16 slides INCLUDING the title, outline, section
-%     transition and Q&A pages; use 3--4 sections for short source documents.
+%     divider and Q&A pages; use 3--4 sections for short source documents.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): collegebeamer,
@@ -23,6 +26,9 @@
 %    \footnotesize; never let a table exceed \textwidth.
 % 10. Write ALL slide text in the language of the source document, and set \date
 %     in that language too (\today produces an English date).
+% 11. Charts are MONOCHROME: bars filled solid maincolor, secondary series in
+%     black!45 dashed; no axis box (axis line style={draw=none}), horizontal
+%     gridlines only. Copy the axis options from the examples verbatim.
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -43,36 +49,19 @@
 \usepackage{multirow}
 
 % --- Font Setup ---
-% English/Numbers -> Times New Roman
-% Disable collegeBeamer auto TOC insertion
+% Latin -> TeX Gyre Heros (Helvetica clone), CJK -> FandolHei; both set by the
+% theme. The deck is sans-first: do not switch families.
+% Disable collegeBeamer auto TOC insertion (section dividers are hand-built)
 \AtBeginSection[]{}
 
 % -----------------------------------------------------------------------------
 % 1.1 Title page (DO NOT CHANGE)
 % -----------------------------------------------------------------------------
-% The theme already guards the per-slide section subtitle: frames placed before
-% the first \section print no section number at all (no stray "0").
-%
-% Title page: accent bar + title at the optical center; subtitle/author lines
-% appear only when those fields are non-empty, so the page stays balanced even
-% with the default empty metadata.
-\makeatletter
-\setbeamertemplate{title page}{
-    \vskip0.30\paperheight
-    \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.85\textwidth, sep=10pt, leftskip=8mm]{title}
-        \textcolor{maincolor}{\rule{34pt}{2.5pt}}\\[12pt]
-        {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle}\\
-        \ifx\insertsubtitle\@empty\else
-            \vskip6pt{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}\\
-        \fi
-        \ifx\beamer@shortauthor\@empty\else
-            \vskip6pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
-        \fi
-        \vskip8pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
-    \end{beamercolorbox}
-}
-\makeatother
+% The theme provides the Swiss title page: thick 12x4mm near-black bar, huge
+% bold flush-left title anchored top-left, tight metadata stack, small date
+% pinned bottom-left. Subtitle/author lines vanish when their fields are empty,
+% so the page stays balanced even with the default empty metadata.
+% Frames placed before the first \section print no section eyebrow (no stray "0").
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -93,47 +82,45 @@
 
 % =============================================================================
 % FRAME 2: MANUAL TABLE OF CONTENTS
+% Swiss list: zero-padded bold numerals, generous leading, flush left.
 % =============================================================================
 \begin{frame}{Outline}
+\vspace{1mm}
 \large
 \renewcommand{\baselinestretch}{1.8}\selectfont
 
-01 \quad Title of Part One
+\textbf{01}\hspace{1.2em}Title of Part One
 
-02 \quad Title of Part Two
+\textbf{02}\hspace{1.2em}Title of Part Two
 
-03 \quad Title of Part Three
+\textbf{03}\hspace{1.2em}Title of Part Three
 
-04 \quad Title of Part Four
+\textbf{04}\hspace{1.2em}Title of Part Four
 
-05 \quad Summary \& Q\&A
+\textbf{05}\hspace{1.2em}Summary \& Q\&A
 \end{frame}
 
 % =============================================================================
 % SECTION 1 (EXAMPLE)
 % IMPORTANT: define \section{...} before any content frames of that section
-% so the subtitle line is complete (no "0").
+% so the eyebrow line under each frametitle is complete (no "0").
 % =============================================================================
 \section{Title of Part One}
 
 % =============================================================================
-% FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section.
-% Current section: bold + maincolor. ALL other entries: \textcolor{reportmuted}.
+% FRAME 3: SECTION DIVIDER (EXAMPLE: SECTION 1)
+% LLM MUST generate one such page right after EACH \section{...}.
+% White page, giant ghost numeral in 8% black, thick near-black bar, bold
+% section name. Update the numeral (01 -> 02, 03 ...) to the section number.
+% NO full-bleed color pages anywhere in this deck.
 % =============================================================================
-\begin{frame}{Outline}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
-
-\textcolor{reportmuted}{02 \quad Title of Part Two}
-
-\textcolor{reportmuted}{03 \quad Title of Part Three}
-
-\textcolor{reportmuted}{04 \quad Title of Part Four}
-
-\textcolor{reportmuted}{05 \quad Summary \& Q\&A}
+\begin{frame}[plain,t]
+\vspace*{0.18\paperheight}
+{\fontsize{100}{100}\selectfont\bfseries\textcolor{black!8}{01}\par}
+\vspace{-12mm}
+\textcolor{maincolor}{\rule{12mm}{4mm}}\par
+\vspace{8pt}
+{\fontsize{20}{24}\selectfont\bfseries\textcolor{maincolor}{Title of Part One}\par}
 \end{frame}
 
 % =============================================================================
@@ -141,7 +128,7 @@
 % =============================================================================
 % Content page example 1: Text-left, figure-right layout
 \begin{frame}{Content Example: Text Left, Figure Right}
-\framesubtitle{} % keep empty; framesubtitle template will show section info automatically
+\framesubtitle{} % keep empty; the theme fills the section eyebrow automatically
 \small
 \begin{columns}[T]
 \column{0.55\textwidth}
@@ -157,13 +144,14 @@ State the central message of this slide in one sentence.
 \column{0.40\textwidth}
 \centering
 % Side panel: FEW categories only (4--6 short labels). Compact width. No xlabel.
+% Swiss chart: solid near-black bars, no axis box, horizontal gridlines only.
 % For 12-month / many-label series use the full-width chart on the next example page.
 \begin{tikzpicture}
 \begin{axis}[
     width=5.4cm,
     height=3.6cm,
     ybar,
-    bar width=9pt,
+    bar width=10pt,
     enlarge x limits=0.25,
     ymin=0, ymax=100,
     symbolic x coords={Q1,Q2,Q3,Q4},
@@ -171,13 +159,13 @@ State the central message of this slide in one sentence.
     ylabel={Sample index},
     tick label style={font=\tiny},
     label style={font=\scriptsize},
-    axis y line*=left,
-    axis x line*=bottom,
-    axis line style={maincolor},
-    grid=major,
-    grid style={maincolor!12},
+    axis line style={draw=none},
+    xtick style={draw=none},
+    ytick style={draw=none},
+    ymajorgrids=true,
+    grid style={black!14},
 ]
-\addplot[fill=maincolor!40, draw=maincolor] coordinates {
+\addplot[fill=maincolor, draw=none] coordinates {
     (Q1,42) (Q2,55) (Q3,61) (Q4,78)
 };
 \end{axis}
@@ -187,7 +175,7 @@ State the central message of this slide in one sentence.
 
 % Content page example 2: Text-top, figure-bottom layout
 \begin{frame}{Content Example: Text Top, Figure Bottom}
-\framesubtitle{} % automatically inherits section info
+\framesubtitle{} % automatically inherits the section eyebrow
 \small
 
 % Upper text area
@@ -195,13 +183,14 @@ When a series has many categories (for example 12 months), use this
 full-width layout below -- not the narrow side-panel chart.
 Keep the text concise so the wide chart remains readable.
 
-\vspace{0.7em}
+\vspace{0.2em}
 
-% Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels
+% Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels.
+% Monochrome line chart: primary series solid maincolor, secondary black!45 dashed.
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    width=11.5cm, height=4.2cm,
+    width=11.5cm, height=3.7cm,
     enlarge x limits=0.04,
     x tick label style={rotate=45, anchor=east, font=\tiny},
     ylabel style={font=\scriptsize},
@@ -213,17 +202,17 @@ Keep the text concise so the wide chart remains readable.
     xlabel={Month (illustrative)},
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
     yticklabel style={font=\tiny},
-    axis y line*=left,
-    axis x line*=bottom,
-    grid=major,
-    grid style={maincolor!12},
-    axis line style={maincolor},
+    axis line style={draw=none},
+    xtick style={draw=none},
+    ytick style={draw=none},
+    ymajorgrids=true,
+    grid style={black!14},
 ]
 \addplot[
-    thick,
-    mark=*,
+    very thick,
     maincolor,
-    mark options={fill=white, draw=maincolor, scale=0.7},
+    mark=square*,
+    mark options={fill=maincolor, scale=0.6},
 ] coordinates {
     (Jan,2040) (Feb,2085) (Mar,2160) (Apr,2330) (May,2345) (Jun,2320)
     (Jul,2420) (Aug,2505) (Sep,2630) (Oct,2740) (Nov,2655) (Dec,2620)
@@ -231,9 +220,9 @@ Keep the text concise so the wide chart remains readable.
 \addplot[
     thick,
     dashed,
-    maincolor!55,
+    black!45,
     mark=square*,
-    mark options={fill=white, draw=maincolor!55, scale=0.55},
+    mark options={fill=white, draw=black!45, scale=0.55, solid},
 ] coordinates {
     (Jan,2010) (Feb,2050) (Mar,2120) (Apr,2280) (May,2300) (Jun,2290)
     (Jul,2380) (Aug,2460) (Sep,2580) (Oct,2700) (Nov,2620) (Dec,2590)
@@ -242,7 +231,7 @@ Keep the text concise so the wide chart remains readable.
 \end{axis}
 \end{tikzpicture}
 
-\vspace{0.3em}
+\vspace{0.1em}
 \centerstate{
     \tiny \emph{Source: data compiled from the source document.}
 }
@@ -251,29 +240,30 @@ Keep the text concise so the wide chart remains readable.
 
 % Content page example 3: Figure-left, text-right layout
 \begin{frame}{Content Example: Figure Left, Text Right}
-\framesubtitle{} 
+\framesubtitle{}
 \small
 \begin{columns}[c] % [c] = vertically centered; use [T] for top alignment if text is long
 
-% Left: real TikZ structure diagram (layered pipeline)
+% Left: real TikZ structure diagram (layered pipeline) — SQUARE corners only,
+% near-black strokes, gray-tint fills. Never use rounded corners in this deck.
 \column{0.45\textwidth}
     \centering
     \begin{tikzpicture}[
         font=\scriptsize,
         box/.style={
-            draw=maincolor, fill=maincolor!12, rounded corners=2pt,
+            draw=maincolor, line width=0.8pt, fill=white,
             minimum height=0.62cm, text width=1.35cm, align=center
         },
         layer title/.style={font=\tiny\bfseries, text=maincolor}
     ]
         % Data layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.45);
+        \fill[black!6] (-0.25,1.05) rectangle (4.85,2.45);
         \node[layer title, anchor=north west] at (-0.15,2.40) {Data layer};
         \node[box] (s1) at (0.7,1.55) {Sensors};
         \node[box] (s2) at (2.5,1.55) {Ingest};
         \node[box] (s3) at (4.2,1.55) {Store};
         % Decision layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,-0.95) rectangle (4.85,0.70);
+        \fill[black!6] (-0.25,-0.95) rectangle (4.85,0.70);
         \node[layer title, anchor=north west] at (-0.15,0.65) {Decision layer};
         \node[box] (p1) at (0.7,-0.15) {Feature};
         \node[box] (p2) at (2.5,-0.15) {Model};
@@ -297,10 +287,9 @@ Keep the text concise so the wide chart remains readable.
     \begin{itemize}
         \item Structure of experimental apparatus
         \item Module details of an algorithm or model
-        \item Domain-specific data analysis
     \end{itemize}
 
-    \vspace{0.8em}
+    \vspace{0.35em}
     \textbf{Key Findings:}
     \begin{enumerate}
         \item \ctextbf{Observation 1}: the left figure shows\ldots
@@ -316,9 +305,11 @@ Keep the text concise so the wide chart remains readable.
 \framesubtitle{}
 \small
 \centering
-% Text columns left-aligned, number columns right-aligned; bold header row.
+% Swiss table: bold sans header, generous row height (arraystretch 1.5),
+% horizontal booktabs rules ONLY — never add vertical rules (no | in the spec).
+% Text columns left-aligned, number columns right-aligned.
 % No \rowcolors zebra striping on short tables (fewer than ~5 data rows).
-\renewcommand{\arraystretch}{1.3}
+\renewcommand{\arraystretch}{1.5}
 \footnotesize
 \begin{tabular}{l r r l}
 \toprule
@@ -336,9 +327,10 @@ Item 2 & 20 & 18 & Stable \\
 \begin{frame}{[STYLE REF] Flowchart Style Example}
 \framesubtitle{}
 \centering
+% Swiss flow: sharp rectangles, near-black strokes, white or gray-tint fills.
 \begin{tikzpicture}[
 node distance=0.9cm and 0.7cm,
-process/.style={rectangle,draw=maincolor,fill=maincolor!10,
+process/.style={rectangle,draw=maincolor,line width=0.8pt,fill=black!6,
 minimum height=0.95cm,text width=1.9cm,align=center}
 ]
 \node[process] (a) {Collect};
@@ -378,10 +370,15 @@ You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
+\item Insert a section divider page (giant ghost numeral + thick bar + bold
+      section name, as in Frame 3) right after each \texttt{\textbackslash section\{...\}}
+\item Define \texttt{\textbackslash section\{...\}} before the first content frame of that section
 \item Use the columns layout for text+side-figure pages; use the full-width
       pattern (Example 2) whenever a chart has more than 6 categories
+\item Keep everything monochrome: maincolor (near-black) and gray tints only;
+      solid maincolor bars, black!45 dashed secondary lines, no other colors
+\item Keep all geometry square: no rounded corners, no circles, no color fills
+      other than white / gray tints
 \item Keep information density high (no empty slides)
 \item Output FULL LaTeX code only
 \end{itemize}

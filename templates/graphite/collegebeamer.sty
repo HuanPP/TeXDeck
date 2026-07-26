@@ -14,6 +14,9 @@
 %   - QA / thank-you page copy rewritten
 %   - some packs add deck-headline helpers (\deckheadlinecontent etc.)
 %   - brand image paths retargeted to local src/brand/ placeholders
+%   - GRAPHITE pack: Swiss / International Typographic restyle — TeX Gyre Heros
+%     (Helvetica clone) throughout, hard flush-left grid, near-black on white,
+%     thick short rules as the only ornament, square geometry everywhere
 %
 % You must retain this attribution when redistributing the .sty file.
 % =============================================================================
@@ -33,11 +36,11 @@
 % --- package options ---
 % languages
 \newcommand{\tocStr}{Table of Contents}
-\newcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+\newcommand{\qaStr}{Thank you for your attention. \\ Questions and discussion are welcome.}
 
 \DeclareOption{en}{
     \renewcommand{\tocStr}{Table of Contents}
-    \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+    \renewcommand{\qaStr}{Thank you for your attention. \\ Questions and discussion are welcome.}
 }
 
 \newif\ifcollegebeamer@zh
@@ -53,29 +56,33 @@
     % them to full width, which looks wrong in English text (dollar's -> dollar ' s).
     \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
 
+    % Swiss typography: grotesque sans throughout. TeX Gyre Heros is the
+    % free Helvetica clone; both families point at it so the deck is sans-first
+    % no matter which family a generated deck selects.
     \setmainfont[Path=./font/,
-      BoldFont       = texgyrepagella-bold.otf,
-      ItalicFont     = texgyrepagella-italic.otf,
-      BoldItalicFont = texgyrepagella-bolditalic.otf,
-    ]{texgyrepagella-regular.otf}
+      BoldFont       = texgyreheros-bold.otf,
+      ItalicFont     = texgyreheros-italic.otf,
+      BoldItalicFont = texgyreheros-bolditalic.otf,
+    ]{texgyreheros-regular.otf}
     \setsansfont[Path=./font/,
-      BoldFont       = texgyrepagella-bold.otf,
-      ItalicFont     = texgyrepagella-italic.otf,
-      BoldItalicFont = texgyrepagella-bolditalic.otf,
-    ]{texgyrepagella-regular.otf}
+      BoldFont       = texgyreheros-bold.otf,
+      ItalicFont     = texgyreheros-italic.otf,
+      BoldItalicFont = texgyreheros-bolditalic.otf,
+    ]{texgyreheros-regular.otf}
 
-    % Dark broker-report typography: Song for body, Hei for headings.
-    \setCJKmainfont{FandolSong-Regular}[
-      Extension    = .otf,
-      AutoFakeBold = true
+    % CJK: Hei (黑体) is the Chinese grotesque — the Helvetica analogue.
+    % FandolHei ships a real Bold, so no fake bolding is needed.
+    \setCJKmainfont{FandolHei-Regular}[
+      Extension = .otf,
+      BoldFont  = FandolHei-Bold.otf
     ]
-    \setCJKsansfont{FandolSong-Regular}[
-      Extension    = .otf,
-      AutoFakeBold = true
+    \setCJKsansfont{FandolHei-Regular}[
+      Extension = .otf,
+      BoldFont  = FandolHei-Bold.otf
     ]
 
     \renewcommand{\tocStr}{目录}
-    \renewcommand{\qaStr}{\textsl{Thank you for your attention. \\ Questions and discussion are welcome.}}
+    \renewcommand{\qaStr}{Thank you for your attention. \\ Questions and discussion are welcome.}
     \ifxetex
     \else
       \PackageError{collegeBeamer}{请使用 XeLaTeX 编译此模板！}{}
@@ -112,7 +119,7 @@
   \hbox to \paperwidth{\hfil\pgfuseimage{\@makelogo}\hspace{0.035\paperwidth}}%
 }
 
-% color
+% color — monochrome ramp; near-black IS the accent
 \definecolor{maincolor}{RGB}{\maincolorRGB}
 \definecolor{airforceblue}{RGB}{90, 90, 96}
 \definecolor{morelightgray}{RGB}{242, 242, 244}
@@ -140,23 +147,23 @@
 \setbeamercolor{frametitle}{fg=maincolor}
 \setbeamercolor{framesubtitle}{fg=reportmuted}
 
-% font
-\renewcommand{\familydefault}{\rmdefault}
+% font — sans-first (Swiss)
+\renewcommand{\familydefault}{\sfdefault}
 \usefonttheme{professionalfonts}
 
 \AtEndOfPackage{%
   \ifcollegebeamer@zh
-    \setbeamerfont{title}{series=\bfseries, size=\LARGE}
+    \setbeamerfont{title}{series=\bfseries, size={\fontsize{30}{35}}}
   \else
-    \setbeamerfont{title}{series=\bfseries, size=\LARGE}
+    \setbeamerfont{title}{series=\bfseries, size={\fontsize{30}{35}}}
   \fi
 }
 
 \setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
 \setbeamerfont{author}{size=\small}
 \setbeamerfont{date}{size=\footnotesize}
-\setbeamerfont{frametitle}{series=\bfseries, size=\large}
-\setbeamerfont{framesubtitle}{series=\mdseries, size=\small}
+\setbeamerfont{frametitle}{series=\bfseries, size={\fontsize{15}{18}}}
+\setbeamerfont{framesubtitle}{series=\mdseries, size=\tiny}
 \setbeamerfont{footline}{size=\tiny}
 \setbeamerfont{block title}{series=\bfseries, size=\small}
 \setbeamerfont{block body}{size=\footnotesize}
@@ -183,12 +190,12 @@
 }
 \footlinecolor{}
 
-% block
-\setbeamertemplate{blocks}[rounded]
-\setbeamercolor{block title}{fg=maincolor, bg=morelightgray}
+% block — square Swiss panels, no rounding, no shadow
+\setbeamertemplate{blocks}[default]
+\setbeamercolor{block title}{fg=white, bg=maincolor}
 \setbeamercolor{block body}{fg=reporttext, bg=morelightgray}
 
-% bullets
+% bullets — small filled squares, en-dash second level
 \setbeamertemplate{itemize item}{\raisebox{0.28ex}{\textcolor{maincolor}{\rule{4.5pt}{4.5pt}}}}
 \setbeamertemplate{itemize subitem}{\textcolor{reportmuted}{\textendash}}
 \setbeamertemplate{itemize subsubitem}{\textcolor{reportmuted}{\tiny$\circ$}}
@@ -197,13 +204,13 @@
 \setbeamertemplate{section in toc}{\raisebox{0.28ex}{\textcolor{maincolor}{\rule{4.5pt}{4.5pt}}}~\inserttocsection}
 \setbeamertemplate{subsection in toc}{}
 
-% code block setting
+% code block setting — neutral grays only
 \definecolor{codegreen}{RGB}{101,218,120}
 \definecolor{darkgreen}{RGB}{93,158,82}
 \definecolor{darkyellow}{RGB}{245,194,105}
 \definecolor{codegray}{rgb}{0.5,0.5,0.5}
-\definecolor{codepurple}{rgb}{0.58,0,0.82}
-\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{codepurple}{rgb}{0.35,0.35,0.38}
+\definecolor{backcolour}{rgb}{0.955,0.955,0.96}
 
 \lstdefinestyle{mystyle}{
     backgroundcolor=\color{backcolour},
@@ -233,8 +240,10 @@
 % --- section & frame setting ---
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
+% Every content frame carries "NN  SECTION NAME" as an eyebrow line under the
+% frametitle bar. Zero-padded to match the giant section numerals.
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\thesection \, \secname}}{}
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\two@digits{\value{section}}\hspace{0.7em}\secname}}{}
 \makeatother
 
 \setbeamertemplate{frametitle continuation}{}
@@ -243,47 +252,73 @@
 {
     \begingroup
     \setbeamertemplate{footline}{}
-    \themecolor{colorbg}
     \begin{frame}{\tocStr}
         \tableofcontents[currentsection]
     \end{frame}
     \endgroup
 }
 
+\makeatletter
 \AtBeginSubsection[]
 {
-    \begin{frame}{\,}{\thesection \, \secname}
-        \fontfamily{\rmdefault}\selectfont
-        \centering\textbf{\textcolor{maincolor}{
-            \large Section \thesection.\thesubsection
-            \vskip12pt
-            \LARGE \subsecname
-        }}
+    \begingroup
+    \setbeamertemplate{footline}{}
+    \begin{frame}[plain,t]
+        \vspace*{0.18\paperheight}
+        {\fontsize{90}{90}\selectfont\bfseries\textcolor{black!8}{\two@digits{\value{section}}.\two@digits{\value{subsection}}}\par}
+        \vspace{-11mm}
+        \textcolor{maincolor}{\rule{12mm}{4mm}}\par
+        \vspace{8pt}
+        {\fontsize{20}{24}\selectfont\bfseries\textcolor{maincolor}{\subsecname}\par}
     \end{frame}
+    \endgroup
 }
+\makeatother
 
 % --- page elements ---
-% Title left edge = body left edge (the 1cm beamer text margin; the colorbox
-% already starts there, so no extra leftskip). The section subtitle is guarded
-% so frames before the first \section never print a bare "0".
+% Frametitle: bold sans headline, thick short near-black bar under it, then the
+% section eyebrow in tiny letterspaced caps. Everything flush left on the 1cm
+% body margin. The eyebrow is guarded so frames before the first \section never
+% print a bare "00".
 \setbeamertemplate{frametitle}{
-    \vspace*{0.75ex}
+    \vspace*{0.45ex}
     \begin{beamercolorbox}[sep=0pt]{frametitle}
-    \usebeamerfont{frametitle}\insertframetitle\\
-    {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\ifnum\value{section}>0\insertframesubtitle\fi}
+    \usebeamerfont{frametitle}\insertframetitle\par
+    \vspace*{0.6ex}
+    \textcolor{maincolor}{\rule{10mm}{1.2mm}}\par
+    \ifnum\value{section}>0
+        \vspace*{0.5ex}
+        {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}%
+         \addfontfeature{LetterSpace=16.0}\MakeUppercase{\insertframesubtitle}\par}
+    \fi
     \end{beamercolorbox}
-    \vspace*{0.5ex}
+    \vspace*{0.35ex}
 }
 
+% Title page: hard grid, top-left anchored. Thick 12x4mm near-black bar above a
+% huge bold flush-left title; metadata in a tight stack below; small date pinned
+% bottom-left. Subtitle/author lines vanish when their fields are empty.
+\makeatletter
 \setbeamertemplate{title page}{
-    \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.9\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle}\\
-        \vskip7pt{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}\\
-        \vskip9pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
-        \vskip4pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
-    \end{beamercolorbox}
+    % Fixed-height box: the metadata stack hangs from the top, the date is
+    % pinned bottom-left regardless of which metadata fields are filled.
+    \vbox to 0.77\paperheight{%
+        \vskip0.055\paperheight
+        \begin{beamercolorbox}[wd=0.82\textwidth, sep=0pt]{title}
+            \textcolor{maincolor}{\rule{12mm}{4mm}}\\[16pt]
+            {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle}\\
+            \ifx\insertsubtitle\@empty\else
+                \vskip9pt{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}\\
+            \fi
+            \ifx\beamer@shortauthor\@empty\else
+                \vskip7pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
+            \fi
+        \end{beamercolorbox}
+        \vfil
+        {\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
+    }%
 }
+\makeatother
 
 \renewcommand{\maketitle}{
     \begingroup
@@ -291,25 +326,26 @@
         \setbeamertemplate{background}{
           \includegraphics[height=\paperheight]{\backgroundPath}
         }
-        \begin{frame}
+        \begin{frame}[t]
             \titlepage
         \end{frame}
     \endgroup
 }
 
+% Q&A: white Swiss page — ghost lettering, thick bar, bold headline.
+% No full-bleed color page (that is the navy/emerald move, not graphite's).
 \newcommand{\QApage}{
     \begingroup
         \setbeamertemplate{footline}{}
-        \themecolor{colorbg}
-        \begin{frame}{}
-            \centering
-            \begin{minipage}{\textwidth}
-                \usebeamercolor[fg]{normal text}
-                \centering
-                \textcolor{white}{\Huge Q \& A}
-                \vskip10pt
-                \textcolor{white}{\Large \qaStr}
-            \end{minipage}
+        \begin{frame}[plain,t]
+            \vspace*{0.18\paperheight}
+            {\fontsize{90}{90}\selectfont\bfseries\textcolor{black!8}{Q\&A}\par}
+            \vspace{-11mm}
+            \textcolor{maincolor}{\rule{12mm}{4mm}}\par
+            \vspace{8pt}
+            {\fontsize{20}{24}\selectfont\bfseries\textcolor{maincolor}{Q \& A}\par}
+            \vspace{6pt}
+            {\small\textcolor{reportmuted}{\qaStr}\par}
         \end{frame}
     \endgroup
 }
@@ -317,8 +353,7 @@
 \newcommand{\bibliographpage}{
     \section{References}
     \begingroup
-    \themecolor{colorbg}
-    \begin{frame}[allowframebreaks]{References}{\,}
+    \begin{frame}[allowframebreaks]{References}
         \tiny
         \printbibliography[heading=none]
     \end{frame}
