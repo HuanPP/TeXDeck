@@ -27,6 +27,27 @@
 % -----------------------------------------------------------------------------
 \usetheme{Execushares}
 
+% --- Font Setup (CJK) ---
+% Latin stays on the theme's Source Pro faces (untouched). xeCJK routes CJK
+% codepoints through TeX Live's Fandol faces so Chinese titles/authors/body
+% never drop glyphs: FandolHei (real Bold cut) pairs with the Source Sans
+% body/titles; FandolSong serves serif contexts. AutoFakeSlant stands in for
+% italic zh (Fandol has no italic cuts).
+\usepackage{xeCJK}
+% Keep curly quotes Latin: xeCJK otherwise treats them as CJK punctuation and
+% pads them to full width in English text (dollar's -> dollar ' s).
+\xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
+\setCJKmainfont{FandolSong-Regular}[
+    Extension = .otf,
+    BoldFont = FandolSong-Bold.otf,
+    AutoFakeSlant = 0.15,
+]
+\setCJKsansfont{FandolHei-Regular}[
+    Extension = .otf,
+    BoldFont = FandolHei-Bold.otf,
+    AutoFakeSlant = 0.15,
+]
+
 % Theme already loads tikz; extend libraries and other helpers used in demos
 \usetikzlibrary{positioning}
 \usepackage{pgfplots}

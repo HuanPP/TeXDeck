@@ -56,6 +56,30 @@
 \let\mathbf\relax % avoid a redefinition clash between bm/beamer and newpxmath
 \usepackage{newpxmath}
 
+% CJK: route Chinese characters through TeX Live's Fandol faces so zh
+% titles/authors/body never drop glyphs. Latin text keeps Pagella untouched --
+% xeCJK only switches fonts for CJK codepoints. FandolSong (real Bold cut)
+% matches the book-plate serif body; FandolHei covers bold-sans contexts.
+% AutoFakeSlant stands in for italic zh (Song has no italic cut); SmallCapsFont
+% maps \scshape (the letterspaced title/institute lines) to the upright cut --
+% CJK has no small caps, so silence the substitution instead of warning.
+\usepackage{xeCJK}
+% Keep curly quotes Latin: xeCJK otherwise treats them as CJK punctuation and
+% pads them to full width in English text (dollar's -> dollar ' s).
+\xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
+\setCJKmainfont{FandolSong-Regular}[
+    Extension = .otf,
+    BoldFont = FandolSong-Bold.otf,
+    AutoFakeSlant = 0.15,
+    SmallCapsFont = FandolSong-Regular,
+    SmallCapsFeatures = {},
+]
+\setCJKsansfont{FandolHei-Regular}[
+    Extension = .otf,
+    BoldFont = FandolHei-Bold.otf,
+    AutoFakeSlant = 0.15,
+]
+
 % NOTE: the theme auto-inserts a full-bleed maroon section divider page
 % (roman numeral over a short rule + section name in small caps) at every
 % \section, and prints "<roman numeral> · <section name>" in small caps at

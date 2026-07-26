@@ -27,6 +27,29 @@
 % -----------------------------------------------------------------------------
 \usetheme{SimplePlus}
 
+% --- Font Setup (CJK) ---
+% Latin stays on the theme default (Latin Modern -- untouched). xeCJK routes
+% CJK codepoints through TeX Live's Fandol faces so Chinese titles/authors/body
+% never drop glyphs: FandolHei (real Bold cut) matches the theme's clean sans
+% look; FandolSong serves serif contexts. AutoFakeSlant stands in for italic zh.
+% no-math keeps fontspec's hands off the math setup so chart tick digits keep
+% rendering exactly as the upstream theme does.
+\PassOptionsToPackage{no-math}{fontspec}
+\usepackage{xeCJK}
+% Keep curly quotes Latin: xeCJK otherwise treats them as CJK punctuation and
+% pads them to full width in English text (dollar's -> dollar ' s).
+\xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
+\setCJKmainfont{FandolSong-Regular}[
+    Extension = .otf,
+    BoldFont = FandolSong-Bold.otf,
+    AutoFakeSlant = 0.15,
+]
+\setCJKsansfont{FandolHei-Regular}[
+    Extension = .otf,
+    BoldFont = FandolHei-Bold.otf,
+    AutoFakeSlant = 0.15,
+]
+
 \usepackage{tikz}
 \usetikzlibrary{positioning}
 \usepackage{pgfplots}

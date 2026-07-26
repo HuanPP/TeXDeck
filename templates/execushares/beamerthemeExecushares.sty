@@ -78,6 +78,13 @@
 % disable navigation
 \setbeamertemplate{navigation symbols}{}
 
+% TeXDeck modification: inside the fixed-width tikz nodes below, the non-flush
+% align keys justify the line, which stretches xeCJK's inter-character glue and
+% scatters CJK text across the whole node width. This helper freezes the CJK
+% glue locally (line-break points survive, spacing does not stretch); it is a
+% no-op when xeCJK is not loaded and never touches Latin spacing.
+\newcommand{\ExecusharesCJKfreeze}{\ifdefined\xeCJKsetup\xeCJKsetup{CJKglue={\hskip 0pt\relax}}\fi}
+
 % custom draw the title page above
 \setbeamertemplate{title page}{}
 
@@ -175,7 +182,9 @@
 
 			% draw the actual text
 			\node[anchor=south,text width=\slidewidth-1cm,inner xsep=0.5cm] at (0.5\slidewidth,4cm) {\color{ExecusharesWhite}\Huge\textbf{\inserttitle}};
-			\node[anchor=north east,text width=\slidewidth-1cm,align=right] at (\slidewidth-0.4cm,4cm) {\color{ExecusharesBlack}\tiny\insertsubtitle};
+			% TeXDeck modification: \ExecusharesCJKfreeze keeps CJK subtitles
+			% from being letterspaced apart by the align=right justification.
+			\node[anchor=north east,text width=\slidewidth-1cm,align=right] at (\slidewidth-0.4cm,4cm) {\ExecusharesCJKfreeze\color{ExecusharesBlack}\tiny\insertsubtitle};
 			% only draw the author block when \author is non-empty
 			% (avoids an orphan grey "by" floating on authorless title pages)
 			\ifdim\execushares@authorwidth>1pt
@@ -246,6 +255,8 @@
 	\begin{tikzpicture}[remember picture,overlay,shift={(current page.south west)}]
 		\fill[color=ExecusharesWhite] (0, 2cm) rectangle (\slidewidth, \slideheight);
 		\fill[color=ExecusharesRed] (0, 0.5\slideheight-1cm) rectangle(\slidewidth, 0.5\slideheight+1cm);
-		\node[text width=\the\paperwidth-1cm,align=center] at (0.5\slidewidth, 0.5\slideheight) {\color{ExecusharesWhite}\Huge\textbf{\insertsection}};
+		% TeXDeck modification: \ExecusharesCJKfreeze keeps CJK section names
+		% from being letterspaced across the band by the align=center justification.
+		\node[text width=\the\paperwidth-1cm,align=center] at (0.5\slidewidth, 0.5\slideheight) {\ExecusharesCJKfreeze\color{ExecusharesWhite}\Huge\textbf{\insertsection}};
 	\end{tikzpicture}
 }
