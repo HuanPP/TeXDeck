@@ -111,10 +111,15 @@
 % logo
 \pgfdeclareimage[width=0.06\paperwidth]{colorlogo}{\colorlogoPath}
 \pgfdeclareimage[width=0.06\paperwidth]{translogo}{\translogoPath}
+% small knockout logo living inside the navy frametitle band (right end);
+% the PNG canvas is mostly transparent padding (glyph ~42% of height), so the
+% declared height over-scales to land the visible mark at ~0.37cm
+\pgfdeclareimage[height=0.88cm]{bandlogo}{\translogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-% logo in each slide's top-left area, with breathing room from the top bezel
-\setbeamertemplate{headline}{\vspace*{3mm}\hspace*{0.91cm}\pgfuseimage{\@makelogo}}
+% no standalone headline: the brand mark sits inside the frametitle band,
+% so content starts on a clean grid directly below the band
+\setbeamertemplate{headline}{}
 
 % color
 \definecolor{maincolor}{RGB}{\maincolorRGB}
@@ -123,6 +128,8 @@
 \definecolor{reporttext}{RGB}{40, 48, 61}
 \definecolor{reportmuted}{RGB}{110, 121, 136}
 \definecolor{reportline}{RGB}{214, 220, 228}
+% light steel for secondary text sitting ON the navy band / panels
+\definecolor{bandsteel}{RGB}{169, 184, 201}
 
 \newcommand{\themecolor}[1]{
     \ifstrequal{#1}{colorbg}{
@@ -142,8 +149,9 @@
 \setbeamercolor{alerted text}{fg=maincolor}
 \setbeamercolor{author}{fg=reporttext}
 \setbeamercolor{date}{fg=reportmuted}
-\setbeamercolor{frametitle}{fg=maincolor}
-\setbeamercolor{framesubtitle}{fg=reportmuted}
+% boardroom band: white title on navy, steel section tag on navy
+\setbeamercolor{frametitle}{fg=white, bg=maincolor}
+\setbeamercolor{framesubtitle}{fg=bandsteel}
 
 % font
 \renewcommand{\familydefault}{\sfdefault}
@@ -168,13 +176,24 @@
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
 
-% footline: hairline exactly as wide as the text block, short title + page N/M
+% footline: full-width navy progress hairline (filled fraction = current/total
+% frames), then short title left + page N/M right in muted report ink
 \newcommand{\@footlinepayoff}{\insertshorttitle}
-\setbeamertemplate{footline}{
-    \begin{beamercolorbox}[wd=\textwidth, ht=4.5mm, dp=2.5mm, leftskip=0.9cm, rightskip=0.9cm]{footline}
-    \color{reportline}\rule{\dimexpr\textwidth-1.8cm\relax}{0.2pt}\par\vspace{-0.15ex}
+\setbeamertemplate{footline}{%
+    \nointerlineskip%
+    \dimen@=\paperwidth
+    \ifnum\inserttotalframenumber>0
+      \dimen@=\dimexpr\paperwidth*\insertframenumber/\inserttotalframenumber\relax
+    \fi
+    \ifdim\dimen@>\paperwidth \dimen@=\paperwidth\fi
+    \hbox{%
+      {\color{maincolor}\vrule width \dimen@ height 0.8pt depth 0pt}%
+      {\color{reportline}\vrule width \dimexpr\paperwidth-\dimen@\relax height 0.8pt depth 0pt}%
+    }%
+    \nointerlineskip%
+    \begin{beamercolorbox}[wd=\paperwidth, ht=4mm, dp=2.5mm, leftskip=0.9cm, rightskip=0.9cm]{footline}
     \usebeamerfont{footline}\color{reportmuted}\insertshorttitle\hfill\insertframenumber\,/\,\inserttotalframenumber
-    \end{beamercolorbox}
+    \end{beamercolorbox}%
 }
 
 \newcommand{\footlinecolor}[1]{
@@ -194,13 +213,18 @@
 \setbeamercolor{block title}{fg=maincolor, bg=morelightgray}
 \setbeamercolor{block body}{fg=reporttext, bg=morelightgray}
 
-% bullets
-\setbeamertemplate{itemize item}{\raisebox{0.2ex}{\scriptsize\textcolor{maincolor}{$\blacksquare$}}}
-\setbeamertemplate{itemize subitem}{\raisebox{0.15ex}{\scriptsize\textcolor{airforceblue}{$\blacktriangleright$}}}
+% bullets: small crisp navy squares (report registers), steel second level
+\setbeamertemplate{itemize item}{\raisebox{0.24ex}{\textcolor{maincolor}{\rule{0.72ex}{0.72ex}}}}
+\setbeamertemplate{itemize subitem}{\raisebox{0.24ex}{\textcolor{airforceblue}{\rule{0.55ex}{0.55ex}}}}
 \setbeamertemplate{itemize subsubitem}{\textcolor{reportmuted}{\tiny$\circ$}}
 
-% table of cotents
-\setbeamertemplate{section in toc}{\textcolor{maincolor}{$\blacktriangleright$}~\inserttocsection}  % section name format
+% table of contents: report-style numbered rows (01 02 ...), steel numerals;
+% non-current sections render muted on section pages
+\setbeamertemplate{section in toc}{%
+    {\color{airforceblue}\makebox[2.0em][l]{\ifnum\inserttocsectionnumber<10 0\fi\inserttocsectionnumber}}%
+    {\color{reporttext}\inserttocsection}}
+\setbeamertemplate{section in toc shaded}{%
+    {\color{reportmuted}\makebox[2.0em][l]{\ifnum\inserttocsectionnumber<10 0\fi\inserttocsectionnumber}\inserttocsection}}
 \setbeamertemplate{subsection in toc}{}  % don't present subsection
 
 % code bolck setting
@@ -249,14 +273,34 @@
 % avoid numbering of frames that are breaked into multiply slides
 \setbeamertemplate{frametitle continuation}{}
 
-% section page with the current section highlighted
+% section page, boardroom divider: left third = solid navy panel carrying the
+% big white section number + name; right two thirds = white agenda with the
+% current section highlighted. (Template packs may override via \AtBeginSection.)
 \AtBeginSection[]
 {
     \begingroup
     \setbeamertemplate{footline}{}
-    \themecolor{colorbg}
-    \begin{frame}{\tocStr}
-        \tableofcontents[currentsection]
+    \begin{frame}[plain]
+        \begin{tikzpicture}[remember picture, overlay]
+            % 2pt bleed on the outer edges so no white hairline survives rasterizing
+            \fill[maincolor] ([xshift=-2pt, yshift=2pt]current page.north west)
+                rectangle ([xshift=0.34\paperwidth, yshift=-2pt]current page.south west);
+            \node[anchor=north west, inner sep=0pt, text=white]
+                at ([xshift=0.9cm, yshift=-1.7cm]current page.north west)
+                {\fontsize{44}{44}\selectfont\bfseries \ifnum\thesection<10 0\fi\thesection};
+            \draw[bandsteel, line width=0.6pt]
+                ([xshift=0.9cm, yshift=-3.55cm]current page.north west) -- ++(1.15cm,0);
+            \node[anchor=north west, inner sep=0pt, text=white, font=\large\bfseries,
+                  text width=\dimexpr0.34\paperwidth-1.8cm\relax]
+                at ([xshift=0.9cm, yshift=-3.95cm]current page.north west) {\secname};
+        \end{tikzpicture}%
+        \hspace*{\dimexpr0.34\paperwidth+0.1cm\relax}%
+        \begin{minipage}{\dimexpr0.66\paperwidth-2.1cm\relax}
+            {\footnotesize\color{airforceblue}\tocStr}\\[0.4em]
+            {\color{reportline}\rule{\linewidth}{0.4pt}}
+            \vspace{0.6em}
+            \tableofcontents[currentsection]
+        \end{minipage}
     \end{frame}
     \endgroup
 }
@@ -275,13 +319,18 @@
 }
 
 % --- page elements ---
-% frame title & subtitle layout
-\setbeamertemplate{frametitle}{
-    \vspace*{-5.5ex}
-    \begin{beamercolorbox}[leftskip=2.2cm, sep=0.6ex]{frametitle}
-    \usebeamerfont{frametitle}\insertframetitle\\
-    \usebeamerfont{framesubtitle}\insertframesubtitle
-    \end{beamercolorbox}
+% frame title: full-width navy band across the top of every content frame.
+% White EB Garamond bold title left; section tag in light steel right-aligned;
+% small knockout logo at the right end of the band.
+\setbeamertemplate{frametitle}{%
+    \nointerlineskip%
+    \begin{beamercolorbox}[wd=\paperwidth, ht=0.70cm, dp=0.45cm, leftskip=0.9cm, rightskip=0.9cm]{frametitle}%
+        \usebeamerfont{frametitle}\insertframetitle%
+        \hfill
+        {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\insertframesubtitle}%
+        \hspace{0.30cm}\smash{\raisebox{-0.34cm}{\pgfuseimage{bandlogo}}}%
+    \end{beamercolorbox}%
+    \vskip0.20cm%
 }
 
 % title page

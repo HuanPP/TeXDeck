@@ -26,6 +26,14 @@
 %    blocks are styled by the theme and are allowed on content pages.
 % 10. Zebra-stripe a table with \rowcolors{2}{maincolor!7}{white} ONLY when it
 %    has 4 or more data rows; leave short tables unstriped.
+% 11. TABLES: give every table a solid navy header row -- start the header row
+%    with \deckheadrow and use {\color{white}\bfseries ...} header cells, NO
+%    \toprule above it -- exactly as in the [STYLE REF] table page. Keep
+%    \midrule and \bottomrule.
+% 12. CHART COLORS: first series maincolor (navy), second series airforceblue
+%    (steel). Never introduce other hues. Every axis takes the [deck, ...] style.
+% 13. The navy frametitle band shows the section tag automatically on its right
+%    side; NEVER repeat the section name inside frame titles or body text.
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -49,12 +57,15 @@
 \AtBeginSection[]{}
 
 % Shared chart style: horizontal grid only (no vertical lines through bars),
-% no axis arrow tips, readable label sizes. Use [deck, ...] on every axis.
+% no axis arrow tips, readable label sizes, and a very light navy plot-area
+% fill so charts read like report figures. Use [deck, ...] on every axis.
+% Series colors are ALWAYS navy first, steel second: maincolor, airforceblue.
 \pgfplotsset{
   deck/.style={
     axis y line=left,
     axis x line=bottom,
     axis line style={-, maincolor!60},
+    axis background/.style={fill=maincolor!3},
     ymajorgrids=true,
     grid style={maincolor!12},
     tick label style={font=\scriptsize},
@@ -63,31 +74,65 @@
   },
 }
 
+% Navy table header row. Start every table's header row with \deckheadrow
+% (instead of a bare \rowcolor) -- the widened overhang closes the hairline
+% gaps between the per-cell color panels.
+\newcommand{\deckheadrow}{\rowcolor{maincolor}[\dimexpr\tabcolsep+0.4pt\relax][\dimexpr\tabcolsep+0.4pt\relax]}
+
 % -----------------------------------------------------------------------------
 % 1.1 Outline machinery (DO NOT CHANGE this block, EDIT titles in \deckoutline)
 % -----------------------------------------------------------------------------
-% \decktoc{0}  -> plain outline page (all entries in normal ink)
-% \decktoc{k}  -> transition page: entry k bold navy with a marker,
-%                 all other entries dimmed
+% \decktoc{0}  -> outline page: report-style agenda rows separated by hairlines
+% \decktoc{k}  -> section divider: left third solid navy panel with the big
+%                 white section number + name; right two thirds carry the
+%                 agenda with entry k bold navy and all other entries dimmed
 \newcounter{decktocurrent}
 \newcommand{\decktocitem}[2]{%
   \ifnum\value{decktocurrent}=#1
-    \textcolor{maincolor}{$\blacktriangleright$}~\textbf{\textcolor{maincolor}{\makebox[1.8em][l]{0#1}#2}}%
+    {\color{maincolor}\bfseries\makebox[2.2em][l]{0#1}#2\hfill\raisebox{0.25ex}{\scriptsize$\blacksquare$}}%
   \else
     \ifnum\value{decktocurrent}=0
-      \hphantom{$\blacktriangleright$~}\makebox[1.8em][l]{0#1}#2%
+      {\color{airforceblue}\makebox[2.2em][l]{0#1}}{\color{reporttext}#2}%
     \else
-      \textcolor{reportmuted}{\hphantom{$\blacktriangleright$~}\makebox[1.8em][l]{0#1}#2}%
+      {\color{reportmuted}\makebox[2.2em][l]{0#1}#2}%
     \fi
-  \fi\par\vspace{1.1em}%
+  \fi
+  \par\vspace{0.55em}%
+  {\color{reportline}\hrule height 0.4pt}%
+  \vspace{0.80em}%
 }
 \newcommand{\decktoc}[1]{%
   \setcounter{decktocurrent}{#1}%
-  \begin{frame}{Outline}
-    \large
-    \vspace{0.4em}
-    \deckoutline
-  \end{frame}
+  \ifnum#1=0
+    \begin{frame}{Outline}
+      \large
+      \vspace{0.8em}
+      \deckoutline
+    \end{frame}
+  \else
+    \begin{frame}[plain]
+      \begin{tikzpicture}[remember picture, overlay]
+        % 2pt bleed on the outer edges so no white hairline survives rasterizing
+        \fill[maincolor] ([xshift=-2pt, yshift=2pt]current page.north west)
+          rectangle ([xshift=0.34\paperwidth, yshift=-2pt]current page.south west);
+        \node[anchor=north west, inner sep=0pt, text=white]
+          at ([xshift=0.9cm, yshift=-1.7cm]current page.north west)
+          {\fontsize{44}{44}\selectfont\bfseries 0#1};
+        \draw[bandsteel, line width=0.6pt]
+          ([xshift=0.9cm, yshift=-3.55cm]current page.north west) -- ++(1.15cm,0);
+        \node[anchor=north west, inner sep=0pt, text=white, font=\large\bfseries,
+              text width=\dimexpr0.34\paperwidth-1.8cm\relax]
+          at ([xshift=0.9cm, yshift=-3.95cm]current page.north west) {\insertsection};
+      \end{tikzpicture}%
+      \hspace*{\dimexpr0.34\paperwidth+0.1cm\relax}%
+      \begin{minipage}{\dimexpr0.66\paperwidth-2.1cm\relax}
+        {\footnotesize\color{airforceblue}Agenda}\\[0.4em]
+        {\color{reportline}\rule{\linewidth}{0.4pt}}
+        \vspace{0.9em}
+        \deckoutline
+      \end{minipage}
+    \end{frame}
+  \fi
 }
 
 % LLM MUST EDIT: define each section title here ONCE (one \decktocitem per
@@ -101,28 +146,36 @@
 }
 
 % -----------------------------------------------------------------------------
-% 1.2 Title page (DO NOT CHANGE): empty fields are skipped, no floating gaps;
-%     the block sits in the calm left zone of the background art.
+% 1.2 Title page (DO NOT CHANGE): report cover. Uppercase letterspaced steel
+%     kicker (institute, when provided), 27pt bold title, thin steel rule,
+%     italic subtitle, author/date stack. Empty fields are skipped, no
+%     floating gaps; the block sits in the calm left zone of the ring art.
 % -----------------------------------------------------------------------------
 \makeatletter
 \setbeamertemplate{title page}{
     \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.75\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\color{maincolor}\rule{24pt}{2pt}}\\[8pt]
-        {\usebeamerfont{title}\inserttitle}%
+    \begin{beamercolorbox}[wd=0.78\textwidth, sep=10pt, leftskip=8mm]{title}
+        \setbox\@tempboxa=\hbox{\insertinstitute}%
+        \ifdim\wd\@tempboxa>1pt
+          % kicker reads the raw institute text (\beamer@shortinstitute):
+          % \MakeUppercase chokes on \insertinstitute's embedded \def prefix
+          {\footnotesize\color{airforceblue}\addfontfeatures{LetterSpace=16}%
+           \def\inst##1{}\def\and{\space}%
+           \MakeUppercase{\beamer@shortinstitute}}\\[11pt]
+        \else
+          {\color{airforceblue}\rule{24pt}{2pt}}\\[10pt]
+        \fi
+        {\fontsize{27}{32}\selectfont\bfseries\color{maincolor}\inserttitle}\\[9pt]
+        {\color{airforceblue}\rule{0.32\textwidth}{0.5pt}}%
         \setbox\@tempboxa=\hbox{\insertsubtitle}%
         \ifdim\wd\@tempboxa>1pt
-          \\[5pt]{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}%
+          \\[7pt]{\usebeamerfont{subtitle}\itshape\textcolor{reportmuted}{\insertsubtitle}}%
         \fi
         \setbox\@tempboxa=\hbox{\insertauthor}%
         \ifdim\wd\@tempboxa>1pt
-          \\[9pt]{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}%
+          \\[10pt]{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}%
         \fi
-        \setbox\@tempboxa=\hbox{\insertinstitute}%
-        \ifdim\wd\@tempboxa>1pt
-          \\[3pt]{\usebeamerfont{author}\textcolor{reportmuted}{\insertinstitute}}%
-        \fi
-        \\[9pt]{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+        \\[6pt]{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
     \end{beamercolorbox}
 }
 \makeatother
@@ -193,7 +246,7 @@ State the central message of this slide in one sentence.
     xtick=data,
     ylabel={Sample index},
 ]
-\addplot[fill=maincolor!40, draw=maincolor] coordinates {
+\addplot[fill=maincolor, draw=none] coordinates {
     (Q1,42) (Q2,55) (Q3,61) (Q4,78)
 };
 \end{axis}
@@ -240,9 +293,9 @@ Keep the text concise so the wide chart remains readable.
 \addplot[
     thick,
     dashed,
-    maincolor!55,
+    airforceblue,
     mark=square*,
-    mark options={fill=white, draw=maincolor!55, scale=0.55},
+    mark options={fill=white, draw=airforceblue, scale=0.55},
 ] coordinates {
     (Jan,2010) (Feb,2050) (Mar,2120) (Apr,2280) (May,2300) (Jun,2290)
     (Jul,2380) (Aug,2460) (Sep,2580) (Oct,2700) (Nov,2620) (Dec,2590)
@@ -272,20 +325,24 @@ Keep the text concise so the wide chart remains readable.
             draw=maincolor, fill=maincolor!12, rounded corners=2pt,
             minimum height=0.62cm, text width=1.35cm, align=center
         },
+        steelbox/.style={
+            draw=airforceblue, fill=airforceblue!14, rounded corners=2pt,
+            minimum height=0.62cm, text width=1.35cm, align=center
+        },
         layer title/.style={font=\tiny\bfseries, text=maincolor}
     ]
-        % Data layer
+        % Data layer (navy family)
         \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.45);
         \node[layer title, anchor=north west] at (-0.15,2.40) {Data layer};
         \node[box] (s1) at (0.7,1.55) {Sensors};
         \node[box] (s2) at (2.5,1.55) {Ingest};
         \node[box] (s3) at (4.2,1.55) {Store};
-        % Decision layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,-0.95) rectangle (4.85,0.70);
-        \node[layer title, anchor=north west] at (-0.15,0.65) {Decision layer};
-        \node[box] (p1) at (0.7,-0.15) {Feature};
-        \node[box] (p2) at (2.5,-0.15) {Model};
-        \node[box] (p3) at (4.2,-0.15) {Act};
+        % Decision layer (steel family -- two-tone report look)
+        \fill[airforceblue!8, rounded corners=3pt] (-0.25,-0.95) rectangle (4.85,0.70);
+        \node[layer title, anchor=north west, text=airforceblue] at (-0.15,0.65) {Decision layer};
+        \node[steelbox] (p1) at (0.7,-0.15) {Feature};
+        \node[steelbox] (p2) at (2.5,-0.15) {Model};
+        \node[steelbox] (p3) at (4.2,-0.15) {Act};
         % Edges
         \draw[->, thick, maincolor] (s1) -- (s2);
         \draw[->, thick, maincolor] (s2) -- (s3);
@@ -324,13 +381,20 @@ Keep the text concise so the wide chart remains readable.
 \begin{frame}{[STYLE REF] Table Style Example}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+\renewcommand{\arraystretch}{1.25}
 \footnotesize
+% BOARDROOM TABLE RULE: header row = solid navy with white bold text.
+% Start the header row with \deckheadrow (NOT \toprule, NOT bare \rowcolor)
+% and write each header cell as {\color{white}\bfseries ...}.
+% In p{...} columns wrap the header cell in \multicolumn{1}{l}{...} so its
+% baseline matches the other header cells.
 % Numeric columns right-aligned (r); prose columns left (l / p{...}).
+% Body keeps booktabs feel: light \midrule under header, \bottomrule to close.
 % Add \rowcolors{2}{maincolor!7}{white} ONLY for tables with 4+ data rows.
 \begin{tabular}{p{0.2\textwidth} r r l}
-\toprule
-Metric & A & B & Conclusion \\
+\deckheadrow
+\multicolumn{1}{l}{\color{white}\bfseries Metric} & {\color{white}\bfseries A}
+  & {\color{white}\bfseries B} & {\color{white}\bfseries Conclusion} \\
 \midrule
 Item 1 & 12 & 15 & Room for improvement \\
 Item 2 & 20 & 18 & Stable \\
@@ -343,21 +407,24 @@ Item 2 & 20 & 18 & Stable \\
 % =============================================================================
 \begin{frame}{[STYLE REF] Flowchart Style Example}
 \centering
+% Main path in navy; secondary / feedback nodes in steel (airforceblue)
 \begin{tikzpicture}[
 node distance=0.9cm and 0.7cm,
 process/.style={rectangle,draw=maincolor,fill=maincolor!10,
+minimum height=0.95cm,text width=1.9cm,align=center},
+sideprocess/.style={rectangle,draw=airforceblue,fill=airforceblue!12,
 minimum height=0.95cm,text width=1.9cm,align=center}
 ]
 \node[process] (a) {Collect};
 \node[process,right=of a] (b) {Analyze};
 \node[process,right=of b] (c) {Decide};
-\node[process,below=of b] (d) {Revise};
+\node[sideprocess,below=of b] (d) {Revise};
 \draw[->,thick,maincolor] (a)--(b);
 \draw[->,thick,maincolor] (b)--(c);
-\draw[->,thick,maincolor] (b)--(d)
-    node[midway,right,font=\tiny,text=maincolor] {gap};
-\draw[->,thick,maincolor,dashed] (d.west) -| (a.south)
-    node[near end,left,font=\tiny,text=maincolor] {retry};
+\draw[->,thick,airforceblue] (b)--(d)
+    node[midway,right,font=\tiny,text=airforceblue] {gap};
+\draw[->,thick,airforceblue,dashed] (d.west) -| (a.south)
+    node[near end,left,font=\tiny,text=airforceblue] {retry};
 \end{tikzpicture}
 \end{frame}
 
@@ -386,11 +453,21 @@ You MUST:
 \item Edit the outline titles ONCE inside \texttt{\textbackslash deckoutline};
       use \texttt{\textbackslash decktoc\{0\}} for the outline page and
       \texttt{\textbackslash decktoc\{k\}} right after \texttt{\textbackslash section\{...\}}
-      of section k -- never hand-copy the outline
+      of section k -- never hand-copy the outline.
+      \texttt{\textbackslash decktoc\{k\}} renders the navy left-panel section
+      divider automatically; never build section pages by hand
 \item Define \texttt{\textbackslash section\{...\}} before the first content frame of that section
+\item Frame titles live in the navy header band; the section tag appears on the
+      band's right automatically -- keep titles short and never repeat the
+      section name in them
 \item Use columns layout for all content pages
 \item Keep information density high (no empty slides)
 \item Respect the page budget: 3 fixed pages + 1 transition per section + content, 12--18 total
+\item Give every table a solid navy header row: start the header row with
+      \texttt{\textbackslash deckheadrow} + white bold cells, no
+      \texttt{\textbackslash toprule} -- as shown on the [STYLE REF] table page
+\item Style every chart with the \texttt{[deck, ...]} axis options; series
+      colors are navy then steel: \texttt{maincolor}, \texttt{airforceblue}
 \item Blocks (block / alertblock / exampleblock) and \texttt{lstlisting} are available
 \item Zebra-stripe tables only when they have 4 or more data rows
 \item Output FULL LaTeX code only
