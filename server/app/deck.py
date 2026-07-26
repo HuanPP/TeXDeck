@@ -102,9 +102,10 @@ def copy_template_bundle(template: Template, target_dir: Path) -> None:
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    sty = template.dir / "collegebeamer.sty"
-    if sty.is_file():
-        shutil.copy2(sty, target_dir / "collegebeamer.sty")
+    # Every style file the sample deck loads must travel with it; SimplePlus and
+    # Execushares keep their themes in beamertheme*.sty, not collegebeamer.sty.
+    for sty in sorted(template.dir.glob("*.sty")):
+        shutil.copy2(sty, target_dir / sty.name)
 
     for folder_name in ("src", "font"):
         src = template.dir / folder_name
@@ -118,7 +119,7 @@ def copy_template_bundle(template: Template, target_dir: Path) -> None:
 def build_generation_messages(
     template: Template,
     request: DeckRequest,
-    document: PdfDocument | None,
+    documents: list[PdfDocument],
 ) -> list[dict[str, Any]]:
     system = (
         "Output only one complete, compilable XeLaTeX Beamer document. "
@@ -142,14 +143,35 @@ def build_generation_messages(
         title_parts.append(f"Requirements: {request.instruction}")
     title_message = "\n".join(title_parts)
 
-    if document is not None:
-        pages = list(document.selected_pages)
-        if not pages:
-            raise DeckError("No source material available for generation")
+    if documents:
+        multi = len(documents) > 1
         material: list[dict[str, Any]] = []
-        for page in pages:
-            material.append(image_block(page.image_path))
-            material.append(text_block(f"Page {page.number}"))
+        if multi:
+            material.append(
+                text_block(
+                    f"Source material consists of {len(documents)} documents, in reading order. "
+                    "When citing, use the document name and its own page number."
+                )
+            )
+        for document in documents:
+            if multi:
+                material.append(
+                    text_block(
+                        f'--- Document {document.index} of {len(documents)}: "{document.name}" '
+                        f"({len(document.pages)} pages, {len(document.selected_numbers)} shown) ---"
+                    )
+                )
+            for page in document.selected_pages:
+                material.append(image_block(page.image_path))
+                material.append(
+                    text_block(
+                        f'Doc {document.index} ("{document.name}") page {page.number}'
+                        if multi
+                        else f"Page {page.number}"
+                    )
+                )
+        if not any(part.get("type") == "image_url" for part in material):
+            raise DeckError("No source material available for generation")
         material_content: str | list[dict[str, Any]] = material
     else:
         source = request.source_text
@@ -205,6 +227,14 @@ def extract_tex(response: str, template: Template | None) -> str:
         raise DeckError(
             "Model output uses \\includegraphics, but this product provides no external image files"
         )
+
+    # Local-file / shell escapes: a poisoned source document could steer the
+    # model into embedding local file contents (or running commands) via these.
+    for forbidden in (r"\input", r"\include{", r"\write18", r"\openin"):
+        if forbidden in body:
+            raise DeckError(
+                f"Model output uses {forbidden}, which is not allowed in generated decks"
+            )
 
     return tex
 

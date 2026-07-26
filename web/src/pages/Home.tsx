@@ -32,7 +32,8 @@ export default function Home() {
   const [templateKey, setTemplateKey] = useState("");
   const [instruction, setInstruction] = useState("");
   const [sourceTab, setSourceTab] = useState<"pdf" | "text">("pdf");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [sourceText, setSourceText] = useState("");
 
   useEffect(() => {
@@ -48,12 +49,41 @@ export default function Home() {
     })();
   }, []);
 
+  // Dropping a file outside the dropzone must not navigate the tab away
+  // (which would silently nuke the whole form).
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", prevent);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", prevent);
+    };
+  }, []);
+
+  const addFiles = (list: FileList | File[] | null) => {
+    if (!list) return;
+    const pdfs = Array.from(list).filter(
+      (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name),
+    );
+    if (pdfs.length) setFiles((prev) => [...prev, ...pdfs]);
+  };
+  const removeFileAt = (i: number) => setFiles((prev) => prev.filter((_, j) => j !== i));
+  const moveFile = (i: number, d: -1 | 1) =>
+    setFiles((prev) => {
+      const next = [...prev];
+      [next[i], next[i + d]] = [next[i + d], next[i]];
+      return next;
+    });
+  const fmtSize = (bytes: number) =>
+    bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitError(null);
     if (!title.trim()) return setSubmitError("Please enter a title");
     if (!templateKey) return setSubmitError("Please select a template");
-    if (sourceTab === "pdf" && !file) return setSubmitError("Please upload a PDF file");
+    if (sourceTab === "pdf" && files.length === 0) return setSubmitError("Please add at least one PDF");
     if (sourceTab === "text" && !sourceText.trim()) return setSubmitError("Please paste text content");
 
     setSubmitting(true);
@@ -64,7 +94,7 @@ export default function Home() {
         instruction: instruction.trim(),
         author: author.trim(),
         institute: institute.trim(),
-        file: sourceTab === "pdf" ? file : null,
+        files: sourceTab === "pdf" ? files : undefined,
         source_text: sourceTab === "text" ? sourceText : undefined,
       });
       navigate(`/g/${result.id}`);
@@ -139,12 +169,57 @@ export default function Home() {
                 onClick={() => setSourceTab("text")}>Paste text</button>
             </div>
             {sourceTab === "pdf" ? (
-              <label className="flex cursor-pointer flex-col items-center border border-dashed border-[var(--color-border)] bg-slate-50 px-4 py-8 text-sm text-slate-600">
-                <FileUp className="mb-2 h-5 w-5" />
-                {file ? file.name : "Click to select a PDF"}
-                <input type="file" accept="application/pdf,.pdf" className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              </label>
+              <>
+                <label
+                  className={`flex cursor-pointer flex-col items-center border border-dashed px-4 py-8 text-sm text-slate-600 ${
+                    dragOver
+                      ? "border-[var(--color-primary)] bg-sky-50"
+                      : "border-[var(--color-border)] bg-slate-50"
+                  }`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    addFiles(e.dataTransfer.files);
+                  }}
+                >
+                  <FileUp className="mb-2 h-5 w-5" />
+                  {files.length ? "Add another PDF" : "Click to select or drop PDFs"}
+                  <span className="mt-1 text-xs text-slate-400">Order below = reading order</span>
+                  <input type="file" multiple accept="application/pdf,.pdf" className="hidden"
+                    onChange={(e) => {
+                      addFiles(e.target.files);
+                      e.target.value = "";
+                    }} />
+                </label>
+                {files.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {files.map((f, i) => (
+                      <li key={`${f.name}-${i}`}
+                        className="flex items-center gap-2 border border-[var(--color-border)] bg-white px-2 py-1 text-sm">
+                        <span className="text-xs text-slate-400">{i + 1}.</span>
+                        <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                        <span className="shrink-0 text-xs text-slate-400">{fmtSize(f.size)}</span>
+                        <button type="button" title="Move up" disabled={i === 0}
+                          className="px-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
+                          onClick={() => moveFile(i, -1)}>↑</button>
+                        <button type="button" title="Move down" disabled={i === files.length - 1}
+                          className="px-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
+                          onClick={() => moveFile(i, 1)}>↓</button>
+                        <button type="button" title="Remove"
+                          className="px-1 text-red-600 hover:text-red-700"
+                          onClick={() => removeFileAt(i)}>
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             ) : (
               <textarea className="input-field min-h-40" value={sourceText}
                 onChange={(e) => setSourceText(e.target.value)}

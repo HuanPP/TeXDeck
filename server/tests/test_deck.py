@@ -15,11 +15,13 @@ from app.deck import (
     _tex_context_around_error,
     build_generation_messages,
     compile_tex,
+    copy_template_bundle,
     extract_tex,
     get_template,
     list_templates,
 )
 from app.edit import parse_frames
+from app.pdf import PdfDocument, PdfPage
 
 
 # Minimal complete Beamer document that satisfies every extract_tex check.
@@ -74,6 +76,19 @@ def test_get_template_returns_known_template() -> None:
 def test_get_template_unknown_key_raises_value_error() -> None:
     with pytest.raises(ValueError, match="Unknown template"):
         get_template("this-template-does-not-exist-xyz")
+
+
+def test_copy_template_bundle_ships_every_local_sty(tmp_path: Path) -> None:
+    """Regression: only collegebeamer.sty used to be copied, so SimplePlus /
+    Execushares generations compiled without their theme files — Execushares
+    failed outright and SimplePlus silently picked up TeX Live's different copy.
+    """
+    for template in list_templates():
+        target = tmp_path / template.key
+        copy_template_bundle(template, target)
+        expected = {p.name for p in template.dir.glob("*.sty")}
+        got = {p.name for p in target.glob("*.sty")}
+        assert got == expected, f"template {template.key} lost sty files"
 
 
 def test_extract_tex_missing_documentclass() -> None:
@@ -192,7 +207,7 @@ def test_build_generation_messages_order_and_verbatim_template() -> None:
         instruction="Focus on risks",
         source_text="Paragraph of research notes for the deck.",
     )
-    messages = build_generation_messages(template, request, document=None)
+    messages = build_generation_messages(template, request, documents=[])
 
     assert len(messages) == 5
     assert messages[0]["role"] == "system"
@@ -226,7 +241,7 @@ def test_build_generation_messages_empty_author_and_institute() -> None:
         instruction="",
         source_text="Some body text for the slides.",
     )
-    messages = build_generation_messages(template, request, document=None)
+    messages = build_generation_messages(template, request, documents=[])
 
     assert len(messages) == 5
     title_msg = messages[2]["content"]
@@ -255,7 +270,7 @@ def test_build_generation_messages_author_only() -> None:
         instruction="Keep short",
         source_text="Body notes.",
     )
-    messages = build_generation_messages(template, request, document=None)
+    messages = build_generation_messages(template, request, documents=[])
     title_msg = messages[2]["content"]
     assert "Author: Alice" in title_msg
     assert "No author was provided" not in title_msg
@@ -276,7 +291,102 @@ def test_build_generation_messages_no_material_raises() -> None:
         source_text="   \n  ",
     )
     with pytest.raises(DeckError, match="No source material"):
-        build_generation_messages(template, request, document=None)
+        build_generation_messages(template, request, documents=[])
+
+
+def _fake_document(
+    tmp_path: Path,
+    *,
+    index: int,
+    name: str,
+    n_pages: int,
+    selected: list[int] | None = None,
+) -> PdfDocument:
+    """PdfDocument over stub PNG files (image_block only needs an existing file)."""
+    doc_dir = tmp_path / f"doc_{index:02d}"
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    pages: list[PdfPage] = []
+    for n in range(1, n_pages + 1):
+        png = doc_dir / f"page_{n:03d}.png"
+        png.write_bytes(b"\x89PNG-stub")
+        pages.append(PdfPage(number=n, image_path=png, text=f"text {n}"))
+    return PdfDocument(
+        path=tmp_path / name,
+        name=name,
+        index=index,
+        pages=pages,
+        selected_numbers=selected if selected is not None else list(range(1, n_pages + 1)),
+    )
+
+
+def _texts(material: list[dict[str, Any]]) -> list[str]:
+    return [part["text"] for part in material if part.get("type") == "text"]
+
+
+def test_build_generation_messages_multi_doc_boundaries_and_labels(tmp_path: Path) -> None:
+    template = get_template("navy")
+    request = DeckRequest(template_key=template.key, title="Multi Doc Deck")
+    doc_a = _fake_document(tmp_path, index=1, name="a.pdf", n_pages=2)
+    doc_b = _fake_document(tmp_path, index=2, name="b.pdf", n_pages=1)
+
+    messages = build_generation_messages(template, request, documents=[doc_a, doc_b])
+
+    # Envelope untouched: 5 segments, template verbatim in segment 2
+    assert len(messages) == 5
+    assert messages[1]["content"] == template.main_tex
+    assert messages[4]["content"] == messages[2]["content"]
+
+    material = messages[3]["content"]
+    assert isinstance(material, list)
+    texts = _texts(material)
+    assert texts[0] == (
+        "Source material consists of 2 documents, in reading order. "
+        "When citing, use the document name and its own page number."
+    )
+    assert '--- Document 1 of 2: "a.pdf" (2 pages, 2 shown) ---' in texts
+    assert '--- Document 2 of 2: "b.pdf" (1 pages, 1 shown) ---' in texts
+    assert 'Doc 1 ("a.pdf") page 1' in texts
+    assert 'Doc 1 ("a.pdf") page 2' in texts
+    assert 'Doc 2 ("b.pdf") page 1' in texts
+    # Boundary blocks precede their document's pages
+    assert texts.index('--- Document 1 of 2: "a.pdf" (2 pages, 2 shown) ---') < texts.index(
+        'Doc 1 ("a.pdf") page 1'
+    )
+    assert texts.index('--- Document 2 of 2: "b.pdf" (1 pages, 1 shown) ---') > texts.index(
+        'Doc 1 ("a.pdf") page 2'
+    )
+    # One image per selected page, each immediately followed by its label
+    images = [i for i, part in enumerate(material) if part.get("type") == "image_url"]
+    assert len(images) == 3
+    for i in images:
+        assert material[i + 1]["type"] == "text"
+
+
+def test_build_generation_messages_single_doc_stays_identical(tmp_path: Path) -> None:
+    """One document must produce today's exact material: no header, no boundary
+    blocks, labels exactly 'Page N' (locks in the no-drift guarantee)."""
+    template = get_template("navy")
+    request = DeckRequest(template_key=template.key, title="Single Doc Deck")
+    document = _fake_document(tmp_path, index=1, name="a.pdf", n_pages=3, selected=[1, 3])
+
+    messages = build_generation_messages(template, request, documents=[document])
+
+    assert len(messages) == 5
+    material = messages[3]["content"]
+    assert isinstance(material, list)
+    # Exactly image+label per selected page and nothing else
+    assert [part.get("type") for part in material] == ["image_url", "text", "image_url", "text"]
+    assert _texts(material) == ["Page 1", "Page 3"]
+    for text in _texts(material):
+        assert "Doc" not in text and "Document" not in text
+
+
+def test_build_generation_messages_doc_without_selected_pages_raises(tmp_path: Path) -> None:
+    template = get_template("navy")
+    request = DeckRequest(template_key=template.key, title="No Pages")
+    document = _fake_document(tmp_path, index=1, name="a.pdf", n_pages=2, selected=[])
+    with pytest.raises(DeckError, match="No source material"):
+        build_generation_messages(template, request, documents=[document])
 
 
 def test_tex_context_around_error_returns_whole_frame() -> None:

@@ -48,7 +48,7 @@ export function createGeneration(input: {
   instruction: string;
   author?: string;
   institute?: string;
-  file?: File | null;
+  files?: File[];
   source_text?: string;
 }): Promise<{ id: string }> {
   const form = new FormData();
@@ -57,8 +57,12 @@ export function createGeneration(input: {
   form.append("instruction", input.instruction);
   form.append("author", input.author ?? "");
   form.append("institute", input.institute ?? "");
-  if (input.file) form.append("file", input.file);
-  else if (input.source_text !== undefined) form.append("source_text", input.source_text);
+  if (input.files?.length) {
+    // Append order = reading order; the server preserves multipart part order
+    for (const f of input.files) form.append("files", f);
+  } else if (input.source_text !== undefined) {
+    form.append("source_text", input.source_text);
+  }
   return requestJson("/api/generations", { method: "POST", body: form });
 }
 

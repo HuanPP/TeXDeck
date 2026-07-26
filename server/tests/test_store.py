@@ -28,7 +28,7 @@ def _make_gen(**overrides: object) -> GenerationMeta:
         template_name="Navy",
         instruction="",
         source_kind="text",
-        source_name="",
+        source_names=[],
     )
     kwargs.update(overrides)
     return new_generation(**kwargs)  # type: ignore[arg-type]
@@ -80,6 +80,33 @@ def test_load_meta_missing_author_institute_defaults(artifact_root: Path) -> Non
     loaded = load_meta(meta.id)
     assert loaded.author == ""
     assert loaded.institute == ""
+
+
+def test_load_meta_legacy_source_name_becomes_source_names(artifact_root: Path) -> None:
+    """Pre-multi-PDF meta.json carries scalar source_name; the load shim upgrades it."""
+    meta = _make_gen(title="Legacy PDF", source_kind="pdf", source_names=["a.pdf"])
+    path = artifact_root / meta.id / "meta.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("source_names", None)
+    data["source_name"] = "a.pdf"
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    loaded = load_meta(meta.id)
+    assert loaded.source_names == ["a.pdf"]
+
+    # Legacy text mode: source_name "" maps to an empty list
+    data["source_name"] = ""
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    assert load_meta(meta.id).source_names == []
+
+    # The shim also applies to listing
+    listed = {m.id: m for m in list_generations()}
+    assert listed[meta.id].source_names == []
 
 
 def test_list_generations_newest_first_skips_corrupt_meta(artifact_root: Path) -> None:
@@ -136,6 +163,7 @@ def test_bundle_zip_contents(artifact_root: Path) -> None:
 
     (gdir / "main.tex").write_text("% deck\n", encoding="utf-8")
     (gdir / "collegebeamer.sty").write_text("% sty\n", encoding="utf-8")
+    (gdir / "beamerthemeSimplePlus.sty").write_text("% theme\n", encoding="utf-8")
     (gdir / "src" / "brand").mkdir(parents=True)
     (gdir / "src" / "brand" / "logo.png").write_bytes(b"\x89PNG")
     (gdir / "font").mkdir()

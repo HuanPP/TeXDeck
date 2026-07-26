@@ -7,4 +7,5 @@ UVICORN="${ROOT}/.venv/bin/uvicorn"
 if [[ ! -x "$UVICORN" ]]; then
   UVICORN="uvicorn"
 fi
-exec "$UVICORN" app.main:app --reload --host 0.0.0.0 --port 8000
+# Localhost by default: the API has no auth. Set TEXDECK_BIND_HOST=0.0.0.0 to expose deliberately.
+exec "$UVICORN" app.main:app --reload --host "${TEXDECK_BIND_HOST:-127.0.0.1}" --port "${TEXDECK_PORT:-8000}"

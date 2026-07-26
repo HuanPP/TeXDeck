@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     pdf_render_dpi: int = 150  # high-res page images sent to generation
     pdf_thumbnail_dpi: int = 60  # thumbnails for page selection
     pdf_max_vision_pages: int = 40  # trigger page selection above this count
+    pdf_max_page_pixels: int = 40_000_000  # per-page render clamp (decompression-bomb guard)
+
+    max_upload_bytes: int = 100 * 1024 * 1024  # reject uploads larger than this
 
     xelatex_command: str = "xelatex"
     xelatex_timeout_seconds: float = 120.0

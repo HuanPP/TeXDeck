@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from .llm import ProgressCallback
 
 
+class TaskBusy(RuntimeError):
+    """A job is already running (or queued) for this generation."""
+
+
 @dataclass(slots=True)
 class TaskState:
     gen_id: str
@@ -23,6 +27,7 @@ class TaskState:
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="texdeck-task")
 _lock = threading.Lock()
 _states: dict[str, TaskState] = {}
+_running: set[str] = set()  # gen_ids with a queued or running job
 _subscribers: dict[str, list[asyncio.Queue[TaskState]]] = {}
 # Captured when start() runs inside an event loop; workers use it for broadcast
 _loop: asyncio.AbstractEventLoop | None = None
@@ -55,6 +60,11 @@ def _set_and_broadcast(state: TaskState) -> None:
             pass
 
 
+def is_running(gen_id: str) -> bool:
+    with _lock:
+        return gen_id in _running
+
+
 def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
     global _loop
     try:
@@ -62,6 +72,11 @@ def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
     except RuntimeError:
         # no running loop (tests): update state dict only, no broadcast
         _loop = None
+
+    with _lock:
+        if gen_id in _running:
+            raise TaskBusy(f"A job is already running for generation {gen_id}")
+        _running.add(gen_id)
 
     initial = TaskState(
         gen_id=gen_id,
@@ -98,6 +113,9 @@ def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
                 )
             )
             return
+        finally:
+            with _lock:
+                _running.discard(gen_id)
         _set_and_broadcast(
             TaskState(
                 gen_id=gen_id,
@@ -108,7 +126,12 @@ def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
             )
         )
 
-    _executor.submit(runner)
+    try:
+        _executor.submit(runner)
+    except BaseException:
+        with _lock:
+            _running.discard(gen_id)
+        raise
 
 
 def get(gen_id: str) -> TaskState | None:

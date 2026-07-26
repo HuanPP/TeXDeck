@@ -9,6 +9,7 @@ import fitz
 import pytest
 
 from app.config import settings
+from app.deck import copy_template_bundle, get_template
 from app.edit import parse_frames
 
 
@@ -89,16 +90,13 @@ def test_template_compiles_after_stripping_instruction_frames(
     work = tmp_path / template_key
     work.mkdir()
 
-    # main.tex + all .sty + src/ + font/ (when present)
-    shutil.copy2(src / "main.tex", work / "main.tex")
-    for sty in src.glob("*.sty"):
-        shutil.copy2(sty, work / sty.name)
-    for folder in ("src", "font"):
-        src_folder = src / folder
-        if src_folder.is_dir():
-            shutil.copytree(src_folder, work / folder)
+    # Build the work dir exactly like production (_run_generation): the bundle
+    # copy plus a written main.tex. Copying files any other way here once masked
+    # a bundle bug where theme .sty files never reached the generation dir.
+    template = get_template(template_key)
+    copy_template_bundle(template, work)
 
-    original = (work / "main.tex").read_text(encoding="utf-8")
+    original = template.main_tex
     cleaned = _strip_instruction_frames(original)
     # Sanity: instruction frames actually removed
     for frame in parse_frames(cleaned):

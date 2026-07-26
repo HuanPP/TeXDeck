@@ -31,9 +31,16 @@ class FrameEditBody(BaseModel):
     instruction: str
 
 
+# Hard cap on PDFs per generation; the combined 200-page cap is enforced in pdf.load_pdfs.
+MAX_UPLOAD_FILES = 10
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings.artifact_root.mkdir(parents=True, exist_ok=True)
+    # Jobs live only in this process; anything still "running" on disk was
+    # killed by the previous shutdown and will never finish.
+    store.mark_interrupted_generations()
     yield
 
 
@@ -113,17 +120,21 @@ def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -
         template = deck.get_template(meta.template_key)
         deck.copy_template_bundle(template, gdir)
         progress("Preparing template", 2)
-        document = None
+        documents: list[pdf.PdfDocument] = []
         if meta.source_kind == "pdf":
-            source_pdf = gdir / "source.pdf"
-            if not source_pdf.is_file():
-                raise RuntimeError("Uploaded PDF is missing")
+            paths = sorted(gdir.glob("source_*.pdf"))
+            if not paths:
+                raise RuntimeError("Uploaded PDFs are missing")
+            if len(paths) != len(meta.source_names):
+                raise RuntimeError("Source file count does not match metadata")
 
             def pdf_progress(stage: str, percent: int) -> None:
                 progress(stage, 5 + percent * 40 // 100)
 
-            document = pdf.load_pdf(source_pdf, gdir, progress=pdf_progress)
-            meta.page_count = len(document.pages)
+            documents = pdf.load_pdfs(
+                list(zip(paths, meta.source_names, strict=True)), gdir, progress=pdf_progress
+            )
+            meta.page_count = sum(len(d.pages) for d in documents)
             store.save_meta(meta)
         request = DeckRequest(
             template_key=template.key,
@@ -133,7 +144,7 @@ def _run_generation(gen_id: str, source_text: str, progress: ProgressCallback) -
             instruction=meta.instruction,
             source_text=source_text if meta.source_kind == "text" else "",
         )
-        messages = deck.build_generation_messages(template, request, document)
+        messages = deck.build_generation_messages(template, request, documents)
         progress("Generating slides with the model", 50)
         client = create_client()
         response = client.complete(messages)
@@ -252,6 +263,21 @@ def api_list_generations() -> list[dict[str, Any]]:
     return [asdict(m) for m in store.list_generations()]
 
 
+async def _read_upload_capped(file: UploadFile) -> bytes:
+    """Read one upload in 1MB chunks; the size cap applies per file."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1 << 20):
+        total += len(chunk)
+        if total > settings.max_upload_bytes:
+            limit_mb = settings.max_upload_bytes // (1024 * 1024)
+            raise HTTPException(
+                413, detail=f"Uploaded PDF exceeds the {limit_mb} MB limit: {file.filename}"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @app.post("/api/generations")
 async def api_create_generation(
     title: str = Form(...),
@@ -260,7 +286,7 @@ async def api_create_generation(
     source_text: str = Form(""),
     author: str = Form(""),
     institute: str = Form(""),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] = File(default=[]),
 ) -> JSONResponse:
     try:
         template = deck.get_template(template_key)
@@ -268,29 +294,35 @@ async def api_create_generation(
         raise HTTPException(400, detail=str(e)) from e
     if not title.strip():
         raise HTTPException(400, detail="Title must not be empty")
-    has_file = file is not None and bool(file.filename)
-    if has_file:
-        assert file is not None
-        content = await file.read()
-        if not content:
-            raise HTTPException(400, detail="Uploaded PDF is empty")
-        kind, name, text_body = "pdf", (file.filename or "source.pdf"), ""
+    uploads = [f for f in files if f.filename]
+    if len(uploads) > MAX_UPLOAD_FILES:
+        raise HTTPException(400, detail=f"At most {MAX_UPLOAD_FILES} PDF files per generation")
+    if uploads:
+        contents: list[bytes] = []
+        for f in uploads:
+            data = await _read_upload_capped(f)
+            if not data:
+                raise HTTPException(400, detail=f"Uploaded PDF is empty: {f.filename}")
+            contents.append(data)
+        kind, names, text_body = "pdf", [f.filename or "source.pdf" for f in uploads], ""
     elif source_text.strip():
-        content, kind, name, text_body = None, "text", "", source_text
+        contents, kind, names, text_body = [], "text", [], source_text
     else:
-        raise HTTPException(400, detail="Upload a PDF or provide pasted text")
+        raise HTTPException(400, detail="Upload at least one PDF or provide pasted text")
     meta = store.new_generation(
         title=title.strip(),
         template_key=template.key,
         template_name=template.name,
         instruction=instruction or "",
         source_kind=kind,
-        source_name=name,
+        source_names=names,
         author=(author or "").strip(),
         institute=(institute or "").strip(),
     )
-    if content is not None:
-        (store.generation_dir(meta.id) / "source.pdf").write_bytes(content)
+    gdir = store.generation_dir(meta.id)
+    # source_XX.pdf index encodes reading order; original names live in meta.source_names
+    for i, data in enumerate(contents, start=1):
+        (gdir / f"source_{i:02d}.pdf").write_bytes(data)
     gen_id, text_for_job = meta.id, text_body
 
     def job(progress: ProgressCallback) -> None:
@@ -308,6 +340,8 @@ def api_get_generation(gen_id: str) -> dict[str, Any]:
 @app.delete("/api/generations/{gen_id}", status_code=204)
 def api_delete_generation(gen_id: str) -> Response:
     _load(gen_id)
+    if tasks.is_running(gen_id):
+        raise HTTPException(409, detail="Cannot delete while a job is running for this generation")
     try:
         store.delete_generation(gen_id)
     except KeyError as e:
@@ -365,14 +399,21 @@ def api_edit_frame(gen_id: str, index: int, body: FrameEditBody) -> Response:
     if not body.instruction.strip():
         raise HTTPException(400, detail="Edit instruction must not be empty")
     tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
-    if not any(f.index == index for f in parse_frames(tex_path.read_text(encoding="utf-8"))):
+    try:
+        frames = parse_frames(tex_path.read_text(encoding="utf-8"))
+    except EditError as e:
+        raise HTTPException(422, detail=str(e)) from e
+    if not any(f.index == index for f in frames):
         raise HTTPException(400, detail=f"Slide index not found: {index}")
     instruction = body.instruction
 
     def job(progress: ProgressCallback) -> None:
         _run_edit(gen_id, index, instruction, progress)
 
-    tasks.start(gen_id, job)
+    try:
+        tasks.start(gen_id, job)
+    except tasks.TaskBusy as e:
+        raise HTTPException(409, detail=str(e)) from e
     return Response(status_code=202)
 
 
@@ -384,5 +425,28 @@ async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
         await websocket.close(code=1008, reason="Invalid generation ID")
         return
     await websocket.accept()
+    if tasks.get(gen_id) is None:
+        # No live job in this process: answer from disk instead of hanging forever
+        # (unknown id, or a job the last server run finished/lost).
+        try:
+            meta = store.load_meta(gen_id)
+        except KeyError:
+            await websocket.close(code=1008, reason=f"Generation not found: {gen_id}")
+            return
+        status = meta.status if meta.status in ("succeeded", "failed") else "failed"
+        error = meta.error or ("Job is no longer running" if status == "failed" else "")
+        await websocket.send_json(
+            asdict(
+                tasks.TaskState(
+                    gen_id=gen_id,
+                    status=status,
+                    percent=100 if status == "succeeded" else 0,
+                    stage="Done" if status == "succeeded" else "Failed",
+                    error=error,
+                )
+            )
+        )
+        await websocket.close()
+        return
     async for state in tasks.watch(gen_id):
         await websocket.send_json(asdict(state))

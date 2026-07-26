@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .config import settings
 
@@ -23,12 +24,12 @@ class GenerationMeta:
     template_name: str
     instruction: str
     source_kind: str  # "pdf" | "text"
-    source_name: str  # original filename; "" for text mode
+    source_names: list[str]  # original filenames, upload order = reading order; [] for text mode
     status: str  # "running" | "succeeded" | "failed"
     error: str  # failure reason (English); "" on success
     created_at: str  # ISO8601
     updated_at: str
-    page_count: int  # source PDF pages; 0 for text mode
+    page_count: int  # total source pages across ALL PDFs; 0 for text mode
     frame_count: int  # finished slide count; 0 while incomplete
     edit_count: int
     author: str = ""  # optional; missing in older meta.json
@@ -57,11 +58,11 @@ def new_generation(
     template_name: str,
     instruction: str,
     source_kind: str,
-    source_name: str,
+    source_names: list[str],
     author: str = "",
     institute: str = "",
 ) -> GenerationMeta:
-    gen_id = _gen_id()
+    gen_id, directory = _claim_generation_dir()
     now = _now_iso()
     meta = GenerationMeta(
         id=gen_id,
@@ -70,7 +71,7 @@ def new_generation(
         template_name=template_name,
         instruction=instruction,
         source_kind=source_kind,
-        source_name=source_name,
+        source_names=list(source_names),
         status="running",
         error="",
         created_at=now,
@@ -81,10 +82,35 @@ def new_generation(
         author=author,
         institute=institute,
     )
-    directory = generation_dir(gen_id)
-    directory.mkdir(parents=True, exist_ok=False)
     _write_meta_file(directory / "meta.json", meta)
     return meta
+
+
+def _claim_generation_dir() -> tuple[str, Path]:
+    """Mint an id and atomically create its directory; retry on same-second collision."""
+    last_exc: OSError | None = None
+    for _ in range(5):
+        gen_id = _gen_id()
+        directory = generation_dir(gen_id)
+        try:
+            directory.mkdir(parents=True, exist_ok=False)
+        except FileExistsError as exc:
+            last_exc = exc
+            continue
+        return gen_id, directory
+    raise RuntimeError("Could not allocate a unique generation ID") from last_exc
+
+
+def _meta_from_dict(data: dict[str, Any]) -> GenerationMeta:
+    """Build GenerationMeta from a meta.json dict, upgrading legacy schemas.
+
+    Pre-multi-PDF meta.json carries a scalar source_name instead of source_names.
+    """
+    if "source_names" not in data:
+        legacy = data.pop("source_name", "")
+        data["source_names"] = [legacy] if legacy else []
+    data.pop("source_name", None)
+    return GenerationMeta(**data)
 
 
 def load_meta(gen_id: str) -> GenerationMeta:
@@ -92,7 +118,7 @@ def load_meta(gen_id: str) -> GenerationMeta:
     if not path.is_file():
         raise KeyError(gen_id)
     data = json.loads(path.read_text(encoding="utf-8"))
-    return GenerationMeta(**data)
+    return _meta_from_dict(data)
 
 
 def save_meta(meta: GenerationMeta) -> None:
@@ -121,7 +147,7 @@ def list_generations() -> list[GenerationMeta]:
             continue
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
-            result.append(GenerationMeta(**data))
+            result.append(_meta_from_dict(data))
         except Exception as exc:
             # Listing: skip corrupted meta with a warning; do not block other entries
             print(f"Warning: skipping corrupted meta.json: {meta_path} ({exc})")
@@ -149,18 +175,31 @@ def next_edit_dir(gen_id: str) -> Path:
     return path
 
 
+def mark_interrupted_generations() -> int:
+    """Fail any meta still 'running' (a restart killed its in-process job)."""
+    n = 0
+    for meta in list_generations():
+        if meta.status == "running":
+            meta.status = "failed"
+            meta.error = "Interrupted by server restart"
+            save_meta(meta)
+            n += 1
+    return n
+
+
 def bundle_zip(gen_id: str) -> Path:
     directory = generation_dir(gen_id)
     if not directory.is_dir():
         raise KeyError(gen_id)
     zip_path = directory / "bundle.zip"
-    names = ("main.tex", "collegebeamer.sty")
+    tmp_path = directory / "bundle.zip.tmp"
     dirs = ("src", "font")
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for name in names:
-            src = directory / name
-            if src.is_file():
-                zf.write(src, arcname=name)
+    with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        main_tex = directory / "main.tex"
+        if main_tex.is_file():
+            zf.write(main_tex, arcname="main.tex")
+        for sty in sorted(directory.glob("*.sty")):
+            zf.write(sty, arcname=sty.name)
         for dirname in dirs:
             src_dir = directory / dirname
             if not src_dir.is_dir():
@@ -169,4 +208,6 @@ def bundle_zip(gen_id: str) -> Path:
                 if file_path.is_file():
                     arcname = file_path.relative_to(directory).as_posix()
                     zf.write(file_path, arcname=arcname)
+    # Atomic publish so a concurrent download never streams a half-written zip
+    tmp_path.replace(zip_path)
     return zip_path

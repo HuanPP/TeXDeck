@@ -49,9 +49,26 @@ def parse_frames(tex: str) -> list[Frame]:
             if m is None:
                 # Literal match but irregular form; still treat as frame start
                 open_title = ""
+                begin_end = line.index(r"\begin{frame}") + len(r"\begin{frame}")
             else:
                 open_title = m.group(1) if m.group(1) is not None else ""
+                begin_end = m.end()
             open_start = line_no
+            # Compact frames close on the line they open; models emit these.
+            if _END_FRAME in line[begin_end:]:
+                index += 1
+                frames.append(
+                    Frame(
+                        index=index,
+                        title=open_title,
+                        start_line=line_no,
+                        end_line=line_no,
+                        tex=line,
+                        page=0,
+                    )
+                )
+                open_start = None
+                open_title = ""
             continue
 
         if _END_FRAME in line:

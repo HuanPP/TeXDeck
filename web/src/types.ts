@@ -9,7 +9,7 @@ export type GenerationMeta = {
   template_name: string;
   instruction: string;
   source_kind: string;
-  source_name: string;
+  source_names: string[];
   status: TaskStatus;
   error: string;
   created_at: string;
@@ -20,7 +20,7 @@ export type GenerationMeta = {
 };
 
 export type TemplateItem = { key: string; name: string };
-export type FrameItem = { index: number; title: string; tex: string };
+export type FrameItem = { index: number; title: string; page: number; tex: string };
 export type TaskEvent = {
   gen_id: string;
   status: TaskStatus;

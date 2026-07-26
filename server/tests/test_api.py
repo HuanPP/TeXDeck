@@ -87,6 +87,83 @@ def test_create_generation_requires_material(client: TestClient) -> None:
     assert "PDF" in detail or "text" in detail.lower() or "Upload" in detail
 
 
+def test_create_generation_multi_pdf_happy_path(
+    client: TestClient, artifact_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multiple PDFs: 202, source_names in upload order, source_XX.pdf bytes on disk."""
+    from app import tasks
+
+    monkeypatch.setattr(tasks, "start", lambda _gen_id, _job: None)
+
+    templates = client.get("/api/templates").json()
+    assert templates, "need at least one real template"
+    key = templates[0]["key"]
+    bytes_a, bytes_b = b"%PDF-1.7 fake A", b"%PDF-1.7 fake B"
+    r = client.post(
+        "/api/generations",
+        data={"title": "Two PDF Deck", "template_key": key, "instruction": ""},
+        files=[
+            ("files", ("a.pdf", bytes_a, "application/pdf")),
+            ("files", ("b.pdf", bytes_b, "application/pdf")),
+        ],
+    )
+    assert r.status_code == 202, r.text
+    gen_id = r.json()["id"]
+    meta = client.get(f"/api/generations/{gen_id}").json()
+    assert meta["source_kind"] == "pdf"
+    assert meta["source_names"] == ["a.pdf", "b.pdf"]
+    gdir = artifact_root / gen_id
+    assert (gdir / "source_01.pdf").read_bytes() == bytes_a
+    assert (gdir / "source_02.pdf").read_bytes() == bytes_b
+    assert not (gdir / "source.pdf").exists()
+
+
+def test_create_generation_empty_pdf_among_several_names_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import tasks
+
+    monkeypatch.setattr(tasks, "start", lambda _gen_id, _job: None)
+
+    templates = client.get("/api/templates").json()
+    key = templates[0]["key"]
+    r = client.post(
+        "/api/generations",
+        data={"title": "Empty Member Deck", "template_key": key},
+        files=[
+            ("files", ("a.pdf", b"%PDF-1.7 fake A", "application/pdf")),
+            ("files", ("hollow.pdf", b"", "application/pdf")),
+        ],
+    )
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "empty" in detail.lower()
+    assert "hollow.pdf" in detail
+
+
+def test_create_generation_rejects_more_than_ten_files(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import tasks
+
+    monkeypatch.setattr(tasks, "start", lambda _gen_id, _job: None)
+
+    templates = client.get("/api/templates").json()
+    key = templates[0]["key"]
+    uploads = [
+        ("files", (f"doc_{i:02d}.pdf", b"%PDF-1.7 fake", "application/pdf"))
+        for i in range(1, 12)  # 11 files
+    ]
+    r = client.post(
+        "/api/generations",
+        data={"title": "Too Many Deck", "template_key": key},
+        files=uploads,
+    )
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "10" in detail
+
+
 def test_create_generation_accepts_author_and_institute(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
