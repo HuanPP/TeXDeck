@@ -56,12 +56,26 @@
     % them to full width, which looks wrong in English text (dollar's -> dollar ' s).
     \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
     
-    \setmainfont[Path=./font/]{EBGaramond12-Regular.otf}
-    \setsansfont[Path=./font/]{EBGaramond12-Regular.otf}
+    % True bold/italic cuts shipped in font/ so \textbf, \emph, \textsl and the
+    % frametitle bold series render with real weights (no silent regular fallback).
+    \setmainfont[
+      Path            = ./font/,
+      BoldFont        = EBGaramond-Bold.otf,
+      ItalicFont      = EBGaramond-Italic.otf,
+      BoldItalicFont  = EBGaramond-BoldItalic.otf,
+      SlantedFont     = EBGaramond-Italic.otf,
+      BoldSlantedFont = EBGaramond-BoldItalic.otf
+    ]{EBGaramond12-Regular.otf}
+    \setsansfont[
+      Path            = ./font/,
+      BoldFont        = EBGaramond-Bold.otf,
+      ItalicFont      = EBGaramond-Italic.otf,
+      BoldItalicFont  = EBGaramond-BoldItalic.otf,
+      SlantedFont     = EBGaramond-Italic.otf,
+      BoldSlantedFont = EBGaramond-BoldItalic.otf
+    ]{EBGaramond12-Regular.otf}
 
 
-
-    
     % FandolKai: TeX Live / Overleaf 自带，按文件名加载，跨平台通用
     \setCJKmainfont{FandolKai-Regular}[
       Extension   = .otf,
@@ -102,15 +116,21 @@
 \geometry{paperwidth=16cm,paperheight=9cm}
 
 % logo
-\pgfdeclareimage[width=0.09\paperwidth]{colorlogo}{\colorlogoPath}
-\pgfdeclareimage[width=0.09\paperwidth]{translogo}{\translogoPath}
+\pgfdeclareimage[width=0.055\paperwidth]{colorlogo}{\colorlogoPath}
+\pgfdeclareimage[width=0.055\paperwidth]{translogo}{\translogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-\setbeamertemplate{headline}{\hspace{0.06\textwidth}\pgfuseimage{\@makelogo}} % put the logo in each slide's top left area
+% logo top-right so frame titles can share the body text's left edge
+\setbeamertemplate{headline}{\vspace{2mm}\hfill\pgfuseimage{\@makelogo}\hspace{0.04\paperwidth}}
+
+% one left edge for frame title and body text (see frametitle leftskip below)
+\setbeamersize{text margin left=10.5mm, text margin right=10.5mm}
 
 % color
 \definecolor{maincolor}{RGB}{\maincolorRGB}
-\definecolor{airforceblue}{rgb}{0.36, 0.54, 0.66}
+% accent for links / b-commands: muted gold, tuned to sit with the emerald palette
+% (name kept for backwards compatibility with the b-command family)
+\definecolor{airforceblue}{RGB}{176, 141, 74}
 \definecolor{morelightgray}{rgb}{0.9, 0.9, 0.9}
 
 \newcommand{\themecolor}[1]{
@@ -138,12 +158,17 @@
 
 \AtEndOfPackage{%
   \ifcollegebeamer@zh
-    \setbeamerfont{title}{series=\bfseries, size=\Large}
+    \setbeamerfont{title}{series=\bfseries, size=\huge}
   \else
-    \setbeamerfont{title}{series=\scshape, size=\Large}
-    
+    \setbeamerfont{title}{series=\scshape, size=\huge}
+
   \fi
 }
+
+% lining tabular figures for data: EB Garamond defaults to oldstyle proportional
+% digits, which hang below the baseline in charts and tables. Switch inside
+% tikzpicture tick labels, tabulars and the outline numbers via \datafont.
+\newcommand{\datafont}{\addfontfeature{Numbers={Lining,Monospaced}}}
 
 \setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
 \setbeamerfont{author}{size=\normalsize}
@@ -156,32 +181,28 @@
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
 
-% footline
-\newcommand{\@footlinepayoff}{\@SINTEFmotto}
+% footline: quiet page indicator bottom-right (title/TOC/QA pages suppress it)
+\newcommand{\@footlinepayoff}{}  % optional extra footline text, empty by default
 \setbeamertemplate{footline}{
-    \begin{beamercolorbox}[wd=\textwidth, ht=5mm, dp=3mm, rightskip=1cm]{footline}
-    \usebeamerfont{footline}\hfill\@footlinepayoff
-    \end{beamercolorbox}
+    \hfill{\usebeamerfont{footline}\color{maincolor!60}\@footlinepayoff\insertframenumber\,/\,\inserttotalframenumber}\hspace{6mm}\vskip3mm
 }
 
 \newcommand{\footlinecolor}[1]{
-    % if #1 is empty, makes footline transparent
+    % if #1 is empty, makes the footline background transparent
     \ifstrempty{#1}{
-        \renewcommand{\@footlinepayoff}{}
         \setbeamercolor{footline}{bg=}
     }{
-        \renewcommand{\@footlinepayoff}{\@SINTEFmotto}
         \setbeamercolor{footline}{fg=white, bg=#1}
     }
 }
-\footlinecolor{} % default: no footline
+\footlinecolor{} % default: transparent footline background
 
 % block
 \setbeamertemplate{blocks}[rounded]
 \setbeamerfont{block title}{series=\centering, size=\small}
 \setbeamerfont{block body}{size=\scriptsize}
-\setbeamercolor{block title}{fg=airforceblue, bg=morelightgray}
-\setbeamercolor{block body}{fg=darkgray, bg=morelightgray}
+\setbeamercolor{block title}{fg=white, bg=maincolor!85}
+\setbeamercolor{block body}{fg=darkgray, bg=maincolor!8}
 
 % bullets
 \setbeamertemplate{itemize item}{\textbullet}
@@ -226,9 +247,10 @@
 % subsection
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
-% presents subtitle on each frame
+% presents subtitle on each frame; guarded so nothing (not even a stray "0")
+% prints before the first \section is defined
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\thesection \, \secname}}
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 \thesection \, \secname\fi}}
 \makeatother
 
 % avoid numbering of frames that are breaked into multiply slides
@@ -263,7 +285,9 @@
 % frame title & subtitle layout
 \setbeamertemplate{frametitle}{
     \vspace*{-3.5ex}
-    \begin{beamercolorbox}[leftskip=2cm]{frametitle}
+    % leftskip=0: the box already starts at the 10.5mm text margin, so the
+    % frame title shares one left edge with the body text
+    \begin{beamercolorbox}[leftskip=0mm]{frametitle}
     \usebeamerfont{frametitle}\insertframetitle\\
     \usebeamerfont{framesubtitle}\insertframesubtitle
     \end{beamercolorbox}
@@ -303,8 +327,9 @@
             \begin{minipage}{\textwidth}
                 \usebeamercolor[fg]{normal text}
                 \centering
-                \Huge $$\mathcal Q \& \mathcal A$$
-                \Large \qaStr
+                {\Huge Q\,\&\,A\par}
+                \vskip10pt
+                {\Large \qaStr\par}
             \end{minipage}
         \end{frame}
     \endgroup

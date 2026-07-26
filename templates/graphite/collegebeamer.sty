@@ -53,8 +53,16 @@
     % them to full width, which looks wrong in English text (dollar's -> dollar ' s).
     \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
 
-    \setmainfont[Path=./font/]{texgyrepagella-regular.otf}
-    \setsansfont[Path=./font/]{texgyrepagella-regular.otf}
+    \setmainfont[Path=./font/,
+      BoldFont       = texgyrepagella-bold.otf,
+      ItalicFont     = texgyrepagella-italic.otf,
+      BoldItalicFont = texgyrepagella-bolditalic.otf,
+    ]{texgyrepagella-regular.otf}
+    \setsansfont[Path=./font/,
+      BoldFont       = texgyrepagella-bold.otf,
+      ItalicFont     = texgyrepagella-italic.otf,
+      BoldItalicFont = texgyrepagella-bolditalic.otf,
+    ]{texgyrepagella-regular.otf}
 
     % Dark broker-report typography: Song for body, Hei for headings.
     \setCJKmainfont{FandolSong-Regular}[
@@ -98,15 +106,19 @@
 \pgfdeclareimage[width=0.082\paperwidth]{translogo}{\translogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-\setbeamertemplate{headline}{\hspace{0.06\textwidth}\pgfuseimage{\@makelogo}}
+% Logo lives top-right so frametitle, subtitle and body share one left edge.
+\setbeamertemplate{headline}{%
+  \vspace{0.03\paperheight}%
+  \hbox to \paperwidth{\hfil\pgfuseimage{\@makelogo}\hspace{0.035\paperwidth}}%
+}
 
 % color
 \definecolor{maincolor}{RGB}{\maincolorRGB}
-\definecolor{airforceblue}{RGB}{122, 98, 106}
-\definecolor{morelightgray}{RGB}{245, 242, 243}
-\definecolor{reporttext}{RGB}{46, 38, 41}
-\definecolor{reportmuted}{RGB}{118, 104, 109}
-\definecolor{reportline}{RGB}{216, 205, 208}
+\definecolor{airforceblue}{RGB}{90, 90, 96}
+\definecolor{morelightgray}{RGB}{242, 242, 244}
+\definecolor{reporttext}{RGB}{38, 38, 42}
+\definecolor{reportmuted}{RGB}{110, 110, 116}
+\definecolor{reportline}{RGB}{214, 214, 218}
 
 \newcommand{\themecolor}[1]{
     \ifstrequal{#1}{colorbg}{
@@ -151,21 +163,21 @@
 
 \setbeamertemplate{navigation symbols}{}
 
-% footline
-\newcommand{\@footlinepayoff}{\@SINTEFmotto}
+% footline: hairline + right-aligned frame counter (always shown)
+\newcommand{\@footlinepayoff}{}
 \setbeamertemplate{footline}{
-    \begin{beamercolorbox}[wd=\textwidth, ht=4.8mm, dp=2.5mm, leftskip=0.9cm, rightskip=0.9cm]{footline}
-    \color{reportmuted}\rule{\textwidth}{0.25pt}\par\vspace{-0.15ex}
-    \usebeamerfont{footline}\color{reportmuted}\hfill\@footlinepayoff
+    \begin{beamercolorbox}[wd=\textwidth, ht=4.8mm, dp=2.5mm, leftskip=1cm, rightskip=1cm]{footline}
+    \color{reportline}\rule{\dimexpr\textwidth-2cm\relax}{0.25pt}\par\vspace{-0.15ex}
+    \usebeamerfont{footline}\usebeamercolor[fg]{footline}\@footlinepayoff\hfill\insertframenumber\,/\,\inserttotalframenumber
     \end{beamercolorbox}
 }
 
 \newcommand{\footlinecolor}[1]{
     \ifstrempty{#1}{
         \renewcommand{\@footlinepayoff}{}
-        \setbeamercolor{footline}{bg=}
+        \setbeamercolor{footline}{fg=reportmuted, bg=}
     }{
-        \renewcommand{\@footlinepayoff}{\@SINTEFmotto}
+        \renewcommand{\@footlinepayoff}{\insertshorttitle}
         \setbeamercolor{footline}{fg=white, bg=#1}
     }
 }
@@ -177,12 +189,12 @@
 \setbeamercolor{block body}{fg=reporttext, bg=morelightgray}
 
 % bullets
-\setbeamertemplate{itemize item}{\raisebox{0.18ex}{\scriptsize\textcolor{maincolor}{$\blacklozenge$}}}
-\setbeamertemplate{itemize subitem}{\raisebox{0.16ex}{\scriptsize\textcolor{airforceblue}{$\triangleright$}}}
+\setbeamertemplate{itemize item}{\raisebox{0.28ex}{\textcolor{maincolor}{\rule{4.5pt}{4.5pt}}}}
+\setbeamertemplate{itemize subitem}{\textcolor{reportmuted}{\textendash}}
 \setbeamertemplate{itemize subsubitem}{\textcolor{reportmuted}{\tiny$\circ$}}
 
 % table of contents
-\setbeamertemplate{section in toc}{\textcolor{maincolor}{$\blacktriangleright$}~\inserttocsection}
+\setbeamertemplate{section in toc}{\raisebox{0.28ex}{\textcolor{maincolor}{\rule{4.5pt}{4.5pt}}}~\inserttocsection}
 \setbeamertemplate{subsection in toc}{}
 
 % code block setting
@@ -251,12 +263,16 @@
 }
 
 % --- page elements ---
+% Title left edge = body left edge (the 1cm beamer text margin; the colorbox
+% already starts there, so no extra leftskip). The section subtitle is guarded
+% so frames before the first \section never print a bare "0".
 \setbeamertemplate{frametitle}{
-    \vspace*{-3.1ex}
-    \begin{beamercolorbox}[leftskip=2cm, sep=0.75ex]{frametitle}
+    \vspace*{0.75ex}
+    \begin{beamercolorbox}[sep=0pt]{frametitle}
     \usebeamerfont{frametitle}\insertframetitle\\
-    \usebeamerfont{framesubtitle}\insertframesubtitle
+    {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\ifnum\value{section}>0\insertframesubtitle\fi}
     \end{beamercolorbox}
+    \vspace*{0.5ex}
 }
 
 \setbeamertemplate{title page}{

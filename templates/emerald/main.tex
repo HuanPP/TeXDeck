@@ -9,7 +9,9 @@
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the collegeBeamer theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5. Keep each slide's body text to roughly 8--10 lines. Page budget: target
+%    12--18 slides total, with AT MOST 10 CONTENT slides — the title page, TOC,
+%    section-transition pages and the Q&A page are NOT counted in that budget.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): collegebeamer,
@@ -41,33 +43,28 @@
 \AtBeginSection[]{}
 
 % -----------------------------------------------------------------------------
-% 1.1 Make "subtitle under each slide title" show FULL and stable
+% 1.1 Title page
 % -----------------------------------------------------------------------------
-% Some collegeBeamer variants put only \insertsectionnumber under the title,
-% which may appear as "0" or look incomplete.
-% Here we redefine framesubtitle so it always shows:
-%   "Section number  Section name"
-% and avoids showing anything before the first \section is defined.
-\setbeamertemplate{framesubtitle}{%
-  \vspace{-0.6ex}%
-  {\scriptsize\color{maincolor}%
-    \ifnum\value{section}>0
-      \thesection\quad\insertsectionhead
-    \fi
-  }\par
-  \vspace{-0.4ex}%
-}
+% The theme prints "section number + section name" under every frame title
+% automatically (guarded inside collegebeamer.sty, so nothing shows before the
+% first \section). No framesubtitle overrides are needed here.
 
-% Keep title page compilable when subtitle/author/institute are left empty.
+% Title page: empty \subtitle{}/\author{} rows are skipped entirely, so an
+% unfilled field never leaves a blank gap between title and date.
+\makeatletter
 \setbeamertemplate{title page}{
     \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\leavevmode\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\leavevmode\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \begin{beamercolorbox}[wd=0.75\textwidth, sep=10pt, leftskip=8mm]{title}
+        {\usebeamerfont{title}\inserttitle\par}
+        \vskip4pt\textcolor{maincolor}{\rule{28mm}{1.5pt}}\par
+        \ifdefempty{\insertsubtitle}{}{%
+            \vskip6pt{\usebeamerfont{subtitle}\insertsubtitle\par}}
+        \ifdefempty{\beamer@shortauthor}{}{%
+            \vskip6pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}}
+        \vskip6pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
     \end{beamercolorbox}
 }
+\makeatother
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -90,18 +87,19 @@
 % FRAME 2: MANUAL TABLE OF CONTENTS
 % =============================================================================
 \begin{frame}{Outline}
-\large
+\large\datafont
 \renewcommand{\baselinestretch}{1.8}\selectfont
+% \makebox keeps a fixed number column so all titles share one left edge
 
-01 \quad Title of Part One
+\makebox[2.4em][l]{01} Title of Part One
 
-02 \quad Title of Part Two
+\makebox[2.4em][l]{02} Title of Part Two
 
-03 \quad Title of Part Three
+\makebox[2.4em][l]{03} Title of Part Three
 
-04 \quad Title of Part Four
+\makebox[2.4em][l]{04} Title of Part Four
 
-05 \quad Summary \& Q\&A
+\makebox[2.4em][l]{05} Summary \& Q\&A
 \end{frame}
 
 % =============================================================================
@@ -116,18 +114,18 @@
 % LLM MUST generate one such page before EACH section
 % =============================================================================
 \begin{frame}{Outline}
-\large
+\large\datafont
 \renewcommand{\baselinestretch}{1.8}\selectfont
 
-\textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
+\textbf{\textcolor{maincolor}{\makebox[2.4em][l]{01} Title of Part One}}
 
-02 \quad Title of Part Two
+\makebox[2.4em][l]{02} Title of Part Two
 
-03 \quad Title of Part Three
+\makebox[2.4em][l]{03} Title of Part Three
 
-04 \quad Title of Part Four
+\makebox[2.4em][l]{04} Title of Part Four
 
-05 \quad Summary \& Q\&A
+\makebox[2.4em][l]{05} Summary \& Q\&A
 \end{frame}
 
 % =============================================================================
@@ -135,7 +133,7 @@
 % =============================================================================
 % Content page example 1: Text-left, figure-right layout
 \begin{frame}{Content Example: Text Left, Figure Right}
-\framesubtitle{} % keep empty; framesubtitle template will show section info automatically
+% the theme adds "section number + name" under the title automatically
 \small
 \begin{columns}[T]
 \column{0.55\textwidth}
@@ -153,21 +151,22 @@ State the central message of this slide in one sentence.
 % Side panel: FEW categories only (4--6 short labels). Compact width. No xlabel.
 % For 12-month / many-label series use the full-width chart on the next example page.
 \begin{tikzpicture}
+% Boxed axes (no "axis x line/axis y line" keys): pgfplots ignores
+% "enlarge x limits" with separate axis lines and clips the outer bars.
 \begin{axis}[
     width=5.4cm,
     height=3.6cm,
     ybar,
     bar width=9pt,
-    enlarge x limits=0.15,
+    enlarge x limits=0.2,
     ymin=0, ymax=100,
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
-    tick label style={font=\tiny},
+    tick label style={font=\tiny\datafont},
     label style={font=\scriptsize},
-    axis y line=left,
-    axis x line=bottom,
-    axis line style={maincolor},
+    axis line style={maincolor!50},
+    tick style={maincolor!50},
     grid=major,
     grid style={maincolor!12},
 ]
@@ -181,7 +180,6 @@ State the central message of this slide in one sentence.
 
 % Content page example 2: Text-top, figure-bottom layout
 \begin{frame}{Content Example: Text Top, Figure Bottom}
-\framesubtitle{} % automatically inherits section info
 \small
 
 % Upper text area
@@ -194,10 +192,11 @@ Keep the text concise so the wide chart remains readable.
 % Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels
 \centering
 \begin{tikzpicture}
+% Boxed axes here as well: keeps Jan/Dec markers clear of the plot edges.
 \begin{axis}[
     width=11.5cm, height=4.2cm,
     enlarge x limits=0.04,
-    x tick label style={rotate=45, anchor=east, font=\tiny},
+    x tick label style={rotate=45, anchor=east, font=\tiny\datafont},
     ylabel style={font=\scriptsize},
     xlabel style={font=\scriptsize, yshift=-2pt},
     ymin=1900, ymax=2900,
@@ -206,12 +205,11 @@ Keep the text concise so the wide chart remains readable.
     ylabel={Sample level},
     xlabel={Month (illustrative)},
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
-    yticklabel style={font=\tiny},
-    axis y line=left,
-    axis x line=bottom,
+    yticklabel style={font=\tiny\datafont},
     grid=major,
     grid style={maincolor!12},
-    axis line style={maincolor},
+    axis line style={maincolor!50},
+    tick style={maincolor!50},
 ]
 \addplot[
     thick,
@@ -245,7 +243,6 @@ Keep the text concise so the wide chart remains readable.
 
 % Content page example 3: Figure-left, text-right layout
 \begin{frame}{Content Example: Figure Left, Text Right}
-\framesubtitle{} 
 \small
 \begin{columns}[c] % [c] = vertically centered; use [T] for top alignment if text is long
 
@@ -308,27 +305,37 @@ Keep the text concise so the wide chart remains readable.
 % [STYLE REF] TABLE PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Table Style Example}
-\framesubtitle{}
 \small
 \centering
 \renewcommand{\arraystretch}{1.15}
 \footnotesize
-\rowcolors{2}{maincolor!10}{white}
-\begin{tabular}{p{0.2\textwidth} c c c}
+\datafont % lining tabular figures: numerals align and sit on the baseline
+% \multirow only in the (uncolored) header rows -- never inside zebra-striped
+% body rows, where the row color of the next row would paint over the text.
+\rowcolors{3}{maincolor!10}{white}
+\begin{tabular}{l c c l}
 \toprule
-Metric & A & B & Conclusion \\
+\multirow{2}{*}{Metric} & \multicolumn{2}{c}{Phase} & \multirow{2}{*}{Conclusion} \\
+\cmidrule(lr){2-3}
+ & A & B & \\
 \midrule
-Item 1 & 12 & 15 & Room for improvement \\
-Item 2 & 20 & 18 & Stable \\
+Throughput (req/s) & 120 & 158 & Room for improvement \\
+Latency (ms) & 340 & 210 & \textcolor{maincolor}{\ding{51}} improved \\
+Error rate (\%) & 2.4 & 0.8 & Stable \\
 \bottomrule
 \end{tabular}
+
+\vspace{1em}
+% Block usage (optional): at most one block per slide, for the single takeaway.
+\begin{block}{Key message}
+State in one sentence the conclusion that the table above supports.
+\end{block}
 \end{frame}
 
 % =============================================================================
 % [STYLE REF] TIKZ FLOW PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Flowchart Style Example}
-\framesubtitle{}
 \centering
 \begin{tikzpicture}[
 node distance=0.9cm and 0.7cm,
@@ -352,30 +359,49 @@ minimum height=0.95cm,text width=1.9cm,align=center}
 % [STYLE REF] TWO-COLUMN ANALYSIS (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Two-Column Analysis Example}
-\framesubtitle{}
 \small
-\begin{columns}
+% Fill BOTH columns to comparable depth (about 5--6 lines each); never leave
+% a column with a single placeholder sentence.
+\begin{columns}[T]
 \column{0.52\textwidth}
-Left column for argumentation, definitions, and derivations.
+\textbf{Findings (itemize):}
+\begin{itemize}
+    \item Demand recovered steadily across all four quarters
+    \item Unit cost fell as utilisation improved
+    \item \textcolor{maincolor}{\ding{51}} Retention stayed above the 90\,\% target
+    \item \textcolor{maincolor}{\ding{55}} Overseas segment still lags the plan
+    \item Risk exposure is concentrated in two suppliers
+\end{itemize}
 
 \column{0.43\textwidth}
-Right column for action items, illustrations, or comparisons.
+\textbf{Action items (enumerate):}
+\begin{enumerate}
+    \item Lock in supplier pricing before Q3
+    \item Re-run the capacity model with new data
+    \item Present the revised forecast to the board
+    \item Start the overseas pricing pilot
+    \item Review retention incentives next quarter
+\end{enumerate}
 \end{columns}
 \end{frame}
 
 % =============================================================================
 % AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
-\begin{frame}[allowframebreaks]{AI GENERATION INSTRUCTIONS}
-\framesubtitle{}
+\begin{frame}{AI GENERATION INSTRUCTIONS}
 You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
 \item Insert a highlighted TOC transition page before each section
 \item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
-\item Use columns layout for all content pages
-\item Keep information density high (no empty slides)
+\item Use columns for side-by-side text+figure pages; switch to the full-width
+      Example-2 layout whenever a chart has more than about 6 categories
+\item Page budget: 12--18 slides total, of which AT MOST 10 are content slides
+      (title page, TOC, section transitions and the Q\&A page are not counted)
+\item Keep information density high (no empty slides); fill both columns of any
+      two-column page to comparable depth
+\item Use \texttt{\textbackslash datafont} for numerals in charts and tables
 \item Output FULL LaTeX code only
 \end{itemize}
 \end{frame}

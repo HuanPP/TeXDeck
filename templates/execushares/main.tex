@@ -9,7 +9,7 @@
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the Execushares theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5. Keep each slide's body text to roughly 8--10 lines. Aim for 12--18 slides total.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble / theme):
@@ -17,6 +17,7 @@
 %    tikz (positioning), pgfplots, amsmath, amssymb, pifont, booktabs, colortbl,
 %    multirow. Do NOT add \usepackage lines.
 %    Runtime fonts required: Source Serif Pro, Source Sans Pro, Source Code Pro.
+% 8. Frame titles must fit on one line (about 55 characters max).
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -30,6 +31,13 @@
 \usetikzlibrary{positioning}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.17}
+% Chart typography: print tick digits in the text font (Source Sans), never
+% Computer Modern math serif, and use a thin space as the thousands separator.
+\pgfplotsset{
+  every axis/.append style={tick label style={font=\sffamily}},
+  /pgf/number format/assume math mode=true,
+  /pgf/number format/1000 sep={\,},
+}
 \usepackage{amsmath,amssymb}
 \usepackage{pifont}
 \usepackage{booktabs}
@@ -57,44 +65,32 @@
 % FRAME 2: MANUAL TABLE OF CONTENTS
 % =============================================================================
 \begin{frame}{Agenda}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-01 \quad First Section Title
-
-02 \quad Second Section Title
-
-03 \quad Third Section Title
-
-04 \quad Fourth Section Title
-
-05 \quad Summary \& Q\&A
+% \agendaitem{number}{Section Title}{flag}: flag 1 = highlight current section
+\agendaitem{01}{First Section Title}{0}
+\agendaitem{02}{Second Section Title}{0}
+\agendaitem{03}{Third Section Title}{0}
+\agendaitem{04}{Fourth Section Title}{0}
+\agendaitem{05}{Summary \& Q\&A}{0}
 \end{frame}
 
 % =============================================================================
 % SECTION 1 (EXAMPLE)
-% IMPORTANT: define \section{...} before any content frames of that section.
-% Execushares also auto-inserts a section splash page via \AtBeginSection.
+% Pattern per section: \section{X} (auto splash page via \AtBeginSection)
+% comes FIRST, followed immediately by the highlighted agenda frame, then the
+% section's content frames.
 % =============================================================================
 \section{First Section Title}
 
 % =============================================================================
 % FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
+% Same agenda list as Frame 2; only the current section's flag flips to 1.
 % =============================================================================
 \begin{frame}{Agenda}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{ExecusharesRed}{01 \quad First Section Title}}
-
-02 \quad Second Section Title
-
-03 \quad Third Section Title
-
-04 \quad Fourth Section Title
-
-05 \quad Summary \& Q\&A
+\agendaitem{01}{First Section Title}{1}
+\agendaitem{02}{Second Section Title}{0}
+\agendaitem{03}{Third Section Title}{0}
+\agendaitem{04}{Fourth Section Title}{0}
+\agendaitem{05}{Summary \& Q\&A}{0}
 \end{frame}
 
 % =============================================================================
@@ -123,16 +119,16 @@ State the single main point this slide must convey.
     width=5.4cm,
     height=3.6cm,
     ybar,
-    bar width=9pt,
-    enlarge x limits=0.15,
-    ymin=0, ymax=100,
+    bar width=14pt,
+    enlarge x limits=0.25,
+    ymin=0, % let the y axis auto-scale (or set ymax to about 1.2x the max value)
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
     tick label style={font=\tiny},
     label style={font=\scriptsize},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     axis line style={ExecusharesRed},
     grid=major,
     grid style={ExecusharesRed!12},
@@ -173,8 +169,8 @@ Keep the prose short so the wide chart remains readable.
     xlabel={Month (illustrative)},
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
     yticklabel style={font=\tiny},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     grid=major,
     grid style={ExecusharesRed!12},
     axis line style={ExecusharesRed},
@@ -191,9 +187,9 @@ Keep the prose short so the wide chart remains readable.
 \addplot[
     thick,
     dashed,
-    ExecusharesRed!55,
+    ExecusharesBlue!80,
     mark=square*,
-    mark options={fill=white, draw=ExecusharesRed!55, scale=0.55},
+    mark options={fill=white, draw=ExecusharesBlue!80, scale=0.55},
 ] coordinates {
     (Jan,2010) (Feb,2050) (Mar,2120) (Apr,2280) (May,2300) (Jun,2290)
     (Jul,2380) (Aug,2460) (Sep,2580) (Oct,2700) (Nov,2620) (Dec,2590)
@@ -276,15 +272,19 @@ Keep the prose short so the wide chart remains readable.
 \framesubtitle{}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+\renewcommand{\arraystretch}{1.3}
 \footnotesize
-\rowcolors{2}{ExecusharesRed!10}{white}
-\begin{tabular}{p{0.2\textwidth} c c c}
+% zebra striping starts after the header row; numeric columns right-aligned
+\rowcolors{3}{}{ExecusharesRed!7}
+\begin{tabular}{l r r l}
 \toprule
-Metric & A & B & Verdict \\
+Metric & FY24 & FY25 & Verdict \\
 \midrule
-Item one & 12 & 15 & Room to improve \\
-Item two & 20 & 18 & Stable \\
+Revenue (\$M) & 412 & 486 & Ahead of plan \\
+Gross margin (\%) & 38.1 & 41.4 & Improving \\
+Operating cost (\$M) & 121 & 128 & Watch closely \\
+Customer churn (\%) & 6.2 & 4.8 & Improving \\
+Net promoter score & 41 & 52 & Ahead of plan \\
 \bottomrule
 \end{tabular}
 \end{frame}
@@ -331,15 +331,17 @@ Right side for actions, diagrams, or comparisons.
 % =============================================================================
 % AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
-\begin{frame}[allowframebreaks]{AI GENERATION INSTRUCTIONS}
+\begin{frame}{AI GENERATION INSTRUCTIONS}
 \framesubtitle{}
 You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
-\item Use columns layout for all content pages
+\item Pattern per section: \texttt{\textbackslash section\{...\}} (auto splash page)
+      first, then the highlighted agenda frame (flip that section's
+      \texttt{\textbackslash agendaitem} flag to 1), then the content frames
+\item Use a columns layout for side-by-side content; use the full-width
+      layout for wide charts
 \item Keep information density high (no empty slides)
 \item Output FULL LaTeX code only
 \end{itemize}
@@ -357,7 +359,8 @@ You MUST:
 {\large Questions \& Discussion}
 
 \vspace{1.5em}
-{\small \insertauthor \quad\textbar\quad \insertinstitute}
+% add a \small line with \insertauthor / \insertinstitute here ONLY if that
+% metadata is non-empty (an empty author would print an orphan separator)
 \end{frame}
 
 \end{document}

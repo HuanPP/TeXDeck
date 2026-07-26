@@ -9,15 +9,18 @@
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the SimplePlus theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5. Keep each slide's body to roughly 8--10 lines of text. Target 12--18 frames
+%    total, counting title, agenda, section transitions and the closing frame.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): SimplePlus
 %    (via \usetheme), tikz, pgfplots, amsmath, amssymb, pifont, booktabs, colortbl,
-%    multirow. Do NOT add \usepackage lines.
+%    multirow. Do NOT add \usepackage lines. pifont (\ding marks), colortbl
+%    (\arrayrulecolor) and multirow each have a worked example in the [STYLE REF]
+%    frames below -- copy those exact patterns when you need them.
 % =============================================================================
 
-\documentclass[aspectratio=169,10pt]{beamer}
+\documentclass[aspectratio=169,10pt,t]{beamer}
 
 % -----------------------------------------------------------------------------
 % 1. Preamble & Theme (DO NOT CHANGE)
@@ -27,21 +30,28 @@
 \usepackage{tikz}
 \usetikzlibrary{positioning}
 \usepackage{pgfplots}
-\pgfplotsset{compat=1.17}
+\pgfplotsset{compat=1.18}
 \usepackage{amsmath,amssymb}
 \usepackage{pifont}
 \usepackage{booktabs}
 \usepackage{colortbl}
 \usepackage{multirow}
 
-% Disable auto TOC insertion at section starts
-\AtBeginSection[]{}
+% Auto-generate a highlighted agenda transition at the start of EACH section.
+% Just write \section{...} before each section's frames; NEVER hand-type
+% agenda or transition frames.
+\AtBeginSection[]{%
+  \begin{frame}{Agenda}
+    \tableofcontents[currentsection,sectionstyle=show/shaded,subsectionstyle=hide]
+  \end{frame}
+}
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
 % -----------------------------------------------------------------------------
 \title[Short Title]{Full Presentation Title}
 % Caller fills these three fields. Leave empty when unknown; never invent placeholders.
+% Empty fields are safe: the theme skips their boxes on the title page.
 \subtitle{}
 \author{}
 \institute{}
@@ -50,60 +60,29 @@
 \begin{document}
 
 % =============================================================================
-% FRAME 1: TITLE PAGE
+% FRAME 1: TITLE PAGE (plain: no footer on the opening slide)
 % =============================================================================
-\maketitle
+\begin{frame}[plain,c]
+  \titlepage
+\end{frame}
 
 % =============================================================================
-% FRAME 2: MANUAL TABLE OF CONTENTS
+% FRAME 2: AGENDA
+% Filled automatically from your \section{...} commands -- do not hand-type items.
 % =============================================================================
 \begin{frame}{Agenda}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-01 \quad First Section Title
-
-02 \quad Second Section Title
-
-03 \quad Third Section Title
-
-04 \quad Fourth Section Title
-
-05 \quad Summary \& Q\&A
+  \tableofcontents[subsectionstyle=hide]
 \end{frame}
 
 % =============================================================================
 % SECTION 1 (EXAMPLE)
-% IMPORTANT: define \section{...} before any content frames of that section
-% so the subtitle line is complete (no "0").
+% Define \section{...} before the first content frame of that section.
+% The highlighted agenda transition page is inserted automatically here.
 % =============================================================================
 \section{First Section Title}
 
-% =============================================================================
-% FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
-% =============================================================================
-\begin{frame}{Agenda}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{DarkBlue}{01 \quad First Section Title}}
-
-02 \quad Second Section Title
-
-03 \quad Third Section Title
-
-04 \quad Fourth Section Title
-
-05 \quad Summary \& Q\&A
-\end{frame}
-
-% =============================================================================
-% CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
-% =============================================================================
 % Content layout 1: text left, figure right
 \begin{frame}{Content Example: Text Left, Figure Right}
-\framesubtitle{} % keep empty
 \small
 \begin{columns}[T]
 \column{0.55\textwidth}
@@ -125,15 +104,15 @@ State the single main point this slide must convey.
     height=3.6cm,
     ybar,
     bar width=9pt,
-    enlarge x limits=0.15,
-    ymin=0, ymax=100,
+    enlarge x limits=0.25,
+    ymin=0, ymax=90,
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
     tick label style={font=\tiny},
     label style={font=\scriptsize},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     axis line style={DarkBlue},
     grid=major,
     grid style={DarkBlue!12},
@@ -146,9 +125,13 @@ State the single main point this slide must convey.
 \end{columns}
 \end{frame}
 
+% =============================================================================
+% SECTION 2 (EXAMPLE) -- again, the transition page appears automatically.
+% =============================================================================
+\section{Second Section Title}
+
 % Content layout 2: text above, figure below
 \begin{frame}{Content Example: Text Above, Figure Below}
-\framesubtitle{}
 \small
 
 % Upper text region
@@ -174,8 +157,8 @@ Keep the prose short so the wide chart remains readable.
     xlabel={Month (illustrative)},
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
     yticklabel style={font=\tiny},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     grid=major,
     grid style={DarkBlue!12},
     axis line style={DarkBlue},
@@ -203,16 +186,14 @@ Keep the prose short so the wide chart remains readable.
 \end{axis}
 \end{tikzpicture}
 
-\vspace{0.3em}
-\begin{center}
-    \tiny \emph{Source: data compiled from the source document.}
-\end{center}
+% Add a real source line under the chart only if the source document names one;
+% otherwise omit it entirely. Never write generic filler like "compiled from the
+% source document".
 \end{frame}
 
 
 % Content layout 3: figure left, text right
 \begin{frame}{Content Example: Figure Left, Text Right}
-\framesubtitle{}
 \small
 \begin{columns}[c] % [c] vertical center; use [T] for top align if text is long
 
@@ -272,20 +253,24 @@ Keep the prose short so the wide chart remains readable.
 
 % =============================================================================
 % [STYLE REF] TABLE PAGE (DELETE IN FINAL OUTPUT)
+% Shows the worked patterns for booktabs + colortbl + multirow + pifont.
 % =============================================================================
 \begin{frame}{[STYLE REF] Table Style Example}
-\framesubtitle{}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+% Zebra striping (\rowcolors) only earns its keep at 5+ data rows; omit it below that.
+% Numeric columns right-aligned; \arrayrulecolor ties the rules to the theme.
+\renewcommand{\arraystretch}{1.3}
 \footnotesize
-\rowcolors{2}{DarkBlue!10}{white}
-\begin{tabular}{p{0.2\textwidth} c c c}
+\arrayrulecolor{DarkBlue!70}
+\begin{tabular}{l l r r l}
 \toprule
-Metric & A & B & Verdict \\
+Group & Metric & A & B & Verdict \\
 \midrule
-Item one & 12 & 15 & Room to improve \\
-Item two & 20 & 18 & Stable \\
+\multirow{2}{*}{Quality} & Item one & 12 & 15 & {\color{MediumRed}\ding{55}}~Room to improve \\
+ & Item two & 20 & 18 & {\color{MediumGreen}\ding{51}}~Stable \\
+\cmidrule(lr){2-5}
+Delivery & Item three & 31 & 29 & {\color{MediumGreen}\ding{51}}~On target \\
 \bottomrule
 \end{tabular}
 \end{frame}
@@ -294,7 +279,6 @@ Item two & 20 & 18 & Stable \\
 % [STYLE REF] TIKZ FLOW PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Flowchart Style Example}
-\framesubtitle{}
 \centering
 \begin{tikzpicture}[
 node distance=0.9cm and 0.7cm,
@@ -315,17 +299,31 @@ minimum height=0.95cm,text width=1.9cm,align=center}
 \end{frame}
 
 % =============================================================================
-% [STYLE REF] TWO-COLUMN ANALYSIS (DELETE IN FINAL OUTPUT)
+% [STYLE REF] BLOCKS & EMPHASIS (DELETE IN FINAL OUTPUT)
+% The theme's block palette (navy / green / red) plus pifont checklist marks.
 % =============================================================================
-\begin{frame}{[STYLE REF] Two-Column Analysis Example}
-\framesubtitle{}
+\begin{frame}{[STYLE REF] Blocks \& Emphasis Example}
 \small
-\begin{columns}
-\column{0.52\textwidth}
-Left side for argument, definition, or derivation.
+\begin{columns}[T]
+\column{0.50\textwidth}
+\begin{block}{Definition or context}
+Use a block for neutral statements: definitions, scope, assumptions.
+\end{block}
+\begin{exampleblock}{Positive finding}
+Use an example block for results that support the recommendation.
+\end{exampleblock}
+\begin{alertblock}{Risk or caveat}
+Use an alert block for warnings, open issues, or hard limits.
+\end{alertblock}
 
-\column{0.43\textwidth}
-Right side for actions, diagrams, or comparisons.
+\column{0.44\textwidth}
+\textbf{Checklist style with pifont:}
+\begin{itemize}
+    \item[{\color{MediumGreen}\ding{51}}] One takeaway per slide
+    \item[{\color{MediumGreen}\ding{51}}] Units and sources on every chart
+    \item[{\color{MediumRed}\ding{55}}] Dense paragraphs of prose
+    \item[{\color{MediumRed}\ding{55}}] Decorative charts with no message
+\end{itemize}
 \end{columns}
 \end{frame}
 
@@ -333,15 +331,16 @@ Right side for actions, diagrams, or comparisons.
 % AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}[allowframebreaks]{AI GENERATION INSTRUCTIONS}
-\framesubtitle{}
 You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
+\item Write \texttt{\textbackslash section\{...\}} before the first frame of each
+      section; the highlighted agenda transition page is inserted automatically --
+      never hand-type agenda or transition frames
 \item Use columns layout for all content pages
 \item Keep information density high (no empty slides)
+\item Target 12--18 frames total
 \item Output FULL LaTeX code only
 \end{itemize}
 \end{frame}
@@ -349,16 +348,16 @@ You MUST:
 % =============================================================================
 % FINAL PAGE
 % =============================================================================
-\begin{frame}{Thank You}
+\begin{frame}[c]{Thank You}
 \centering
-\vspace{1.5em}
 {\Large Thank you for your attention.}
 
 \vspace{1.2em}
 {\large Questions \& Discussion}
 
 \vspace{1.5em}
-{\small \insertauthor \quad\textbar\quad \insertinstitute}
+% Renders "author | institute" only when that metadata exists; safe when empty.
+\SimplePlusClosingAttribution
 \end{frame}
 
 \end{document}

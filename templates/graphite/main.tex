@@ -9,12 +9,20 @@
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the collegeBeamer theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5a. Keep each slide's body text to at most 8--10 lines.
+% 5b. Total deck length: 12--16 slides INCLUDING the title, outline, section
+%     transition and Q&A pages; use 3--4 sections for short source documents.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): collegebeamer,
 %    tikz, pgfplots, amsmath, amssymb, pifont, booktabs, colortbl, multirow.
 %    Do NOT add \usepackage lines.
+% 8. NO pie charts (no pie package is available) -- for composition/share data use
+%    a stacked ybar, a horizontal xbar, or a booktabs table instead.
+% 9. Tables: max 5 columns; wrap long text columns in p{..\textwidth}; use
+%    \footnotesize; never let a table exceed \textwidth.
+% 10. Write ALL slide text in the language of the source document, and set \date
+%     in that language too (\today produces an English date).
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -40,33 +48,31 @@
 \AtBeginSection[]{}
 
 % -----------------------------------------------------------------------------
-% 1.1 Make "subtitle under each slide title" show FULL and stable
+% 1.1 Title page (DO NOT CHANGE)
 % -----------------------------------------------------------------------------
-% Some collegeBeamer variants put only \insertsectionnumber under the title,
-% which may appear as "0" or look incomplete.
-% Here we redefine framesubtitle so it always shows:
-%   "Section number  Section name"
-% and avoids showing anything before the first \section is defined.
-\setbeamertemplate{framesubtitle}{%
-  \vspace{-0.6ex}%
-  {\scriptsize\color{maincolor}%
-    \ifnum\value{section}>0
-      \thesection\quad\insertsectionhead
-    \fi
-  }\par
-  \vspace{-0.4ex}%
-}
-
-% Keep title page compilable when subtitle/author/institute are left empty.
+% The theme already guards the per-slide section subtitle: frames placed before
+% the first \section print no section number at all (no stray "0").
+%
+% Title page: accent bar + title at the optical center; subtitle/author lines
+% appear only when those fields are non-empty, so the page stays balanced even
+% with the default empty metadata.
+\makeatletter
 \setbeamertemplate{title page}{
+    \vskip0.30\paperheight
     \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\leavevmode\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\leavevmode\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \begin{beamercolorbox}[wd=0.85\textwidth, sep=10pt, leftskip=8mm]{title}
+        \textcolor{maincolor}{\rule{34pt}{2.5pt}}\\[12pt]
+        {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle}\\
+        \ifx\insertsubtitle\@empty\else
+            \vskip6pt{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}\\
+        \fi
+        \ifx\beamer@shortauthor\@empty\else
+            \vskip6pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
+        \fi
+        \vskip8pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
     \end{beamercolorbox}
 }
+\makeatother
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -112,7 +118,8 @@
 
 % =============================================================================
 % FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
+% LLM MUST generate one such page before EACH section.
+% Current section: bold + maincolor. ALL other entries: \textcolor{reportmuted}.
 % =============================================================================
 \begin{frame}{Outline}
 \large
@@ -120,13 +127,13 @@
 
 \textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
 
-02 \quad Title of Part Two
+\textcolor{reportmuted}{02 \quad Title of Part Two}
 
-03 \quad Title of Part Three
+\textcolor{reportmuted}{03 \quad Title of Part Three}
 
-04 \quad Title of Part Four
+\textcolor{reportmuted}{04 \quad Title of Part Four}
 
-05 \quad Summary \& Q\&A
+\textcolor{reportmuted}{05 \quad Summary \& Q\&A}
 \end{frame}
 
 % =============================================================================
@@ -157,15 +164,15 @@ State the central message of this slide in one sentence.
     height=3.6cm,
     ybar,
     bar width=9pt,
-    enlarge x limits=0.15,
+    enlarge x limits=0.25,
     ymin=0, ymax=100,
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
     tick label style={font=\tiny},
     label style={font=\scriptsize},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     axis line style={maincolor},
     grid=major,
     grid style={maincolor!12},
@@ -188,7 +195,7 @@ When a series has many categories (for example 12 months), use this
 full-width layout below -- not the narrow side-panel chart.
 Keep the text concise so the wide chart remains readable.
 
-\vspace{1em}
+\vspace{0.7em}
 
 % Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels
 \centering
@@ -206,8 +213,8 @@ Keep the text concise so the wide chart remains readable.
     xlabel={Month (illustrative)},
     legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
     yticklabel style={font=\tiny},
-    axis y line=left,
-    axis x line=bottom,
+    axis y line*=left,
+    axis x line*=bottom,
     grid=major,
     grid style={maincolor!12},
     axis line style={maincolor},
@@ -285,20 +292,19 @@ Keep the text concise so the wide chart remains readable.
 % Right: text analysis area (50\% width)
 \column{0.50\textwidth}
     \textbf{Figure / Object Analysis:}
-    
-    This section provides a detailed interpretation of the visual element
-    on the left. Suitable for presenting:
+
+    Interpret the visual element on the left. Suitable for presenting:
     \begin{itemize}
-        \item Physical structure of experimental apparatus
-        \item Specific module details of an algorithm or model
+        \item Structure of experimental apparatus
+        \item Module details of an algorithm or model
         \item Domain-specific data analysis
     \end{itemize}
 
-    \vspace{1em}
+    \vspace{0.8em}
     \textbf{Key Findings:}
     \begin{enumerate}
-        \item \ctextbf{Observation 1}: The figure on the left shows\ldots
-        \item \ctextbf{Observation 2}: Compared to expectations, the results exhibit\ldots
+        \item \ctextbf{Observation 1}: the left figure shows\ldots
+        \item \ctextbf{Observation 2}: results differ from expectations\ldots
     \end{enumerate}
 \end{columns}
 \end{frame}
@@ -310,12 +316,13 @@ Keep the text concise so the wide chart remains readable.
 \framesubtitle{}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+% Text columns left-aligned, number columns right-aligned; bold header row.
+% No \rowcolors zebra striping on short tables (fewer than ~5 data rows).
+\renewcommand{\arraystretch}{1.3}
 \footnotesize
-\rowcolors{2}{maincolor!10}{white}
-\begin{tabular}{p{0.2\textwidth} c c c}
+\begin{tabular}{l r r l}
 \toprule
-Metric & A & B & Conclusion \\
+\textbf{Metric} & \textbf{A} & \textbf{B} & \textbf{Conclusion} \\
 \midrule
 Item 1 & 12 & 15 & Room for improvement \\
 Item 2 & 20 & 18 & Stable \\
@@ -373,7 +380,8 @@ You MUST:
 \item Replace all placeholders with real content
 \item Insert a highlighted TOC transition page before each section
 \item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
-\item Use columns layout for all content pages
+\item Use the columns layout for text+side-figure pages; use the full-width
+      pattern (Example 2) whenever a chart has more than 6 categories
 \item Keep information density high (no empty slides)
 \item Output FULL LaTeX code only
 \end{itemize}

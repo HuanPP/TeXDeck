@@ -5,16 +5,27 @@
 % based on this template.
 %
 % CRITICAL RULES:
-% 1. DO NOT change anything in the Preamble.
+% 1. DO NOT change anything in the Preamble (except the outline titles inside
+%    \deckoutline, which you MUST edit).
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the collegeBeamer theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5. PAGE BUDGET: total pages = 3 fixed pages (title + outline + Q&A)
+%    + 1 transition page per section + your content pages.
+%    Target 12--18 pages total. Keep each content frame to roughly
+%    8--10 lines of body text.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): collegebeamer,
 %    tikz, pgfplots, amsmath, amssymb, pifont, booktabs, colortbl, multirow.
 %    Do NOT add \usepackage lines.
+% 8. OUTLINE: edit the section titles ONCE inside \deckoutline. Then write
+%    \decktoc{0} for the outline page and \decktoc{k} right after \section{...}
+%    of section k. NEVER copy outline text by hand onto multiple pages.
+% 9. Block environments (block / alertblock / exampleblock) and lstlisting code
+%    blocks are styled by the theme and are allowed on content pages.
+% 10. Zebra-stripe a table with \rowcolors{2}{maincolor!7}{white} ONLY when it
+%    has 4 or more data rows; leave short tables unstriped.
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -34,39 +45,87 @@
 \usepackage{colortbl}
 \usepackage{multirow}
 
-% --- Font Setup ---
-% English/Numbers 
-% Disable collegeBeamer auto TOC insertion
+% Disable collegeBeamer auto TOC insertion (\decktoc pages replace it)
 \AtBeginSection[]{}
 
-% -----------------------------------------------------------------------------
-% 1.1 Make "subtitle under each slide title" show FULL and stable
-% -----------------------------------------------------------------------------
-% Some collegeBeamer variants put only \insertsectionnumber under the title,
-% which may appear as "0" or look incomplete.
-% Here we redefine framesubtitle so it always shows:
-%   "Section number  Section name"
-% and avoids showing anything before the first \section is defined.
-\setbeamertemplate{framesubtitle}{%
-  \vspace{-0.6ex}%
-  {\scriptsize\color{maincolor}%
-    \ifnum\value{section}>0
-      \thesection\quad\insertsectionhead
-    \fi
-  }\par
-  \vspace{-0.4ex}%
+% Shared chart style: horizontal grid only (no vertical lines through bars),
+% no axis arrow tips, readable label sizes. Use [deck, ...] on every axis.
+\pgfplotsset{
+  deck/.style={
+    axis y line=left,
+    axis x line=bottom,
+    axis line style={-, maincolor!60},
+    ymajorgrids=true,
+    grid style={maincolor!12},
+    tick label style={font=\scriptsize},
+    label style={font=\scriptsize},
+    legend style={font=\scriptsize, draw=none, fill=none},
+  },
 }
 
-% Keep title page compilable when subtitle/author/institute are left empty.
+% -----------------------------------------------------------------------------
+% 1.1 Outline machinery (DO NOT CHANGE this block, EDIT titles in \deckoutline)
+% -----------------------------------------------------------------------------
+% \decktoc{0}  -> plain outline page (all entries in normal ink)
+% \decktoc{k}  -> transition page: entry k bold navy with a marker,
+%                 all other entries dimmed
+\newcounter{decktocurrent}
+\newcommand{\decktocitem}[2]{%
+  \ifnum\value{decktocurrent}=#1
+    \textcolor{maincolor}{$\blacktriangleright$}~\textbf{\textcolor{maincolor}{\makebox[1.8em][l]{0#1}#2}}%
+  \else
+    \ifnum\value{decktocurrent}=0
+      \hphantom{$\blacktriangleright$~}\makebox[1.8em][l]{0#1}#2%
+    \else
+      \textcolor{reportmuted}{\hphantom{$\blacktriangleright$~}\makebox[1.8em][l]{0#1}#2}%
+    \fi
+  \fi\par\vspace{1.1em}%
+}
+\newcommand{\decktoc}[1]{%
+  \setcounter{decktocurrent}{#1}%
+  \begin{frame}{Outline}
+    \large
+    \vspace{0.4em}
+    \deckoutline
+  \end{frame}
+}
+
+% LLM MUST EDIT: define each section title here ONCE (one \decktocitem per
+% section, numbered 1..N). Every outline/transition page renders from this.
+\newcommand{\deckoutline}{%
+  \decktocitem{1}{Title of Part One}%
+  \decktocitem{2}{Title of Part Two}%
+  \decktocitem{3}{Title of Part Three}%
+  \decktocitem{4}{Title of Part Four}%
+  \decktocitem{5}{Summary \& Q\&A}%
+}
+
+% -----------------------------------------------------------------------------
+% 1.2 Title page (DO NOT CHANGE): empty fields are skipped, no floating gaps;
+%     the block sits in the calm left zone of the background art.
+% -----------------------------------------------------------------------------
+\makeatletter
 \setbeamertemplate{title page}{
     \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\leavevmode\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\leavevmode\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \begin{beamercolorbox}[wd=0.75\textwidth, sep=10pt, leftskip=8mm]{title}
+        {\color{maincolor}\rule{24pt}{2pt}}\\[8pt]
+        {\usebeamerfont{title}\inserttitle}%
+        \setbox\@tempboxa=\hbox{\insertsubtitle}%
+        \ifdim\wd\@tempboxa>1pt
+          \\[5pt]{\usebeamerfont{subtitle}\textcolor{reportmuted}{\insertsubtitle}}%
+        \fi
+        \setbox\@tempboxa=\hbox{\insertauthor}%
+        \ifdim\wd\@tempboxa>1pt
+          \\[9pt]{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}%
+        \fi
+        \setbox\@tempboxa=\hbox{\insertinstitute}%
+        \ifdim\wd\@tempboxa>1pt
+          \\[3pt]{\usebeamerfont{author}\textcolor{reportmuted}{\insertinstitute}}%
+        \fi
+        \\[9pt]{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
     \end{beamercolorbox}
 }
+\makeatother
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -86,55 +145,25 @@
 \maketitle
 
 % =============================================================================
-% FRAME 2: MANUAL TABLE OF CONTENTS
+% FRAME 2: OUTLINE PAGE (rendered from \deckoutline; never hand-copy titles)
 % =============================================================================
-\begin{frame}{Outline}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-01 \quad Title of Part One
-
-02 \quad Title of Part Two
-
-03 \quad Title of Part Three
-
-04 \quad Title of Part Four
-
-05 \quad Summary \& Q\&A
-\end{frame}
+\decktoc{0}
 
 % =============================================================================
 % SECTION 1 (EXAMPLE)
-% IMPORTANT: define \section{...} before any content frames of that section
-% so the subtitle line is complete (no "0").
+% Pattern for EVERY section k: \section{...} then \decktoc{k}, then content
+% frames. The transition page highlights the current section automatically.
 % =============================================================================
 \section{Title of Part One}
 
-% =============================================================================
 % FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
-% =============================================================================
-\begin{frame}{Outline}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
-
-02 \quad Title of Part Two
-
-03 \quad Title of Part Three
-
-04 \quad Title of Part Four
-
-05 \quad Summary \& Q\&A
-\end{frame}
+\decktoc{1}
 
 % =============================================================================
 % CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
 % =============================================================================
 % Content page example 1: Text-left, figure-right layout
 \begin{frame}{Content Example: Text Left, Figure Right}
-\framesubtitle{} % keep empty; framesubtitle template will show section info automatically
 \small
 \begin{columns}[T]
 \column{0.55\textwidth}
@@ -153,22 +182,16 @@ State the central message of this slide in one sentence.
 % For 12-month / many-label series use the full-width chart on the next example page.
 \begin{tikzpicture}
 \begin{axis}[
+    deck,
     width=5.4cm,
     height=3.6cm,
     ybar,
-    bar width=9pt,
+    bar width=13pt,
     enlarge x limits=0.15,
     ymin=0, ymax=100,
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
-    tick label style={font=\tiny},
-    label style={font=\scriptsize},
-    axis y line=left,
-    axis x line=bottom,
-    axis line style={maincolor},
-    grid=major,
-    grid style={maincolor!12},
 ]
 \addplot[fill=maincolor!40, draw=maincolor] coordinates {
     (Q1,42) (Q2,55) (Q3,61) (Q4,78)
@@ -180,7 +203,6 @@ State the central message of this slide in one sentence.
 
 % Content page example 2: Text-top, figure-bottom layout
 \begin{frame}{Content Example: Text Top, Figure Bottom}
-\framesubtitle{} % automatically inherits section info
 \small
 
 % Upper text area
@@ -194,23 +216,17 @@ Keep the text concise so the wide chart remains readable.
 \centering
 \begin{tikzpicture}
 \begin{axis}[
+    deck,
     width=11.5cm, height=4.2cm,
     enlarge x limits=0.04,
-    x tick label style={rotate=45, anchor=east, font=\tiny},
-    ylabel style={font=\scriptsize},
-    xlabel style={font=\scriptsize, yshift=-2pt},
+    x tick label style={rotate=45, anchor=east, font=\scriptsize},
+    xlabel style={yshift=-2pt},
     ymin=1900, ymax=2900,
     symbolic x coords={Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec},
     xtick=data,
     ylabel={Sample level},
     xlabel={Month (illustrative)},
-    legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
-    yticklabel style={font=\tiny},
-    axis y line=left,
-    axis x line=bottom,
-    grid=major,
-    grid style={maincolor!12},
-    axis line style={maincolor},
+    legend style={at={(0.02,0.98)}, anchor=north west},
 ]
 \addplot[
     thick,
@@ -244,7 +260,6 @@ Keep the text concise so the wide chart remains readable.
 
 % Content page example 3: Figure-left, text-right layout
 \begin{frame}{Content Example: Figure Left, Text Right}
-\framesubtitle{} 
 \small
 \begin{columns}[c] % [c] = vertically centered; use [T] for top alignment if text is long
 
@@ -285,7 +300,7 @@ Keep the text concise so the wide chart remains readable.
 % Right: text analysis area (50\% width)
 \column{0.50\textwidth}
     \textbf{Figure / Object Analysis:}
-    
+
     This section provides a detailed interpretation of the visual element
     on the left. Suitable for presenting:
     \begin{itemize}
@@ -307,13 +322,13 @@ Keep the text concise so the wide chart remains readable.
 % [STYLE REF] TABLE PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Table Style Example}
-\framesubtitle{}
 \small
 \centering
 \renewcommand{\arraystretch}{1.15}
 \footnotesize
-\rowcolors{2}{maincolor!10}{white}
-\begin{tabular}{p{0.2\textwidth} c c c}
+% Numeric columns right-aligned (r); prose columns left (l / p{...}).
+% Add \rowcolors{2}{maincolor!7}{white} ONLY for tables with 4+ data rows.
+\begin{tabular}{p{0.2\textwidth} r r l}
 \toprule
 Metric & A & B & Conclusion \\
 \midrule
@@ -327,7 +342,6 @@ Item 2 & 20 & 18 & Stable \\
 % [STYLE REF] TIKZ FLOW PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Flowchart Style Example}
-\framesubtitle{}
 \centering
 \begin{tikzpicture}[
 node distance=0.9cm and 0.7cm,
@@ -351,7 +365,6 @@ minimum height=0.95cm,text width=1.9cm,align=center}
 % [STYLE REF] TWO-COLUMN ANALYSIS (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}{[STYLE REF] Two-Column Analysis Example}
-\framesubtitle{}
 \small
 \begin{columns}
 \column{0.52\textwidth}
@@ -366,15 +379,20 @@ Right column for action items, illustrations, or comparisons.
 % AI INSTRUCTION PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
 \begin{frame}[allowframebreaks]{AI GENERATION INSTRUCTIONS}
-\framesubtitle{}
 You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
+\item Edit the outline titles ONCE inside \texttt{\textbackslash deckoutline};
+      use \texttt{\textbackslash decktoc\{0\}} for the outline page and
+      \texttt{\textbackslash decktoc\{k\}} right after \texttt{\textbackslash section\{...\}}
+      of section k -- never hand-copy the outline
+\item Define \texttt{\textbackslash section\{...\}} before the first content frame of that section
 \item Use columns layout for all content pages
 \item Keep information density high (no empty slides)
+\item Respect the page budget: 3 fixed pages + 1 transition per section + content, 12--18 total
+\item Blocks (block / alertblock / exampleblock) and \texttt{lstlisting} are available
+\item Zebra-stripe tables only when they have 4 or more data rows
 \item Output FULL LaTeX code only
 \end{itemize}
 \end{frame}

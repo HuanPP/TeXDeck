@@ -55,8 +55,20 @@
     % them to full width, which looks wrong in English text (dollar's -> dollar ' s).
     \xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
 
-    \setmainfont[Path=./font/]{EBGaramond12-Regular.otf}
-    \setsansfont[Path=./font/]{EBGaramond12-Regular.otf}
+    % Real Bold/Italic faces + lining figures (oldstyle digits must not leak
+    % into charts, tables, or page numbers).
+    \setmainfont[
+      Path       = ./font/,
+      BoldFont   = EBGaramond-Bold.otf,
+      ItalicFont = EBGaramond-Italic.otf,
+      Numbers    = Lining
+    ]{EBGaramond12-Regular.otf}
+    \setsansfont[
+      Path       = ./font/,
+      BoldFont   = EBGaramond-Bold.otf,
+      ItalicFont = EBGaramond-Italic.otf,
+      Numbers    = Lining
+    ]{EBGaramond12-Regular.otf}
     
     % Finance-style Chinese typography: Song for body, Hei for emphasis.
     \setCJKmainfont{FandolSong-Regular}[
@@ -97,11 +109,12 @@
 \geometry{paperwidth=16cm,paperheight=9cm}
 
 % logo
-\pgfdeclareimage[width=0.085\paperwidth]{colorlogo}{\colorlogoPath}
-\pgfdeclareimage[width=0.085\paperwidth]{translogo}{\translogoPath}
+\pgfdeclareimage[width=0.06\paperwidth]{colorlogo}{\colorlogoPath}
+\pgfdeclareimage[width=0.06\paperwidth]{translogo}{\translogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
-\setbeamertemplate{headline}{\hspace{0.06\textwidth}\pgfuseimage{\@makelogo}} % put the logo in each slide's top left area
+% logo in each slide's top-left area, with breathing room from the top bezel
+\setbeamertemplate{headline}{\vspace*{3mm}\hspace*{0.91cm}\pgfuseimage{\@makelogo}}
 
 % color
 \definecolor{maincolor}{RGB}{\maincolorRGB}
@@ -155,26 +168,24 @@
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
 
-% footline
-\newcommand{\@footlinepayoff}{\@SINTEFmotto}
+% footline: hairline exactly as wide as the text block, short title + page N/M
+\newcommand{\@footlinepayoff}{\insertshorttitle}
 \setbeamertemplate{footline}{
     \begin{beamercolorbox}[wd=\textwidth, ht=4.5mm, dp=2.5mm, leftskip=0.9cm, rightskip=0.9cm]{footline}
-    \color{reportmuted}\rule{\textwidth}{0.2pt}\par\vspace{-0.15ex}
-    \usebeamerfont{footline}\hfill\@footlinepayoff
+    \color{reportline}\rule{\dimexpr\textwidth-1.8cm\relax}{0.2pt}\par\vspace{-0.15ex}
+    \usebeamerfont{footline}\color{reportmuted}\insertshorttitle\hfill\insertframenumber\,/\,\inserttotalframenumber
     \end{beamercolorbox}
 }
 
 \newcommand{\footlinecolor}[1]{
-    % if #1 is empty, makes footline transparent
+    % if #1 is empty, makes footline background transparent
     \ifstrempty{#1}{
-        \renewcommand{\@footlinepayoff}{}
         \setbeamercolor{footline}{bg=}
     }{
-        \renewcommand{\@footlinepayoff}{\@SINTEFmotto}
         \setbeamercolor{footline}{fg=white, bg=#1}
     }
 }
-\footlinecolor{} % default: no footline
+\footlinecolor{} % default: transparent footline background
 
 % block
 \setbeamertemplate{blocks}[rounded]
@@ -229,9 +240,10 @@
 % subsection
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
-% presents subtitle on each frame
+% presents subtitle on each frame -- only once a \section exists, so no
+% stray section number ("0") appears on pre-section frames like the outline
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\thesection \, \secname}}{}
+    \pretocmd\beamer@checkframetitle{\ifnum\value{section}>0 \framesubtitle{\thesection \, \secname}\fi}{}{}
 \makeatother
 
 % avoid numbering of frames that are breaked into multiply slides
@@ -265,8 +277,8 @@
 % --- page elements ---
 % frame title & subtitle layout
 \setbeamertemplate{frametitle}{
-    \vspace*{-3.2ex}
-    \begin{beamercolorbox}[leftskip=2cm, sep=0.6ex]{frametitle}
+    \vspace*{-5.5ex}
+    \begin{beamercolorbox}[leftskip=2.2cm, sep=0.6ex]{frametitle}
     \usebeamerfont{frametitle}\insertframetitle\\
     \usebeamerfont{framesubtitle}\insertframesubtitle
     \end{beamercolorbox}
@@ -300,6 +312,9 @@
     \begingroup
         \setbeamertemplate{footline}{}
         \themecolor{colorbg}
+        % paint the canvas too, so no light sliver of default background
+        % shows at the paper edges of the full-bleed navy page
+        \setbeamercolor{background canvas}{bg=maincolor}
 
         \begin{frame}{}
             \centering

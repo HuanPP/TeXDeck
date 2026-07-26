@@ -15,7 +15,10 @@
 % https://kuler.adobe.com/Some-Kind-Of-Execushares-color-theme-3837185/
 \definecolor{ExecusharesRed}{RGB}{230,37,52}
 \definecolor{ExecusharesBlack}{RGB}{43,40,40}
-\definecolor{ExecusharesBlue}{RGB}{22,190,207}
+% TeXDeck modification: darkened from the original {22,190,207} so the teal
+% accent reaches ~4.6:1 contrast on the cream background (readable bullets,
+% enumerate numbers and \alert text).
+\definecolor{ExecusharesBlue}{RGB}{14,124,135}
 \definecolor{ExecusharesWhite}{RGB}{255,255,243}
 \definecolor{ExecusharesGrey}{RGB}{107,110,108}
 
@@ -81,6 +84,15 @@
 % again, manually draw the frame title above
 \setbeamertemplate{frametitle}{}
 
+% TeXDeck modification: reserve vertical space for the theme chrome so body
+% text can never flow under the red title bar (1.25cm) or over the progress
+% bar + footer labels (0.25cm bar + 0.3cm label zone).
+\setbeamertemplate{headline}{\vspace*{1.25cm}}
+\setbeamertemplate{footline}{\vspace*{0.55cm}}
+
+% never append roman-numeral continuations ("Title I") to frame titles
+\setbeamertemplate{frametitle continuation}{}
+
 % disable "Figure:" in the captions
 \setbeamertemplate{caption}{\tiny\insertcaption}
 \setbeamertemplate{caption label separator}{}
@@ -105,6 +117,11 @@
    \setcounter{framenumber}{\value{finalframe}}
 }
 
+% agenda line helper: \agendaitem{01}{Section Title}{flag}
+% flag 1 = highlighted entry (current section, bold red); flag 0 = normal.
+% One call per agenda line keeps numbering/titles/highlight in sync.
+\newcommand{\agendaitem}[3]{{\large\ifnum#3=1\bfseries\color{ExecusharesRed}\fi #1 \quad #2\par\vspace{0.9em}}}
+
 % use \makeatletter for our progress bar definitions
 % progress bar idea from http://tex.stackexchange.com/a/59749/44221
 % slightly adapted for visual purposes here
@@ -116,6 +133,7 @@
 
 \newdimen\slidewidth % auxiliary dimension
 \newdimen\slideheight % auxiliary dimension
+\newdimen\execushares@authorwidth % measured width of \insertauthor
 
 % make the progress bar go across the screen
 %\progressbar@pbwidth=12.8cm
@@ -128,6 +146,10 @@
 % and looks good
 % TODO: base title slide and contents slide on something other than slide numbers :/
 \setbeamertemplate{background}{
+	% measure the author OUTSIDE the tikzpicture: inside it the hyperlink
+	% wrapper in \insertauthor makes an \hbox measurement come out 0pt
+	\setbox0=\hbox{\insertauthor}%
+	\execushares@authorwidth=\wd0\relax
 	% deal with progress bar stuff
 	% (calculate where it should go)
 	\progressbar@tmpcounta=\insertframenumber
@@ -154,19 +176,24 @@
 			% draw the actual text
 			\node[anchor=south,text width=\slidewidth-1cm,inner xsep=0.5cm] at (0.5\slidewidth,4cm) {\color{ExecusharesWhite}\Huge\textbf{\inserttitle}};
 			\node[anchor=north east,text width=\slidewidth-1cm,align=right] at (\slidewidth-0.4cm,4cm) {\color{ExecusharesBlack}\tiny\insertsubtitle};
-			\node[above] at(0.5\slidewidth,2.3cm) {\color{ExecusharesBlack}\tiny by};
-			\node at (0.5\slidewidth,2cm) {\color{ExecusharesBlack}\LARGE\insertauthor};
+			% only draw the author block when \author is non-empty
+			% (avoids an orphan grey "by" floating on authorless title pages)
+			\ifdim\execushares@authorwidth>1pt
+				\node[above] at(0.5\slidewidth,2.3cm) {\color{ExecusharesBlack}\tiny by};
+				\node at (0.5\slidewidth,2cm) {\color{ExecusharesBlack}\LARGE\insertauthor};
+			\fi
 
 			% add the date in the corner
 			\node[anchor=south east] at(\slidewidth,0cm) {\color{ExecusharesGrey}\tiny\insertdate};
 		\else
 			% NOT the title page
-			% title bar
-			\fill[color=ExecusharesRed] (0, \slideheight-1cm) rectangle(\slidewidth,\slideheight);
+			% title bar (1.25cm tall: one \LARGE title line sits centred,
+			% and a two-line title still fits inside the bar)
+			\fill[color=ExecusharesRed] (0, \slideheight-1.25cm) rectangle(\slidewidth,\slideheight);
 
 			% swap the comment on these to add section titles to slide titles
-			%\node[anchor=north,text width=11.8cm,inner xsep=0.5cm,inner ysep=0.25cm] at (6.4cm,9.6cm) {\color{ExecusharesWhite}\Large\textbf{\insertsectionhead: \insertframetitle}};
-			\node[anchor=north,text width=\slidewidth-1cm,inner xsep=0.5cm,inner ysep=0.25cm] at (0.5\slidewidth,\slideheight) {\color{ExecusharesWhite}\huge\textbf{\insertframetitle}};
+			%\node[anchor=center,text width=\slidewidth-1cm,inner xsep=0.5cm] at (0.5\slidewidth,\slideheight-0.625cm) {\color{ExecusharesWhite}\Large\textbf{\insertsectionhead: \insertframetitle}};
+			\node[anchor=center,text width=\slidewidth-1cm,inner xsep=0.5cm] at (0.5\slidewidth,\slideheight-0.625cm) {\color{ExecusharesWhite}\LARGE\textbf{\insertframetitle}};
 			
 			% if we're showing a progress bar, show it
 			% (I disable the progress bar and slide numbers for the "Appendix" slides)
@@ -213,12 +240,12 @@
 \AtBeginSection{\frame{\sectionpage}}
 \setbeamertemplate{section page}
 {
-	\begin{tikzpicture}
-		% set up the entire slide as the canvas
-		\useasboundingbox (0,0) rectangle(\slidewidth,\slideheight);
-		%\fill[color=ExecusharesWhite] (0,0) rectangle(\the\paperwidth,\the\paperheight);
-		\fill[color=ExecusharesWhite] (-1cm, 2cm) rectangle (\slidewidth, \slideheight+0.1cm);
-		\fill[color=ExecusharesRed] (-1cm, 0.5\slideheight-1cm) rectangle(\slidewidth, 0.5\slideheight+1cm);
-		\node[text width=\the\paperwidth-1cm,align=center] at (0.4\slidewidth, 0.5\slideheight) {\color{ExecusharesWhite}\Huge\textbf{\insertsection}};
+	% TeXDeck modification: draw the splash as a zero-size overlay anchored to
+	% the physical page, so the band spans edge to edge, the title is truly
+	% centred, and no overfull \hbox/\vbox warnings pollute the compile log.
+	\begin{tikzpicture}[remember picture,overlay,shift={(current page.south west)}]
+		\fill[color=ExecusharesWhite] (0, 2cm) rectangle (\slidewidth, \slideheight);
+		\fill[color=ExecusharesRed] (0, 0.5\slideheight-1cm) rectangle(\slidewidth, 0.5\slideheight+1cm);
+		\node[text width=\the\paperwidth-1cm,align=center] at (0.5\slidewidth, 0.5\slideheight) {\color{ExecusharesWhite}\Huge\textbf{\insertsection}};
 	\end{tikzpicture}
 }

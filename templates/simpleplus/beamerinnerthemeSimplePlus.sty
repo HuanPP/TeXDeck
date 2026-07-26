@@ -27,7 +27,12 @@ color(0pt)=(lower.bg); color(2pt)=(lower.bg); color(4pt)=(lower.bg)}
 \setbeamertemplate{itemize subitem}[circle]
 
 % table of contents (overview) settings
-\setbeamertemplate{section in toc}[sections numbered]
+% Accent-colored number + roomy leading; used by the agenda and the
+% auto-generated section transition pages (\AtBeginSection + \tableofcontents).
+\setbeamertemplate{section in toc}{%
+    {\usebeamercolor[fg]{structure}\bfseries\inserttocsectionnumber.}%
+    \hspace{0.8em}\inserttocsection\par\vspace{0.9em}%
+}
 \setbeamertemplate{subsection in toc}{%
     \leavevmode
     \leftskip=3.2em
@@ -35,17 +40,30 @@ color(0pt)=(lower.bg); color(2pt)=(lower.bg); color(4pt)=(lower.bg)}
     \inserttocsubsection\par
 }
 
+% closing-slide attribution: prints "author | institute" but silently skips
+% whatever metadata is empty (the pipeline's normal case), so the final slide
+% never shows an orphan separator.
+\newcommand{\SimplePlusClosingAttribution}{%
+    \ifx\beamer@shortauthor\@empty\else
+    {\small \insertauthor\ifx\beamer@shortinstitute\@empty\else\ \textbar\ \insertinstitute\fi}%
+    \fi
+}
+
 % frame title customization
+% Renders \insertframesubtitle so a \framesubtitle{...} is never silently lost.
 \setbeamertemplate{frametitle}{%
     \vspace*{0.5em}
     \bfseries\insertframetitle\par
+    {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\insertframesubtitle\par}%
     \vskip-6pt
-    \hrulefill\vspace{-0.1em}
+    \hrulefill\vspace{0.5em}
 }
 
 % title page customization
+% Empty author/institute boxes are skipped entirely (the pipeline's normal case),
+% and fill-order glue gives a stable ~1:2 optical split above/below the block.
 \setbeamertemplate{title page}{%
-    \vspace{6em}
+    \vskip0pt plus 1fill%
     \begingroup
     \centering
     % ------------------------
@@ -59,14 +77,18 @@ color(0pt)=(lower.bg); color(2pt)=(lower.bg); color(4pt)=(lower.bg)}
     \end{beamercolorbox}%
     \vskip0.5em\par
     % ------------------------
+    \ifx\beamer@shortauthor\@empty\else%
     \begin{beamercolorbox}[sep=8pt,center]{author}
         \usebeamerfont{author}\insertauthor
     \end{beamercolorbox}
-    \vskip-1em
+    \fi%
     % ------------------------
+    \ifx\beamer@shortinstitute\@empty\else%
+    \vskip-1em
     \begin{beamercolorbox}[sep=8pt,center]{institute}
         \usebeamerfont{institute}\insertinstitute
     \end{beamercolorbox}
+    \fi%
     % ------------------------
     \begin{beamercolorbox}[sep=8pt,center]{date}
         \usebeamerfont{date}\insertdate
@@ -74,5 +96,5 @@ color(0pt)=(lower.bg); color(2pt)=(lower.bg); color(4pt)=(lower.bg)}
     % ------------------------
     {\usebeamercolor[fg]{titlegraphic}\inserttitlegraphic\par}
     \endgroup
-    \vfill
+    \vskip0pt plus 2fill%
 }
