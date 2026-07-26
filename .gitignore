@@ -30,3 +30,6 @@ artifacts/
 
 # Local prototype (not part of the published tree)
 ppt_bjtu_overleaf/
+
+# Private template with real institutional branding (never publish)
+templates/bjtu/
