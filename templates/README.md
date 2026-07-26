@@ -14,8 +14,11 @@ at least `template.json` and `main.tex`.
 
 `academic` / `emerald` / `graphite` / `navy` share one ancestor
 ([college-beamer](https://github.com/liu-qilong/college-beamer) by Qilong Liu,
-upstream SINTEF Presentation by Federico Zenith). They are four design
-treatments of that line, not four independent theme designs.
+upstream SINTEF Presentation by Federico Zenith), but each has since been
+redesigned into its own family: book-plate scholarly (academic), editorial
+serif (emerald), Swiss typographic (graphite), and banded boardroom (navy).
+The shared ancestry survives in `collegebeamer.sty` plumbing and licensing,
+not in how the decks look.
 
 These packs ship **neutral placeholder brand assets only** where a brand path
 is used. They do **not** contain any real institutional logos, trademarks, or

@@ -29,7 +29,7 @@ You upload a paper, a report, a set of notes — or just paste text — pick a t
 | `simpleplus` | SimplePlus | [pm25/SimplePlus-BeamerTheme](https://github.com/pm25/SimplePlus-BeamerTheme) | Unlicense |
 | `execushares` | Execushares | [hamaluik/Beamer-Theme-Execushares](https://github.com/hamaluik/Beamer-Theme-Execushares) | MIT |
 
-The first four share a common ancestor and differ in palette, typography and chrome rather than being four independent designs. All six are verified to compile with XeLaTeX on a plain TeX Live install with no extra fonts registered. None of them ship anyone's logo — the images under `src/brand/` are neutral placeholders meant to be replaced.
+The first four share a collegeBeamer ancestor but have since been redesigned into distinct families: Academic is a university-press book plate (centered small caps between double hairlines, roman-numeral dividers), Emerald is editorial (display serif over flowing curves, full-bleed part pages with ghost numerals), Graphite is Swiss typographic (sans-first Heros, hard grid, monochrome charts), and Navy is a boardroom deck (banded white-on-navy headers, split-panel agendas, a footer progress line). SimplePlus and Execushares keep their own upstream identities. All six are verified to compile with XeLaTeX on a plain TeX Live install with no extra fonts registered — the faces each theme needs ship inside its pack. None of them ship anyone's logo — the images under `src/brand/` are neutral placeholders meant to be replaced.
 
 ## The template file is the prompt
 

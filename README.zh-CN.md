@@ -27,7 +27,7 @@
 | `simpleplus` | SimplePlus | [pm25/SimplePlus-BeamerTheme](https://github.com/pm25/SimplePlus-BeamerTheme) | Unlicense |
 | `execushares` | Execushares | [hamaluik/Beamer-Theme-Execushares](https://github.com/hamaluik/Beamer-Theme-Execushares) | MIT |
 
-前四套同源，差在配色、字体与页眉页脚一类的 chrome，并不是四套彼此独立的设计。六套都已在干净的 TeX Live 上用 XeLaTeX 编译通过，无需另行注册字体。没有一套自带别人的 logo——`src/brand/` 下的图是中性占位，本来就打算被替换掉。
+前四套虽同出 collegeBeamer 一脉，但各自已被重新设计成独立的版式家族：Academic 是大学出版社的书籍扉页风（双细线框、居中小型大写、罗马数字节页）；Emerald 是杂志编辑风（大号衬线展示标题、流线纹理、带幽灵数字的满幅章节页）；Graphite 是瑞士排印风（Heros 无衬线、硬网格、单色图表）；Navy 是董事会报告风（藏青通栏题头带、左右分栏议程页、页脚进度线）。SimplePlus 与 Execushares 保持各自上游的身份。六套都已在干净的 TeX Live 上用 XeLaTeX 编译通过，主题所需字体随包自带，无需另行注册。没有一套自带别人的 logo——`src/brand/` 下的图是中性占位，本来就打算被替换掉。
 
 ## 模板文件本身就是提示词
 
