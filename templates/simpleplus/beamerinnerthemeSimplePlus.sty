@@ -49,52 +49,170 @@ color(0pt)=(lower.bg); color(2pt)=(lower.bg); color(4pt)=(lower.bg)}
     \fi
 }
 
+%--------------------------------------
+%  Shared design primitives
+%  (executed at document time; tikz is loaded by the document preamble)
+%--------------------------------------
+
+% Corner geometry: a quiet cluster of DarkBlue squares and thin diagonals
+% anchored to the lower-right page corner. Used by the title page template
+% and \SimplePlusClosingPage. Needs two compile passes (remember picture).
+\newcommand{\SimplePlusCornerDeco}{%
+    \begin{tikzpicture}[remember picture,overlay]
+        \begin{scope}[shift={(current page.south east)},DarkBlue]
+            % thin 45-degree hairlines running behind the squares
+            \draw[line width=0.4pt,opacity=0.28] (-44mm,5mm) -- (-21mm,28mm);
+            \draw[line width=0.4pt,opacity=0.18] (-38mm,4mm) -- (-18mm,24mm);
+            % translucent filled squares
+            \fill[opacity=0.10] (-31mm,7mm)  rectangle (-19mm,19mm);
+            \fill[opacity=0.16] (-17.5mm,11mm) rectangle (-10.5mm,18mm);
+            % one outlined square overlapping the cluster
+            \draw[line width=0.5pt,opacity=0.50] (-24mm,14mm) rectangle (-13mm,25mm);
+            % small solid anchor square nearest the corner
+            \fill[opacity=0.75] (-8.6mm,7mm) rectangle (-5.2mm,10.4mm);
+        \end{scope}
+    \end{tikzpicture}%
+}
+
+% Accent-bar block: measures its argument, then sets a DarkBlue vertical bar
+% of exactly the block's height flush left of it. The composition therefore
+% stays balanced whatever metadata is present.
+\newsavebox{\SP@blockbox}
+\newdimen\SP@barwidth \SP@barwidth=5mm
+\newcommand{\SP@barblock}[1]{%
+    \sbox{\SP@blockbox}{#1}%
+    \noindent
+    {\color{DarkBlue}%
+     \rule[\dimexpr-\dp\SP@blockbox\relax]{\SP@barwidth}{\dimexpr\ht\SP@blockbox+\dp\SP@blockbox\relax}}%
+    \hspace{4.5mm}%
+    \usebox{\SP@blockbox}\par
+}
+
+% Title sizing: 27pt when the title fits two lines of the 122mm type block,
+% otherwise fall back to 22pt so even very long titles stay composed.
+\newdimen\SP@titlenatwd
+\newcommand{\SP@titlefont}{%
+    \begingroup
+        \def\\{ }\def\newline{ }%
+        \setbox\@tempboxa\hbox{\fontsize{27}{32}\selectfont\bfseries\inserttitle}%
+        \global\SP@titlenatwd=\wd\@tempboxa
+    \endgroup
+    \ifdim\SP@titlenatwd>232mm
+        \fontsize{22}{27}\selectfont
+    \else
+        \fontsize{27}{32}\selectfont
+    \fi
+    \bfseries
+}
+
+% metadata line "author | institute | date" that never shows an orphan
+% separator, whichever subset of the three fields is empty.
+\newcommand{\SP@metasep}{\hspace{0.8em}{\color{DarkBlue!45}\textbar}\hspace{0.8em}}
+\newcommand{\SP@titlemeta}{%
+    \def\SP@sep{}%
+    \ifx\beamer@shortauthor\@empty\else
+        \insertauthor\def\SP@sep{\SP@metasep}%
+    \fi
+    \ifx\beamer@shortinstitute\@empty\else
+        \SP@sep\insertinstitute\def\SP@sep{\SP@metasep}%
+    \fi
+    \ifx\beamer@shortdate\@empty\else
+        \SP@sep\insertdate
+    \fi
+}
+
+% signature divider: short solid DarkBlue tick continuing as a light hairline.
+% Shared by the frame titles and the section transition pages.
+\newcommand{\SP@accentrule}{%
+    \noindent
+    {\color{DarkBlue}\rule{8mm}{1mm}}%
+    \hspace{1.2mm}%
+    {\color{DarkBlue!22}\leaders\hrule height 0.7mm depth -0.5mm\hfill\kern0pt}%
+    \par
+}
+
 % frame title customization
-% Renders \insertframesubtitle so a \framesubtitle{...} is never silently lost.
+% Bold title over the accent divider; \insertframesubtitle is rendered so a
+% \framesubtitle{...} is never silently lost.
 \setbeamertemplate{frametitle}{%
-    \vspace*{0.5em}
+    \vspace*{2.6mm}
     \bfseries\insertframetitle\par
     {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\insertframesubtitle\par}%
-    \vskip-6pt
-    \hrulefill\vspace{0.5em}
+    \vskip1.4mm
+    \nointerlineskip
+    \SP@accentrule
+    \vspace{1.8mm}
 }
 
 % title page customization
-% Empty author/institute boxes are skipped entirely (the pipeline's normal case),
-% and fill-order glue gives a stable ~1:2 optical split above/below the block.
+% Asymmetric, left-anchored: DarkBlue accent bar sized to the type block
+% (title / subtitle / hairline / author | institute | date), plus the
+% geometric corner decoration. Empty metadata is skipped entirely, so
+% bar + title + date still compose cleanly on their own.
 \setbeamertemplate{title page}{%
-    \vskip0pt plus 1fill%
+    \SimplePlusCornerDeco
+    \vskip0pt plus 0.85fill%
     \begingroup
-    \centering
-    % ------------------------
-    \begin{beamercolorbox}[sep=10pt,center]{title}
-        \usebeamerfont{title}\inserttitle\par%
-        \ifx\insertsubtitle\@empty%
-        \else%
-        \vskip0.25em%
-        {\usebeamerfont{subtitle}\usebeamercolor[fg]{subtitle}\insertsubtitle\par}%
-        \fi%
-    \end{beamercolorbox}%
-    \vskip0.5em\par
-    % ------------------------
-    \ifx\beamer@shortauthor\@empty\else%
-    \begin{beamercolorbox}[sep=8pt,center]{author}
-        \usebeamerfont{author}\insertauthor
-    \end{beamercolorbox}
-    \fi%
-    % ------------------------
-    \ifx\beamer@shortinstitute\@empty\else%
-    \vskip-1em
-    \begin{beamercolorbox}[sep=8pt,center]{institute}
-        \usebeamerfont{institute}\insertinstitute
-    \end{beamercolorbox}
-    \fi%
-    % ------------------------
-    \begin{beamercolorbox}[sep=8pt,center]{date}
-        \usebeamerfont{date}\insertdate
-    \end{beamercolorbox}\vskip0.5em
-    % ------------------------
-    {\usebeamercolor[fg]{titlegraphic}\inserttitlegraphic\par}
+    \raggedright
+    \SP@barblock{%
+        \begin{minipage}[b]{122mm}
+            \raggedright
+            {\usebeamercolor[fg]{title}\SP@titlefont\inserttitle\par}%
+            \ifx\insertsubtitle\@empty\else
+                \vskip2.4mm
+                {\usebeamerfont{subtitle}\mdseries\color{black!55}\insertsubtitle\par}%
+            \fi
+            \vskip4.2mm
+            {\color{DarkBlue!30}\rule{56mm}{0.5pt}\par}%
+            \vskip2.8mm
+            {\usebeamerfont{date}\color{black!60}\SP@titlemeta\par}%
+        \end{minipage}}%
     \endgroup
-    \vskip0pt plus 2fill%
+    \vskip0pt plus 1.3fill%
+}
+
+% section transition page body: oversized light section number, bold section
+% name on the same baseline, a hairline, then the highlighted agenda.
+% Called by the \AtBeginSection hook in the document.
+\newcommand{\SimplePlusSectionTransition}{%
+    \vspace*{6mm}
+    \noindent
+    {\fontsize{54}{54}\selectfont\mdseries\color{DarkBlue!28}%
+     \ifnum\insertsectionnumber<10 0\fi\insertsectionnumber}%
+    \hspace{4mm}%
+    \parbox[b]{\dimexpr\textwidth-42mm\relax}{%
+        \raggedright\fontsize{19}{23}\selectfont\bfseries\color{DarkBlue}\insertsection}%
+    \par
+    \vskip3mm
+    \SP@accentrule
+    \vskip6mm
+    \tableofcontents[currentsection,sectionstyle=show/shaded,subsectionstyle=hide]%
+}
+
+% closing page: mirrors the title page language (accent bar, type block,
+% corner geometry). #1 headline, #2 subline; the attribution keeps the
+% empty-metadata guards from \SimplePlusClosingAttribution.
+\newcommand{\SimplePlusClosingPage}[2]{%
+    \SimplePlusCornerDeco
+    \vskip0pt plus 0.85fill%
+    \begingroup
+    \raggedright
+    \SP@barblock{%
+        \begin{minipage}[b]{122mm}
+            \raggedright
+            {\usebeamercolor[fg]{title}\fontsize{23}{28}\selectfont\bfseries #1\par}%
+            \if\relax\detokenize{#2}\relax\else
+                \vskip2.4mm
+                {\usebeamerfont{subtitle}\mdseries\color{black!55}#2\par}%
+            \fi
+            \ifx\beamer@shortauthor\@empty\else
+                \vskip4.2mm
+                {\color{DarkBlue!30}\rule{56mm}{0.5pt}\par}%
+                \vskip2.8mm
+                {\usebeamerfont{date}\color{black!60}\insertauthor
+                 \ifx\beamer@shortinstitute\@empty\else\unskip\SP@metasep\insertinstitute\fi\par}%
+            \fi
+        \end{minipage}}%
+    \endgroup
+    \vskip0pt plus 1.3fill%
 }

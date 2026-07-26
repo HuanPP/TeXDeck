@@ -37,21 +37,24 @@
 \usepackage{colortbl}
 \usepackage{multirow}
 
-% Auto-generate a highlighted agenda transition at the start of EACH section.
+% Auto-generate a designed section transition at the start of EACH section:
+% oversized section number + section name + highlighted agenda (theme macro).
 % Just write \section{...} before each section's frames; NEVER hand-type
 % agenda or transition frames.
 \AtBeginSection[]{%
-  \begin{frame}{Agenda}
-    \tableofcontents[currentsection,sectionstyle=show/shaded,subsectionstyle=hide]
+  \begin{frame}[t]
+    \SimplePlusSectionTransition
   \end{frame}
 }
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
 % -----------------------------------------------------------------------------
+% Keep the full title concise: it is set flush left at 27pt over up to two
+% lines (overlong titles are scaled down automatically, but read worse).
 \title[Short Title]{Full Presentation Title}
 % Caller fills these three fields. Leave empty when unknown; never invent placeholders.
-% Empty fields are safe: the theme skips their boxes on the title page.
+% Empty fields are safe: the theme skips them on the title and closing pages.
 \subtitle{}
 \author{}
 \institute{}
@@ -61,6 +64,8 @@
 
 % =============================================================================
 % FRAME 1: TITLE PAGE (plain: no footer on the opening slide)
+% The theme draws the whole composition (left accent bar, type block, corner
+% geometry); keep this frame exactly as is -- never hand-build a title layout.
 % =============================================================================
 \begin{frame}[plain,c]
   \titlepage
@@ -336,8 +341,12 @@ You MUST:
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
 \item Write \texttt{\textbackslash section\{...\}} before the first frame of each
-      section; the highlighted agenda transition page is inserted automatically --
-      never hand-type agenda or transition frames
+      section; the designed section transition page (big section number + agenda)
+      is inserted automatically -- never hand-type agenda or transition frames
+\item Keep the title frame (\texttt{\textbackslash titlepage}) and the closing
+      frame (\texttt{\textbackslash SimplePlusClosingPage\{...\}\{...\}}) exactly
+      as structured in this template: the theme draws their accent bar and corner
+      geometry. You may reword only the two closing text arguments
 \item Use columns layout for all content pages
 \item Keep information density high (no empty slides)
 \item Target 12--18 frames total
@@ -347,17 +356,12 @@ You MUST:
 
 % =============================================================================
 % FINAL PAGE
+% Mirrors the title page (accent bar + corner geometry). The theme macro
+% handles layout and skips missing author/institute metadata; keep this frame
+% exactly one \SimplePlusClosingPage call -- do not hand-build a closing layout.
 % =============================================================================
-\begin{frame}[c]{Thank You}
-\centering
-{\Large Thank you for your attention.}
-
-\vspace{1.2em}
-{\large Questions \& Discussion}
-
-\vspace{1.5em}
-% Renders "author | institute" only when that metadata exists; safe when empty.
-\SimplePlusClosingAttribution
+\begin{frame}[plain,c]
+  \SimplePlusClosingPage{Thank You}{Questions \& Discussion}
 \end{frame}
 
 \end{document}
