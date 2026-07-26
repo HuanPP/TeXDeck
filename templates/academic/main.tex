@@ -9,12 +9,18 @@
 % 2. You MUST delete all [STYLE REF] frames and the AI INSTRUCTION frame.
 % 3. You MUST replace all placeholder texts with real content.
 % 4. You MUST preserve the collegeBeamer theme and visual style.
-% 5. Keep each slide's body text to roughly 8--10 lines, More than 10 pages is unacceptable.
+% 5. PAGE BUDGET: the final PDF must total 12--18 pages.
+%    Scaffolding = title (1) + outline (1) + Q&A (1), and the theme
+%    AUTO-INSERTS one divider page at every \section -- never build divider
+%    frames by hand. Plan 3--5 sections with 2--4 content frames each.
+%    Keep each content slide's body text to roughly 8--10 lines.
 % 6. NEVER use \includegraphics. No external image files exist. Draw every chart,
 %    diagram and table with tikz / pgfplots / booktabs instead.
 % 7. Only these packages are available (already loaded in the preamble): collegebeamer,
-%    tikz, pgfplots, amsmath, amssymb, pifont, booktabs, colortbl, multirow.
-%    Do NOT add \usepackage lines.
+%    fontspec, newpxmath, tikz, pgfplots, amsmath, amssymb, pifont, booktabs,
+%    colortbl, multirow. Do NOT add \usepackage lines.
+% 8. In pgfplots, every \addplot coordinate MUST reuse exactly the labels declared
+%    in `symbolic x coords` (any mismatch is a compile error).
 % =============================================================================
 
 \documentclass[aspectratio=169,10pt]{beamer}
@@ -35,42 +41,44 @@
 \usepackage{multirow}
 
 % --- Font Setup ---
-% Text font: Palatino  |  Math font: Times-like
-\usepackage{palatino}
-\let\mathbf\relax
-\usepackage{newtxmath}
+% Text: TeX Gyre Pagella (Palatino clone with real bold/italic/small caps under
+% XeLaTeX, loaded from the bundled font/ directory).  Math: newpxmath
+% (Palatino-matched math letters).
+\usepackage{fontspec}
+\setmainfont{texgyrepagella}[
+    Path = font/,
+    Extension = .otf,
+    UprightFont = *-regular,
+    BoldFont = *-bold,
+    ItalicFont = *-italic,
+    BoldItalicFont = *-bolditalic,
+]
+\let\mathbf\relax % avoid a redefinition clash between bm/beamer and newpxmath
+\usepackage{newpxmath}
 
-% Disable collegeBeamer auto TOC insertion
-\AtBeginSection[]{}
+% NOTE: the theme auto-inserts a highlighted-TOC divider page at every
+% \section, and prints "<number> <section name>" under each frame title
+% (suppressed automatically before the first \section). Do not redefine these.
 
-% -----------------------------------------------------------------------------
-% 1.1 Make "subtitle under each slide title" show FULL and stable
-% -----------------------------------------------------------------------------
-% Some collegeBeamer variants put only \insertsectionnumber under the title,
-% which may appear as "0" or look incomplete.
-% Here we redefine framesubtitle so it always shows:
-%   "Section number  Section name"
-% and avoids showing anything before the first \section is defined.
-\setbeamertemplate{framesubtitle}{%
-  \vspace{-0.6ex}%
-  {\scriptsize\color{maincolor}%
-    \ifnum\value{section}>0
-      \thesection\quad\insertsectionhead
-    \fi
-  }\par
-  \vspace{-0.4ex}%
-}
-
-% Keep title page compilable when subtitle/author/institute are left empty.
+% Title page: skips subtitle/author/institute lines cleanly when left empty.
+\makeatletter
+\def\academic@emptyauthor{\def\inst{\beamer@insttitle}\def\and{\beamer@andtitle}}
 \setbeamertemplate{title page}{
     \hspace{-12mm}
-    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\leavevmode\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\leavevmode\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
+    \begin{beamercolorbox}[wd=0.72\textwidth, sep=10pt, leftskip=8mm]{title}
+        {\color{maincolor}\rule{2cm}{0.6pt}\par}
+        \vskip10pt
+        {\usebeamerfont{title}\inserttitle\par}
+        \ifx\insertsubtitle\@empty\else
+            \vskip8pt{\usebeamerfont{subtitle}\insertsubtitle\par}\fi
+        \ifx\insertauthor\academic@emptyauthor\else
+            \vskip14pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}\fi
+        \ifx\insertinstitute\@empty\else
+            \vskip4pt{\usebeamerfont{institute}\usebeamercolor[fg]{author}\insertinstitute\par}\fi
+        \vskip10pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
     \end{beamercolorbox}
 }
+\makeatother
 
 % -----------------------------------------------------------------------------
 % 2. Metadata (LLM MUST FILL)
@@ -90,48 +98,21 @@
 \maketitle
 
 % =============================================================================
-% FRAME 2: MANUAL TABLE OF CONTENTS
+% FRAME 2: TABLE OF CONTENTS (auto-generated -- never hardcode section numbers)
 % =============================================================================
 \begin{frame}{Outline}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-01 \quad Title of Part One
-
-02 \quad Title of Part Two
-
-03 \quad Title of Part Three
-
-04 \quad Title of Part Four
-
-05 \quad Summary \& Q\&A
+    \vspace{0.5em}
+    \large
+    \tableofcontents
 \end{frame}
 
 % =============================================================================
 % SECTION 1 (EXAMPLE)
-% IMPORTANT: define \section{...} before any content frames of that section
-% so the subtitle line is complete (no "0").
+% IMPORTANT: declare \section{...} BEFORE the content frames of each part.
+% The theme then automatically inserts a full-color divider page with the
+% current section highlighted -- do NOT build any manual transition frames.
 % =============================================================================
 \section{Title of Part One}
-
-% =============================================================================
-% FRAME 3: SECTION TRANSITION (EXAMPLE: SECTION 1)
-% LLM MUST generate one such page before EACH section
-% =============================================================================
-\begin{frame}{Outline}
-\large
-\renewcommand{\baselinestretch}{1.8}\selectfont
-
-\textbf{\textcolor{maincolor}{01 \quad Title of Part One}}
-
-02 \quad Title of Part Two
-
-03 \quad Title of Part Three
-
-04 \quad Title of Part Four
-
-05 \quad Summary \& Q\&A
-\end{frame}
 
 % =============================================================================
 % CONTENT FRAME TEMPLATE (LLM MUST USE THIS STRUCTURE)
@@ -155,22 +136,25 @@ State the central message of this slide in one sentence.
 \centering
 % Side panel: FEW categories only (4--6 short labels). Compact width. No xlabel.
 % For 12-month / many-label series use the full-width chart on the next example page.
+% NOTE: keep `enlarge x limits` AFTER the axis-line keys (they reset it),
+% and every coordinate label must match `symbolic x coords` exactly.
 \begin{tikzpicture}
 \begin{axis}[
     width=5.4cm,
     height=3.6cm,
     ybar,
-    bar width=9pt,
-    enlarge x limits=0.15,
+    bar width=11pt,
     ymin=0, ymax=100,
+    ytick distance=25,
     symbolic x coords={Q1,Q2,Q3,Q4},
     xtick=data,
     ylabel={Sample index},
-    tick label style={font=\tiny},
+    tick label style={font=\scriptsize},
     label style={font=\scriptsize},
     axis y line=left,
     axis x line=bottom,
-    axis line style={maincolor},
+    axis line style={maincolor!70, -},
+    enlarge x limits={abs=0.65cm},
     grid=major,
     grid style={maincolor!12},
 ]
@@ -194,13 +178,15 @@ Keep the text concise so the wide chart remains readable.
 
 \vspace{1em}
 
-% Lower figure: MANY categories (12 months) → MUST be wide + rotated x labels
-\centering
+% Lower figure: MANY categories (12 months) → MUST use this full-width layout.
+% Short labels (<=3 chars) stay horizontal; add `rotate=30, anchor=east` to
+% `x tick label style` only when labels are long. Keep `enlarge x limits`
+% AFTER the axis-line keys, and match `symbolic x coords` labels exactly.
+{\centering
 \begin{tikzpicture}
 \begin{axis}[
     width=11.5cm, height=4.2cm,
-    enlarge x limits=0.04,
-    x tick label style={rotate=45, anchor=east, font=\tiny},
+    x tick label style={font=\scriptsize},
     ylabel style={font=\scriptsize},
     xlabel style={font=\scriptsize, yshift=-2pt},
     ymin=1900, ymax=2900,
@@ -208,13 +194,14 @@ Keep the text concise so the wide chart remains readable.
     xtick=data,
     ylabel={Sample level},
     xlabel={Month (illustrative)},
-    legend style={at={(0.02,0.98)}, anchor=north west, font=\tiny, draw=none, fill=none},
-    yticklabel style={font=\tiny},
+    legend style={at={(0.02,0.98)}, anchor=north west, font=\scriptsize, draw=none, fill=none},
+    yticklabel style={font=\scriptsize},
     axis y line=left,
     axis x line=bottom,
+    axis line style={maincolor!70, -},
+    enlarge x limits=0.04,
     grid=major,
     grid style={maincolor!12},
-    axis line style={maincolor},
 ]
 \addplot[
     thick,
@@ -237,12 +224,10 @@ Keep the text concise so the wide chart remains readable.
 };
 \legend{Series A (sample), Series B (sample)}
 \end{axis}
-\end{tikzpicture}
+\end{tikzpicture}\par}
 
-\vspace{0.3em}
-\centerstate{
-    \tiny \emph{Source: data compiled from the source document.}
-}
+\vspace{0.2em}
+\hspace*{1.9cm}{\scriptsize\color{darkgray!80}\emph{Source: data compiled from the source document.}}
 \end{frame}
 
 
@@ -261,28 +246,30 @@ Keep the text concise so the wide chart remains readable.
             draw=maincolor, fill=maincolor!12, rounded corners=2pt,
             minimum height=0.62cm, text width=1.35cm, align=center
         },
-        layer title/.style={font=\tiny\bfseries, text=maincolor}
+        layer title/.style={font=\scriptsize\bfseries, text=maincolor}
     ]
-        % Data layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.45);
-        \node[layer title, anchor=north west] at (-0.15,2.40) {Data layer};
-        \node[box] (s1) at (0.7,1.55) {Sensors};
-        \node[box] (s2) at (2.5,1.55) {Ingest};
-        \node[box] (s3) at (4.2,1.55) {Store};
+        % Data layer (panel top leaves reserved space for the caption)
+        \fill[maincolor!6, rounded corners=3pt] (-0.25,1.05) rectangle (4.85,2.60);
+        \node[layer title, anchor=north west] at (-0.15,2.55) {Data layer};
+        \node[box] (s1) at (0.7,1.50) {Sensors};
+        \node[box] (s2) at (2.5,1.50) {Ingest};
+        \node[box] (s3) at (4.2,1.50) {Store};
         % Decision layer
-        \fill[maincolor!6, rounded corners=3pt] (-0.25,-0.95) rectangle (4.85,0.70);
+        \fill[maincolor!6, rounded corners=3pt] (-0.25,-1.25) rectangle (4.85,0.70);
         \node[layer title, anchor=north west] at (-0.15,0.65) {Decision layer};
-        \node[box] (p1) at (0.7,-0.15) {Feature};
-        \node[box] (p2) at (2.5,-0.15) {Model};
-        \node[box] (p3) at (4.2,-0.15) {Act};
-        % Edges
+        \node[box] (p1) at (0.7,-0.30) {Feature};
+        \node[box] (p2) at (2.5,-0.30) {Model};
+        \node[box] (p3) at (4.2,-0.30) {Act};
+        % Edges (route cross-layer links orthogonally around the panels so
+        % they never slice through captions or other boxes)
         \draw[->, thick, maincolor] (s1) -- (s2);
         \draw[->, thick, maincolor] (s2) -- (s3);
-        \draw[->, thick, maincolor] (s2) -- (p1);
+        \draw[->, thick, maincolor, rounded corners=2pt]
+            (s2.south) -- (2.5,0.875) -- (-0.65,0.875) -- (-0.65,-0.30) -- (p1.west);
         \draw[->, thick, maincolor] (p1) -- (p2);
         \draw[->, thick, maincolor] (p2) -- (p3);
         \draw[->, thick, maincolor, dashed]
-            (p3.south) -- ++(0,-0.28) -| (p1.south)
+            (p3.south) -- ++(0,-0.30) -| (p1.south)
             node[pos=0.25, below, font=\tiny, text=maincolor] {feedback};
     \end{tikzpicture}
 
@@ -307,6 +294,32 @@ Keep the text concise so the wide chart remains readable.
 \end{columns}
 \end{frame}
 
+% Content page example 4: Definition block + displayed equation
+% Use this pattern whenever the source document is math-heavy.
+\begin{frame}{Content Example: Definition and Key Equation}
+\framesubtitle{}
+\small
+\begin{block}{Definition (state the core assumption or theorem here)}
+    Summarize the central definition, assumption, or theorem of this part
+    in one or two sentences.
+\end{block}
+
+\vspace{0.6em}
+The key relation then follows directly:
+\begin{equation*}
+    \hat{y}_t = f_\theta(x_t) + \varepsilon_t,
+    \qquad
+    \mathcal{L}(\theta) = \frac{1}{T}\sum_{t=1}^{T}\bigl(y_t - \hat{y}_t\bigr)^2 .
+\end{equation*}
+
+\vspace{0.4em}
+\begin{itemize}
+    \item Explain every symbol in one line directly below the equation.
+    \item Display only the one or two equations that carry the argument;
+          keep everything else inline.
+\end{itemize}
+\end{frame}
+
 % =============================================================================
 % [STYLE REF] TABLE PAGE (DELETE IN FINAL OUTPUT)
 % =============================================================================
@@ -314,13 +327,15 @@ Keep the text concise so the wide chart remains readable.
 \framesubtitle{}
 \small
 \centering
-\renewcommand{\arraystretch}{1.15}
+\renewcommand{\arraystretch}{1.3}
 \footnotesize
-\rowcolors{2}{maincolor!10}{white}
+% Header: maincolor fill + white bold text; body: plain rows + \bottomrule.
+% Use \rowcolors zebra striping ONLY for tables with 6+ rows, and then add
+% \noalign{\vskip2pt} before \bottomrule to keep the stripe off the rule.
 \begin{tabular}{p{0.2\textwidth} c c c}
-\toprule
-Metric & A & B & Conclusion \\
-\midrule
+\rowcolor{maincolor}
+\textcolor{white}{\textbf{Metric}} & \textcolor{white}{\textbf{A}} &
+\textcolor{white}{\textbf{B}} & \textcolor{white}{\textbf{Conclusion}} \\
 Item 1 & 12 & 15 & Room for improvement \\
 Item 2 & 20 & 18 & Stable \\
 \bottomrule
@@ -375,9 +390,17 @@ You MUST:
 \begin{itemize}
 \item Delete all [STYLE REF] frames and this instruction frame
 \item Replace all placeholders with real content
-\item Insert a highlighted TOC transition page before each section
-\item Define \texttt{\textbackslash section\{...\}} before the first frame of that section
-\item Use columns layout for all content pages
+\item Declare \texttt{\textbackslash section\{...\}} before the content frames of each
+      part; the theme auto-inserts a highlighted divider page at every
+      \texttt{\textbackslash section} -- NEVER build manual transition or outline frames
+\item PAGE BUDGET: 12--18 PDF pages total = title + outline + Q\&A (3 pages)
+      + one auto divider per section + 2--4 content frames per section,
+      for 3--5 sections
+\item Lay out every content page with one of the demonstrated example layouts;
+      full-width (no columns) is REQUIRED for charts with more than 6 categories
+\item In every chart, each \texttt{\textbackslash addplot} coordinate must reuse exactly
+      the labels declared in \texttt{symbolic x coords}, and keep
+      \texttt{enlarge x limits} AFTER the axis-line keys
 \item Keep information density high (no empty slides)
 \item Output FULL LaTeX code only
 \end{itemize}

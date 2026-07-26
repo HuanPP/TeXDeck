@@ -95,7 +95,7 @@
 % \renewcommand{\familydefault}{\sfdefault}  % sans-serif
 \usefonttheme{serif}
 
-\setbeamerfont{title}{series=\scshape, size=\Large}
+\setbeamerfont{title}{series=\bfseries, size=\fontsize{22}{27}\selectfont}
 
 \setbeamerfont{subtitle}{series=\mdseries, size=\normalsize}
 \setbeamerfont{author}{size=\normalsize}
@@ -108,8 +108,9 @@
 % no navigation symbols
 \setbeamertemplate{navigation symbols}{}
 
-% footline
-\newcommand{\@footlinepayoff}{\@SINTEFmotto}
+% footline: page counter, right-aligned (suppressed on title/section/QA pages
+% via the \begingroup overrides around those frames)
+\newcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
 \setbeamertemplate{footline}{
     \begin{beamercolorbox}[wd=\textwidth, ht=5mm, dp=3mm, rightskip=1cm]{footline}
     \usebeamerfont{footline}\hfill\@footlinepayoff
@@ -117,23 +118,27 @@
 }
 
 \newcommand{\footlinecolor}[1]{
-    % if #1 is empty, makes footline transparent
+    % if #1 is empty, resets the footline to its plain (no background) look
     \ifstrempty{#1}{
-        \renewcommand{\@footlinepayoff}{}
-        \setbeamercolor{footline}{bg=}
+        \renewcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
+        \setbeamercolor{footline}{fg=darkgray!70, bg=}
     }{
-        \renewcommand{\@footlinepayoff}{\@SINTEFmotto}
+        \renewcommand{\@footlinepayoff}{\insertframenumber\,/\,\inserttotalframenumber}
         \setbeamercolor{footline}{fg=white, bg=#1}
     }
 }
-\footlinecolor{} % default: no footline
+\setbeamercolor{footline}{fg=darkgray!70, bg=}  % default: subtle page numbers
 
-% block
+% block (kept strictly on the maincolor palette)
 \setbeamertemplate{blocks}[rounded]
-\setbeamerfont{block title}{series=\centering, size=\small}
+\setbeamerfont{block title}{series=\bfseries, size=\small}
 \setbeamerfont{block body}{size=\scriptsize}
-\setbeamercolor{block title}{fg=airforceblue, bg=morelightgray}
-\setbeamercolor{block body}{fg=darkgray, bg=morelightgray}
+\setbeamercolor{block title}{fg=white, bg=maincolor}
+\setbeamercolor{block body}{fg=darkgray, bg=maincolor!8}
+\setbeamercolor{block title alerted}{fg=white, bg=maincolor!80!black}
+\setbeamercolor{block body alerted}{fg=darkgray, bg=maincolor!10}
+\setbeamercolor{block title example}{fg=white, bg=maincolor!60!black}
+\setbeamercolor{block body example}{fg=darkgray, bg=maincolor!60!black!8}
 
 % bullets
 \setbeamertemplate{itemize item}{\textbullet}
@@ -178,9 +183,10 @@
 % subsection
 \newcommand{\strsubsec}{Section \thesection.\thesubsection}
 
-% presents subtitle on each frame
+% presents subtitle on each frame; suppressed before the first \section so no
+% stray "0" appears under early frame titles (e.g. the Outline page)
 \makeatletter
-    \pretocmd\beamer@checkframetitle{\framesubtitle{\thesection \, \secname}}
+    \pretocmd\beamer@checkframetitle{\framesubtitle{\ifnum\value{section}>0 \thesection\,\secname\fi}}
 \makeatother
 
 % avoid numbering of frames that are breaked into multiply slides
@@ -221,16 +227,8 @@
     \end{beamercolorbox}
 }
 
-% title page
-\setbeamertemplate{title page}{
-    \hspace{-12mm}  % pull back the box in an inelegant way - but it works!
-    \begin{beamercolorbox}[wd=0.6\textwidth, sep=10pt, leftskip=8mm]{title}
-        {\usebeamerfont{title}\inserttitle}\\
-        \vskip5pt{\usebeamerfont{subtitle}\insertsubtitle}\\
-        \vskip5pt{\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor}\\
-        \vskip5pt{\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate}
-    \end{beamercolorbox}
-}
+% title page: the layout template lives in main.tex (it guards empty
+% subtitle/author/institute fields); only \maketitle plumbing lives here
 
 \renewcommand{\maketitle}{
     \begingroup
@@ -255,8 +253,9 @@
             \begin{minipage}{\textwidth}
                 \usebeamercolor[fg]{normal text}
                 \centering
-                \Huge $$\mathcal Q \& \mathcal A$$
-                \Large \qaStr
+                {\fontsize{30}{36}\selectfont\bfseries Q\,\&\,A\par}
+                \vspace{1em}
+                {\Large \qaStr\par}
             \end{minipage}
         \end{frame}
     \endgroup
