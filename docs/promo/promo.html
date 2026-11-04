@@ -1,0 +1,309 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Garamond; src: url(build/fonts/EBGaramond12-Regular.otf); }
+@font-face { font-family: Garamond; font-style: italic; src: url(build/fonts/EBGaramond-Italic.otf); }
+@font-face { font-family: Heros; src: url(build/fonts/texgyreheros-regular.otf); }
+@font-face { font-family: Heros; font-weight: bold; src: url(build/fonts/texgyreheros-bold.otf); }
+:root { --ink: #efe9dc; --gold: #cfae6e; --dim: #8b93a3; }
+html, body { margin: 0; padding: 0; background: #000; }
+#stage { position: relative; width: 1280px; height: 544px; overflow: hidden; background: #05070b;
+  font-family: Garamond, serif; color: var(--ink); }
+.abs { position: absolute; }
+#bg { inset: 0; background: radial-gradient(ellipse 70% 80% at 50% 46%, #172133 0%, #0b1019 55%, #040609 100%); }
+#warm { width: 900px; height: 900px; border-radius: 50%; left: 0; top: 0;
+  background: radial-gradient(circle, rgba(232,150,62,.13) 0%, rgba(232,150,62,0) 60%); mix-blend-mode: screen; }
+#cool { width: 1000px; height: 1000px; border-radius: 50%; left: 0; top: 0;
+  background: radial-gradient(circle, rgba(60,110,190,.20) 0%, rgba(60,110,190,0) 60%); mix-blend-mode: screen; }
+#world { inset: 0; perspective: 1500px; perspective-origin: 50% 50%; }
+.plane { transform-style: preserve-3d; }
+
+/* the morphing card: PDF page on the front, generated slide on the back */
+#card { transform-style: preserve-3d; }
+.face { position: absolute; inset: 0; backface-visibility: hidden; overflow: hidden; background: #fff;
+  box-shadow: 0 40px 90px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.06); }
+.face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#back { transform: rotateY(180deg); }
+#back .shot { width: 100%; height: 100%; background: url(build/assets/hero.png) no-repeat;
+  background-size: 997.6px 396.9px; background-position: -298.4px -7.1px; }
+#beam { left: 0; right: 0; height: 2px; background: #9cc3ff;
+  box-shadow: 0 0 22px 8px rgba(120,170,255,.55), 0 0 60px 20px rgba(120,170,255,.25); }
+#beamTint { left: 0; right: 0; top: 0; background: linear-gradient(180deg, rgba(90,140,230,.0), rgba(90,140,230,.14)); }
+.sweep { inset: 0; background: linear-gradient(105deg, rgba(255,255,255,0) 35%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 65%);
+  background-size: 300% 100%; mix-blend-mode: soft-light; }
+.sheet { position: absolute; inset: 0; backface-visibility: hidden; background: #dcd8cf; box-shadow: 0 30px 70px rgba(0,0,0,.55); }
+#flare { width: 1400px; height: 14px; border-radius: 50%; background: radial-gradient(ellipse, rgba(225,238,255,1) 0%, rgba(150,190,255,.6) 30%, rgba(150,190,255,0) 70%); mix-blend-mode: screen; }
+#bloom { width: 900px; height: 600px; border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(80,130,220,.35) 0%, rgba(80,130,220,0) 62%); mix-blend-mode: screen; }
+
+.big { font-size: 60px; line-height: 1.04; letter-spacing: -.5px; white-space: nowrap; }
+.big i { font-style: italic; }
+.cap { font-family: Heros; font-size: 13px; letter-spacing: 3.6px; text-transform: uppercase; color: var(--gold); white-space: nowrap; }
+.ch { display: inline-block; white-space: pre; }
+.center { left: 0; width: 1280px; text-align: center; }
+.chip { display: inline-block; margin-right: 10px; padding: 7px 14px; border: 1px solid rgba(207,174,110,.55);
+  border-radius: 3px; font-family: Heros; font-size: 13px; letter-spacing: 1.5px; color: var(--ink); }
+
+#wall { left: -620px; top: -260px; width: 2600px; height: 1100px; transform-style: preserve-3d; }
+.row { position: absolute; left: 0; height: 190px; white-space: nowrap; }
+.tile { display: inline-block; width: 320px; height: 180px; margin-right: 26px; overflow: hidden; background: #fff;
+  box-shadow: 0 20px 50px rgba(0,0,0,.55); vertical-align: top; }
+.tile img { width: 100%; height: 100%; display: block; }
+#wallShade { inset: 0; background: linear-gradient(90deg, rgba(4,6,9,.92) 0%, rgba(4,6,9,.72) 34%, rgba(4,6,9,.05) 66%, rgba(4,6,9,0) 100%); }
+#wallTop { inset: 0; background: linear-gradient(180deg, rgba(4,6,9,.6) 0%, rgba(4,6,9,0) 22%, rgba(4,6,9,0) 78%, rgba(4,6,9,.7) 100%); }
+
+.word { font-size: 124px; letter-spacing: -1.5px; }
+#logo { font-size: 132px; letter-spacing: -1px;
+  background: linear-gradient(100deg, #e9e2d2 0%, #e9e2d2 40%, #fff6dc 48%, #d9b46c 52%, #e9e2d2 60%, #e9e2d2 100%);
+  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+#rule { left: 610px; width: 60px; height: 1px; background: var(--gold); }
+
+#vignette { inset: 0; background: radial-gradient(ellipse 75% 85% at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.6) 100%); }
+#grain { inset: 0; width: 1280px; height: 544px; opacity: .035; mix-blend-mode: overlay; }
+#fade { inset: 0; background: #000; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="bg"></div>
+  <div class="abs" id="warm"></div>
+  <div class="abs" id="cool"></div>
+
+  <!-- S1 cold open -->
+  <div class="abs big center" id="o1" style="top:196px">Every talk begins</div>
+  <div class="abs big center" id="o2" style="top:262px"><i>with a document.</i></div>
+
+  <div class="abs" id="bloom"></div>
+  <div class="abs" id="world">
+    
+    <div class="abs" id="card">
+      <div class="sheet" id="sh2" style="transform: translate3d(22px,-16px,-36px)"></div><div class="sheet" id="sh1" style="transform: translate3d(11px,-8px,-18px)"></div><div class="face" id="front"><img src="build/assets/demo-1.png">
+        <div class="abs" id="beamTint"></div><div class="abs" id="beam"></div></div>
+      <div class="face" id="back"><div class="shot"></div><div class="abs sweep" id="sweep"></div></div>
+    </div>
+  </div>
+
+  <!-- S2 text, right -->
+  <div class="abs cap" id="a0" style="left:700px; top:186px">A vision model</div>
+  <div class="abs big" id="a1" style="left:698px; top:216px">reads your pages</div>
+  <div class="abs big" id="a2" style="left:698px; top:280px"><i>as images.</i></div>
+
+  <!-- S3 text, left -->
+  <div class="abs cap" id="b0" style="left:92px; top:170px">XeLaTeX &middot; about a minute</div>
+  <div class="abs big" id="b1" style="left:90px; top:200px">Out comes</div>
+  <div class="abs big" id="b2" style="left:90px; top:264px"><i>Beamer.</i></div>
+  <div class="abs" id="chips" style="left:92px; top:360px"><span class="chip">main.pdf</span><span class="chip">main.tex</span><span class="chip">overleaf.zip</span></div>
+
+  <!-- S4 template wall -->
+  <div class="abs" id="wallWorld" style="inset:0; perspective:1400px; perspective-origin: 70% 50%">
+    <div class="abs" id="wall"></div>
+  </div>
+  <div class="abs" id="wallShade"></div>
+  <div class="abs" id="wallTop"></div>
+  <div class="abs cap" id="w0" style="left:92px; top:190px">Each one a full deck the model imitates</div>
+  <div class="abs big" id="w1" style="left:90px; top:220px">Seven</div>
+  <div class="abs big" id="w2" style="left:90px; top:284px"><i>templates.</i></div>
+
+  <!-- S5 fast cuts -->
+  <div class="abs word center" id="x1" style="top:170px">Desktop.</div>
+  <div class="abs cap center" id="y1" style="top:340px">macOS &middot; Windows &middot; Linux &middot; TeX bundled</div>
+  <div class="abs word center" id="x2" style="top:170px">Docker.</div>
+  <div class="abs cap center" id="y2" style="top:340px">One command &middot; the whole app on :8000</div>
+  <div class="abs word center" id="x3" style="top:170px"><i>Your model.</i></div>
+  <div class="abs cap center" id="y3" style="top:340px">Sign in with ChatGPT &middot; or any vision API</div>
+
+  <!-- S6 end card -->
+  <div class="abs center" id="logoWrap" style="top:150px"><span id="logo">TeXDeck</span></div>
+  <div class="abs" id="rule" style="top:318px"></div>
+  <div class="abs center" id="tag" style="top:336px; font-size:30px; font-style:italic; color:#cfc8b8">Drop in a PDF. Get back Beamer.</div>
+  <div class="abs cap center" id="url" style="top:402px; color:#8fa6c8">github.com/HuanPP/TeXDeck</div>
+
+  <div class="abs" id="flare"></div>
+  <div class="abs" id="vignette"></div>
+  <canvas class="abs" id="grain" width="640" height="272"></canvas>
+  <div class="abs" id="fade"></div>
+</div>
+<script>
+const DURATION = 23.0, FPS = 20;
+const $ = id => document.getElementById(id);
+const clamp = v => Math.max(0, Math.min(1, v));
+const lin = x => x;
+const out3 = x => 1 - Math.pow(1 - x, 3);
+const out5 = x => 1 - Math.pow(1 - x, 5);
+const inOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const p = (t, a, b, e = out3) => e(clamp((t - a) / (b - a)));
+const mix = (a, b, k) => a + (b - a) * k;
+
+// split headline text into per-letter spans
+function split(el) {
+  const walk = node => {
+    [...node.childNodes].forEach(n => {
+      if (n.nodeType === 3) {
+        const frag = document.createDocumentFragment();
+        [...n.textContent].forEach(c => { const s = document.createElement("span"); s.className = "ch"; s.textContent = c; frag.append(s); });
+        n.replaceWith(frag);
+      } else walk(n);
+    });
+  };
+  walk(el);
+  return [...el.querySelectorAll(".ch")];
+}
+const letters = {};
+["o1", "o2", "a1", "a2", "b1", "b2", "w1", "w2", "x1", "x2", "x3"].forEach(id => letters[id] = split($(id)));
+
+// letters rise out of a blur, staggered; whole line leaves with a soft blur
+function reveal(id, t, start, end, stagger = .035, dur = .7, exit = .45) {
+  const el = $(id), ls = letters[id];
+  const gone = p(t, end - exit, end, inOut);
+  el.style.opacity = 1 - gone;
+  el.style.filter = gone > 0 ? `blur(${gone * 10}px)` : "none";
+  ls.forEach((s, i) => {
+    const q = p(t, start + i * stagger, start + i * stagger + dur, out5);
+    s.style.opacity = q;
+    s.style.filter = q < 1 ? `blur(${(1 - q) * 14}px)` : "none";
+    s.style.transform = `translateY(${(1 - q) * 22}px)`;
+  });
+}
+function fadeEl(el, t, a, b, f = .5, rise = 10) {
+  const q = p(t, a, a + f), g = p(t, b - f * .8, b, inOut);
+  el.style.opacity = q * (1 - g);
+  el.style.transform = `translateY(${(1 - q) * rise}px)`;
+  el.style.filter = g > 0 ? `blur(${g * 8}px)` : "none";
+}
+
+// template wall: five rows, different orders
+const pool = [];
+["academic", "emerald", "graphite", "navy", "scholar", "simpleplus", "execushares"].forEach(n => {
+  const inner = { academic: [5, 7, 4], emerald: [3, 4, 6], graphite: [6, 2, 5], navy: [5, 3, 6], scholar: [4, 2, 7], simpleplus: [7, 6, 4], execushares: [6, 5, 7] }[n];
+  pool.push(`${n}-01`); inner.forEach(k => pool.push(`${n}-${String(k).padStart(2, "0")}`));
+});
+const rows = [];
+for (let r = 0; r < 5; r++) {
+  const row = document.createElement("div"); row.className = "row"; row.style.top = (r * 216) + "px";
+  for (let i = 0; i < 9; i++) {
+    const tile = document.createElement("div"); tile.className = "tile";
+    const img = document.createElement("img"); img.src = `build/assets/${pool[(i * 5 + r * 11) % pool.length]}.png`;
+    tile.append(img); row.append(tile);
+  }
+  $("wall").append(row); rows.push(row);
+}
+
+// deterministic film grain
+const g = $("grain").getContext("2d"), gd = g.createImageData(640, 272);
+function grain(seed) {
+  let a = seed * 2654435761 >>> 0;
+  const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let x = a; x = Math.imul(x ^ x >>> 15, x | 1); x ^= x + Math.imul(x ^ x >>> 7, x | 61); return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+  for (let i = 0; i < gd.data.length; i += 4) { const v = rnd() * 255; gd.data[i] = gd.data[i + 1] = gd.data[i + 2] = v; gd.data[i + 3] = 255; }
+  g.putImageData(gd, 0, 0);
+}
+
+window.renderAt = function (t) {
+  grain(Math.round(t * FPS) + 1);
+  // drifting light
+  $("warm").style.transform = `translate(${mix(-200, 700, t / DURATION)}px, ${-260 + 60 * Math.sin(t * .4)}px)`;
+  $("cool").style.transform = `translate(${mix(600, -100, t / DURATION)}px, ${-300 + 50 * Math.cos(t * .35)}px)`;
+
+  // S1 cold open
+  reveal("o1", t, .4, 3.5, .04, .9);
+  reveal("o2", t, 1.2, 3.5, .04, .9);
+
+  // S2 + S3: the card morphs from pose A (PDF page) to pose B (slide)
+  const m = p(t, 8.1, 9.7, inOut);
+  const enter = p(t, 3.3, 4.6, out3);
+  const leave = p(t, 12.3, 13.0, inOut);
+  const w = mix(300, 680, m), h = mix(424, 383, m);
+  const cx = mix(370, 824, m), cy = 272;
+  const drift = t - 3.3;
+  const ryA = mix(30, 12, p(t, 3.3, 8.1, out3)), ryB = 180 - mix(14, 5, p(t, 9.2, 12.5, out3));
+  const ry = m < 1 ? mix(ryA, ryB, m) : ryB;
+  const rx = mix(8, 2, m) + .6 * Math.sin(drift * .7);
+  const z = mix(-260, -60, enter) + Math.sin(Math.PI * m) * 160 + leave * 260;
+  const card = $("card");
+  card.style.width = w + "px"; card.style.height = h + "px";
+  card.style.left = (cx - w / 2) + "px"; card.style.top = (cy - h / 2 + (1 - enter) * 40) + "px";
+  card.style.transform = `translateZ(${z}px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+  card.style.opacity = enter * (1 - leave);
+  card.style.filter = leave > 0 ? `blur(${leave * 12}px)` : (enter < 1 ? `blur(${(1 - enter) * 10}px)` : "none");
+
+  // paper stack behind the page fans out, then tucks away before the flip
+  const fan = p(t, 4.0, 5.2) * (1 - p(t, 7.6, 8.2, inOut));
+  $("sh1").style.opacity = fan; $("sh2").style.opacity = fan * .8;
+  $("sh1").style.transform = `translate3d(${11 * fan}px, ${-8 * fan}px, ${-18 * fan}px)`;
+  $("sh2").style.transform = `translate3d(${22 * fan}px, ${-16 * fan}px, ${-36 * fan}px)`;
+  // light streak when the card turns edge-on
+  const fl = Math.max(0, 1 - Math.abs(m - .5) / .16) * (m > 0 && m < 1 ? 1 : 0);
+  $("flare").style.opacity = fl;
+  $("flare").style.transform = `translate(${cx - 700}px, ${cy - 7}px) scaleY(${.6 + fl * 1.4})`;
+
+  const sc = p(t, 4.6, 7.0, inOut), beamOn = p(t, 4.5, 4.8) * (1 - p(t, 7.0, 7.4));
+  $("beam").style.top = (sc * 100) + "%"; $("beam").style.opacity = beamOn;
+  $("beamTint").style.height = (sc * 100) + "%"; $("beamTint").style.opacity = beamOn;
+  $("sweep").style.backgroundPosition = `${mix(150, -15, p(t, 10.0, 11.4, inOut))}% 0`;
+  $("sweep").style.opacity = p(t, 9.9, 10.1) * (1 - p(t, 11.3, 11.6));
+
+  const bl = p(t, 9.0, 10.2) * (1 - leave);
+  $("bloom").style.opacity = bl;
+  $("bloom").style.transform = `translate(${cx - 450}px, ${cy - 300}px) scale(${.9 + .1 * bl})`;
+
+  fadeEl($("a0"), t, 4.4, 8.1);
+  reveal("a1", t, 4.6, 8.1);
+  reveal("a2", t, 5.2, 8.1);
+  fadeEl($("b0"), t, 9.6, 12.6);
+  reveal("b1", t, 9.8, 12.6);
+  reveal("b2", t, 10.3, 12.6);
+  fadeEl($("chips"), t, 10.9, 12.6, .6, 14);
+
+  // S4 template wall
+  const wallIn = p(t, 12.8, 14.0, out3), wallOut = p(t, 16.9, 17.4, inOut);
+  const wt = t - 12.8;
+  $("wall").style.transform = `rotateX(16deg) rotateY(-24deg) rotateZ(-7deg) translateZ(${mix(-420, -160, p(t, 12.8, 17.4, lin))}px)`;
+  rows.forEach((r, i) => {
+    const dir = i % 2 ? 1 : -1;
+    r.style.transform = `translateX(${(i % 2 ? -340 : 0) + dir * wt * (34 + i * 6)}px)`;
+  });
+  $("wallWorld").style.opacity = wallIn * (1 - wallOut);
+  $("wallWorld").style.filter = wallOut > 0 ? `blur(${wallOut * 10}px)` : (wallIn < 1 ? `blur(${(1 - wallIn) * 8}px)` : "none");
+  $("wallShade").style.opacity = wallIn * (1 - wallOut);
+  $("wallTop").style.opacity = wallIn * (1 - wallOut);
+  fadeEl($("w0"), t, 13.4, 17.2);
+  reveal("w1", t, 13.6, 17.2);
+  reveal("w2", t, 14.0, 17.2);
+
+  // S5 fast cuts
+  [["x1", "y1", 17.5], ["x2", "y2", 18.4], ["x3", "y3", 19.3]].forEach(([x, y, a]) => {
+    const on = t >= a && t < a + .9;
+    const q = p(t, a, a + .35, out5);
+    const el = $(x);
+    el.style.display = on ? "block" : "none";
+    letters[x].forEach(s => { s.style.opacity = 1; s.style.filter = "none"; s.style.transform = "none"; });
+    el.style.opacity = q;
+    el.style.filter = q < 1 ? `blur(${(1 - q) * 16}px)` : "none";
+    el.style.transform = `scale(${mix(1.08, 1, q) - .02 * clamp((t - a) / .9)})`;
+    const sub = $(y);
+    sub.style.display = on ? "block" : "none";
+    sub.style.opacity = p(t, a + .15, a + .45);
+  });
+
+  // S6 end card
+  const lg = p(t, 20.3, 21.3, out5);
+  $("logoWrap").style.opacity = lg;
+  $("logoWrap").style.filter = lg < 1 ? `blur(${(1 - lg) * 18}px)` : "none";
+  $("logoWrap").style.transform = `scale(${mix(1.06, 1, lg)})`;
+  $("logo").style.backgroundPosition = `${mix(100, 0, p(t, 20.8, 22.0, inOut))}% 0`;
+  const rl = p(t, 21.0, 21.6);
+  $("rule").style.opacity = rl; $("rule").style.transform = `scaleX(${rl})`;
+  fadeEl($("tag"), t, 21.1, 99, .6);
+  fadeEl($("url"), t, 21.4, 99, .6);
+
+  // fade from and to black so the loop closes; brief dips between the fast cuts
+  let f = Math.max(1 - p(t, 0, .5, lin), p(t, 22.4, 23.0, lin));
+  [18.4, 19.3, 20.2].forEach(c => { if (t >= c - .05 && t < c + .02) f = .85; });
+  $("fade").style.opacity = f;
+};
+window.DURATION = DURATION;
+window.renderAt(0);
+</script>
+</body>
+</html>

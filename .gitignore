@@ -41,3 +41,6 @@ templates/bjtu/
 # Desktop build outputs
 desktop/build/
 desktop/dist/
+
+# Promo video build intermediates
+docs/promo/build/
