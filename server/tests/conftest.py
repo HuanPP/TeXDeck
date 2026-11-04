@@ -86,3 +86,11 @@ def make_pdf(tmp_path: Path) -> Callable[[str, int], Path]:
         return path
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _isolated_chatgpt_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep tests away from a developer's real ChatGPT sign-in."""
+    path = tmp_path / "chatgpt-auth.json"
+    monkeypatch.setattr(settings, "chatgpt_auth_file", path)
+    return path

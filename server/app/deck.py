@@ -393,9 +393,7 @@ def compile_tex(
     if not tex_path.is_file():
         raise CompileError(f"TeX file not found: {tex_path}", "")
 
-    xelatex = settings.xelatex_command
-    if not shutil.which(xelatex):
-        raise CompileError("xelatex not found; please install TeX Live", "")
+    engine = tex_engine()
 
     work_dir = tex_path.parent
     pdf_path = work_dir / f"{tex_path.stem}.pdf"
@@ -448,14 +446,16 @@ def compile_tex(
             _try_repair(progress_pct=50)
             continue
 
-        if progress is not None:
-            progress("Compiling LaTeX (pass 2)", min(40 + attempts * 10, 90))
+        # Tectonic reruns to a fixed point by itself; xelatex needs a second pass.
+        if engine == "xelatex":
+            if progress is not None:
+                progress("Compiling LaTeX (pass 2)", min(40 + attempts * 10, 90))
 
-        ok, last_log = _run_xelatex(tex_path, work_dir)
-        attempts += 1
-        if not ok:
-            _try_repair(progress_pct=60)
-            continue
+            ok, last_log = _run_xelatex(tex_path, work_dir)
+            attempts += 1
+            if not ok:
+                _try_repair(progress_pct=60)
+                continue
 
         if not pdf_path.is_file():
             raise CompileError("LaTeX compilation failed: no PDF produced", last_log)
@@ -465,22 +465,52 @@ def compile_tex(
         return CompileResult(pdf_path=pdf_path, log=last_log, attempts=attempts)
 
 
+def tex_engine() -> str:
+    """Resolve TEXDECK_TEX_ENGINE to "xelatex" or "tectonic", or raise CompileError."""
+    if settings.tex_engine == "auto":
+        if shutil.which(settings.xelatex_command):
+            return "xelatex"
+        if shutil.which(settings.tectonic_command):
+            return "tectonic"
+        raise CompileError("No TeX engine found; install TeX Live (xelatex) or Tectonic", "")
+    command = settings.xelatex_command if settings.tex_engine == "xelatex" else settings.tectonic_command
+    if not shutil.which(command):
+        raise CompileError(f"{settings.tex_engine} not found ({command})", "")
+    return settings.tex_engine
+
+
 def _run_xelatex(tex_path: Path, work_dir: Path) -> tuple[bool, str]:
-    cmd = [
-        settings.xelatex_command,
-        "-interaction=nonstopmode",
-        "-halt-on-error",
-        "-synctex=1",
-        tex_path.name,
-    ]
+    """One engine run: an xelatex pass, or a full Tectonic build. Returns (ok, log)."""
+    if tex_engine() == "tectonic":
+        cmd = [
+            settings.tectonic_command,
+            "-X",
+            "compile",
+            "--untrusted",
+            "--synctex",
+            "--keep-logs",
+            tex_path.name,
+        ]
+        timeout = settings.tectonic_timeout_seconds
+    else:
+        cmd = [
+            settings.xelatex_command,
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            "-synctex=1",
+            tex_path.name,
+        ]
+        timeout = settings.xelatex_timeout_seconds
     try:
         proc = subprocess.run(
             cmd,
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=settings.xelatex_timeout_seconds,
+            timeout=timeout,
             check=False,
+            # The Windows desktop build has no console; keep TeX from flashing one.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
         partial = ""
@@ -495,12 +525,9 @@ def _run_xelatex(tex_path: Path, work_dir: Path) -> tuple[bool, str]:
                 )
             )
         log = _read_compile_log(work_dir, tex_path.stem, partial)
-        raise CompileError(
-            f"LaTeX compilation timed out (>{settings.xelatex_timeout_seconds}s)",
-            log,
-        ) from exc
+        raise CompileError(f"LaTeX compilation timed out (>{timeout}s)", log) from exc
     except FileNotFoundError as exc:
-        raise CompileError("xelatex not found; please install TeX Live", "") from exc
+        raise CompileError(f"{cmd[0]} not found", "") from exc
 
     proc_output = (proc.stdout or "") + (proc.stderr or "")
     log = _read_compile_log(work_dir, tex_path.stem, proc_output)
@@ -646,14 +673,13 @@ def template_fingerprint(template: Template) -> str:
 
 
 def _compile_preview(tex_path: Path, work_dir: Path) -> None:
-    """Compile the template's own main.tex twice; raise CompileError on failure.
+    """Compile the template's own main.tex; raise CompileError on failure.
 
     Kept as a small seam so tests can substitute a fake PDF writer.
     """
-    if not shutil.which(settings.xelatex_command):
-        raise CompileError("xelatex not found; please install TeX Live", "")
+    passes = 2 if tex_engine() == "xelatex" else 1
     log = ""
-    for _ in range(2):
+    for _ in range(passes):
         ok, log = _run_xelatex(tex_path, work_dir)
         if not ok:
             raise CompileError("Template preview compilation failed", log)

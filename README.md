@@ -48,7 +48,17 @@ Two smaller rules follow from the same instinct. Source pages go to the model as
 
 ## Getting started
 
-The quickest way is Docker — nothing to install but a key:
+### Desktop app
+
+Download the build for your system from [Releases](https://github.com/HuanPP/TeXDeck/releases): a `.dmg` for Apple-silicon Macs, a setup `.exe` for Windows, a `.tar.gz` for Linux. It carries its own TeX engine ([Tectonic](https://tectonic-typesetting.github.io)), so there is no TeX Live to install. The first deck takes a minute or two longer than the rest, because Tectonic downloads the LaTeX packages it needs once and caches them.
+
+Open it and click **Sign in with ChatGPT** in the top bar, or put an API key in `texdeck.env` in the data folder and restart. The data folder is `~/Library/Application Support/TeXDeck` on macOS, `%APPDATA%\TeXDeck` on Windows and `~/.local/share/TeXDeck` on Linux; finished decks are kept there too.
+
+The builds are not code-signed. On macOS the first launch is blocked: right-click the app and choose Open, or allow it under System Settings > Privacy & Security. On Windows, SmartScreen asks once; choose More info, then Run anyway. The Linux build has no window of its own: run `./TeXDeck` from a terminal, it opens in your browser, and Ctrl+C stops it.
+
+### Docker
+
+Nothing to install but Docker and a key:
 
 ```bash
 git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
@@ -61,11 +71,11 @@ ENV
 docker compose up --build
 ```
 
-The first build downloads TeX Live, so it takes a while; after that, open http://localhost:8000. Finished decks land in `./artifacts`. The image bundles Noto CJK, so Chinese output uses Source Han faces out of the box.
+The first build downloads TeX Live, so it takes a while; after that, open http://localhost:8000. Finished decks land in `./artifacts`. The image bundles Noto CJK, so Chinese output uses Source Han faces out of the box. The key is optional if you sign in with ChatGPT instead (see below); the sign-in is kept in `./state`.
 
 ### Running from source
 
-You need Python 3.12+, Node 20+, a TeX Live install with XeLaTeX (`synctex` too, if you want per-slide editing), and an API key for a vision-capable model.
+You need Python 3.12+, Node 20+, a TeX engine, and either an API key for a vision-capable model or a ChatGPT plan. For the engine, a TeX Live install with XeLaTeX is used when `xelatex` is on your PATH; otherwise TeXDeck falls back to [Tectonic](https://tectonic-typesetting.github.io) if that is installed. `TEXDECK_TEX_ENGINE` picks one explicitly.
 
 ```bash
 git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
@@ -107,6 +117,14 @@ TEXDECK_LLM_MODEL=moonshot-v1-128k-vision-preview
 
 Two things that will not work: text-only models, and the Moonshot `kimi-k2.6` / `kimi-k3` families, which reject every temperature except 1 and so refuse the calls this makes.
 
+### Signing in with ChatGPT
+
+A ChatGPT plan works in place of an API key. Click **Sign in with ChatGPT** in the top bar and approve TeXDeck on OpenAI's page; from then on generation runs on your plan, with `gpt-6.1-sol` unless you set `TEXDECK_CHATGPT_MODEL`. This is OpenAI's token-sharing sign-in for third-party apps, the same flow opencode uses. The tokens sit in one file (`server/.chatgpt-auth.json` from source, the data folder in the desktop app, `./state` under Docker) and go nowhere but OpenAI.
+
+When the browser and TeXDeck are on different machines, or TeXDeck runs in Docker, OpenAI's page finishes on an address that will not load. Copy that address from the browser's address bar into the box TeXDeck shows and the sign-in completes.
+
+With both a sign-in and a key configured, the sign-in wins; `TEXDECK_LLM_PROVIDER=api` prefers the key. The sign-in is for your own use, so do not leave a server signed in to your plan where other people can reach it.
+
 ## Making it yours
 
 Copy `templates/academic` to `templates/mylab`, change the `key` and `name` in its `template.json`, and drop your own logo and background into `src/brand/` over the three placeholder files. Restart the server and your template is in the picker.
@@ -123,16 +141,27 @@ Slide count is a request, not a guarantee. Ask for eight and you will often get 
 
 PDFs are capped at 200 pages combined, up to ten files per run. Past 40, the model is shown thumbnails of everything first and asked which pages carry the argument; only those are sent at full resolution.
 
-Per-slide editing maps a PDF page back to its `\begin{frame}` using synctex. If your TeX installation does not have synctex, that feature tells you so instead of guessing.
+Per-slide editing maps a PDF page back to its `\begin{frame}` by reading the synctex file the engine writes next to the PDF. No separate `synctex` tool is needed, so it works the same under TeX Live and Tectonic.
 
 ## Tests
 
 ```bash
 cd server && ../.venv/bin/python -m pytest      # includes a real XeLaTeX compile of every template
 cd server && ../.venv/bin/python -m pytest -m "not slow"
+cd server && TEXDECK_TEX_ENGINE=tectonic ../.venv/bin/python -m pytest -m slow   # same, through Tectonic
 ```
 
 The compile suite is the one worth keeping. It renders every bundled template through the real toolchain, which is the only check that catches a template that has quietly stopped working.
+
+## Building the desktop app
+
+```bash
+cd web && npm ci && npm run build && cd ..
+python -m pip install ./server pyinstaller pywebview
+python desktop/build.py
+```
+
+That freezes the app for the machine you run it on, has the frozen app render a template preview through its bundled Tectonic as a smoke test, and writes the package to `desktop/dist/release/`. Pushing a `v*` tag runs the same thing on macOS, Windows and Linux in GitHub Actions and attaches the results to a release.
 
 ## License
 

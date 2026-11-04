@@ -8,6 +8,7 @@ from typing import Any
 
 import openai
 
+from . import chatgpt
 from .config import settings
 
 ProgressCallback = Callable[[str, int], None]  # (stage description, percent 0-100)
@@ -48,11 +49,17 @@ def image_block(image_path: Path) -> dict[str, Any]:
 
 
 class LlmClient:
-    def __init__(self, client: openai.OpenAI, on_usage: UsageCallback | None = None) -> None:
+    def __init__(
+        self,
+        client: openai.OpenAI,
+        on_usage: UsageCallback | None = None,
+        model: str | None = None,
+    ) -> None:
         # on_usage is per-instance and clients are created per job (create_client),
         # so no usage state leaks across jobs.
         self._client = client
         self._on_usage = on_usage
+        self.model = model or settings.llm_model
 
     def complete(
         self,
@@ -63,7 +70,7 @@ class LlmClient:
     ) -> str:
         try:
             response = self._client.chat.completions.create(
-                model=settings.llm_model,
+                model=self.model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=settings.llm_max_tokens,
@@ -99,10 +106,55 @@ class LlmClient:
         return str(content)
 
 
-def create_client(on_usage: UsageCallback | None = None) -> LlmClient:
+class ChatGptClient:
+    """Same complete() contract as LlmClient, backed by a ChatGPT sign-in.
+
+    temperature is accepted and ignored: the reasoning models a ChatGPT plan
+    serves reject it.
+    """
+
+    def __init__(self, on_usage: UsageCallback | None = None) -> None:
+        self._responses = chatgpt.ResponsesClient(settings.chatgpt_model)
+        self._on_usage = on_usage
+        self.model = settings.chatgpt_model
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        on_usage: UsageCallback | None = None,
+    ) -> str:
+        del temperature
+        callback = on_usage if on_usage is not None else self._on_usage
+        try:
+            content = self._responses.complete(messages, callback)
+        except chatgpt.ChatGptError as exc:
+            raise LlmError(str(exc)) from exc
+        if not content.strip():
+            raise LlmError("Model returned empty content")
+        return content
+
+
+def active_provider() -> str:
+    """Return "chatgpt" or "api", resolving TEXDECK_LLM_PROVIDER=auto by sign-in state."""
+    if settings.llm_provider == "auto":
+        return "chatgpt" if chatgpt.load_credential() is not None else "api"
+    return settings.llm_provider
+
+
+def active_model() -> str:
+    return settings.chatgpt_model if active_provider() == "chatgpt" else settings.llm_model
+
+
+def create_client(on_usage: UsageCallback | None = None) -> LlmClient | ChatGptClient:
+    if active_provider() == "chatgpt":
+        if chatgpt.load_credential() is None:
+            raise LlmError("TEXDECK_LLM_PROVIDER is chatgpt but nobody is signed in; sign in first")
+        return ChatGptClient(on_usage=on_usage)
     if not settings.llm_api_key:
         raise LlmError(
-            "TEXDECK_LLM_API_KEY is not set; put it in server/.env"
+            "No model configured: sign in with ChatGPT, or set TEXDECK_LLM_API_KEY in server/.env"
         )
     client = openai.OpenAI(
         api_key=settings.llm_api_key,

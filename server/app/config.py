@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +16,12 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 16384  # a full Beamer deck is ~6k-10k tokens; defaults are too low
     llm_timeout_seconds: float = 900.0
     llm_max_retries: int = 2  # OpenAI SDK network-layer retries
+
+    # "auto" uses the ChatGPT sign-in when one exists, else the API key above.
+    llm_provider: Literal["auto", "api", "chatgpt"] = "auto"
+    chatgpt_model: str = "gpt-6.1-sol"
+    chatgpt_reasoning_effort: str = ""  # "" leaves the model default; low/medium/high
+    chatgpt_auth_file: Path = REPO_ROOT / "server" / ".chatgpt-auth.json"
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"
@@ -31,8 +38,13 @@ class Settings(BaseSettings):
     # always kept on failure for debugging). Env: TEXDECK_KEEP_PAGE_RENDERS.
     keep_page_renders: bool = False
 
+    # "auto" prefers a system TeX Live (xelatex) and falls back to Tectonic.
+    tex_engine: Literal["auto", "xelatex", "tectonic"] = "auto"
     xelatex_command: str = "xelatex"
     xelatex_timeout_seconds: float = 120.0
+    tectonic_command: str = "tectonic"
+    # Tectonic fetches packages on first use, so a cold run is much slower.
+    tectonic_timeout_seconds: float = 600.0
     max_compile_repairs: int = 2
 
     # absolute env_file so settings load regardless of process cwd

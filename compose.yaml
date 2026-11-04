@@ -4,8 +4,10 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      TEXDECK_LLM_API_KEY: ${TEXDECK_LLM_API_KEY:?put TEXDECK_LLM_API_KEY in .env next to this file}
+      # Optional when you sign in with ChatGPT from the page instead.
+      TEXDECK_LLM_API_KEY: ${TEXDECK_LLM_API_KEY:-}
       TEXDECK_LLM_BASE_URL: ${TEXDECK_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
       TEXDECK_LLM_MODEL: ${TEXDECK_LLM_MODEL:-gemini-pro-latest}
     volumes:
       - ./artifacts:/data/artifacts
+      - ./state:/data/state

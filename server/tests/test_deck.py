@@ -645,3 +645,21 @@ def test_compile_tex_no_client_raises_without_dump(
         compile_tex(tex_path, client=None, llm_dump_dir=dump_dir)
 
     assert not dump_dir.exists() or not any(dump_dir.iterdir())
+
+
+def test_tex_engine_auto_prefers_xelatex_then_tectonic(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import settings
+    from app.deck import CompileError, tex_engine
+
+    found: set[str] = {"xelatex", "tectonic"}
+    monkeypatch.setattr("app.deck.shutil.which", lambda cmd: f"/bin/{cmd}" if cmd in found else None)
+    monkeypatch.setattr(settings, "tex_engine", "auto")
+    assert tex_engine() == "xelatex"
+    found.discard("xelatex")
+    assert tex_engine() == "tectonic"
+    found.clear()
+    with pytest.raises(CompileError, match="No TeX engine"):
+        tex_engine()
+    monkeypatch.setattr(settings, "tex_engine", "tectonic")
+    with pytest.raises(CompileError, match="tectonic not found"):
+        tex_engine()

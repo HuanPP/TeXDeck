@@ -1,4 +1,4 @@
-import type { FrameItem, GenerationMeta, TemplateItem } from "./types";
+import type { FrameItem, GenerationMeta, ModelStatus, TemplateItem } from "./types";
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text();
@@ -92,3 +92,15 @@ export const pdfUrl = (id: string, bust = 0) =>
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
 export const logUrl = (id: string) => `/api/generations/${id}/log`;
+
+export const getModelStatus = () => requestJson<ModelStatus>("/api/model");
+export const startChatGptLogin = () =>
+  requestJson<{ url: string }>("/api/auth/chatgpt/login", { method: "POST" });
+export const finishChatGptLogin = (url: string) =>
+  requestJson<ModelStatus>("/api/auth/chatgpt/callback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+export const signOutChatGpt = () =>
+  requestJson<ModelStatus>("/api/auth/chatgpt", { method: "DELETE" });

@@ -89,3 +89,28 @@ for end users to replace with their own brand assets (same file names).
 
 End users who need branded output must supply their own logo and background
 images by replacing the files in src/brand/ (see templates/README.md).
+
+
+6. ChatGPT sign-in flow (server/app/chatgpt.py)
+-----------------------------------------------
+The OAuth token-sharing flow (authorize parameters, dynamic client
+registration, token exchange and refresh) is ported from:
+
+    opencode, packages/core/src/plugin/provider/chatgpt.ts
+    Source : https://github.com/sst/opencode
+    License: MIT License, Copyright (c) 2025 opencode
+
+TeXDeck's Python implementation is a re-implementation of that flow, not a
+copy of the TypeScript source.
+
+
+7. Tectonic (desktop builds only)
+---------------------------------
+The desktop release bundles an unmodified Tectonic binary as its TeX engine:
+
+    Tectonic
+    Source : https://github.com/tectonic-typesetting/tectonic
+    License: MIT License
+
+TeX packages and fonts Tectonic downloads at run time come from its TeX Live
+based bundle and keep their own licenses.

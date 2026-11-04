@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 import Home from "./pages/Home";
 import Generation from "./pages/Generation";
+import ModelMenu from "./components/ModelMenu";
 
 // Key the page by generation id so navigating /g/a → /g/b (e.g. after
 // "Regenerate") remounts with fresh state instead of reusing stale
@@ -18,6 +19,7 @@ export default function App() {
           <Link to="/" className="text-xl tracking-wide text-[var(--color-heading)] no-underline">
             TeXDeck
           </Link>
+          <ModelMenu />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">

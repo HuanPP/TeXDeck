@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import gzip
 import re
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -104,17 +103,61 @@ def resolve_frame_pages(frames: list[Frame], tex_path: Path) -> list[Frame]:
     Beamer's \\begin{frame} line usually has no typeset content, so synctex
     lands on the previous page. Measured on real main.tex — not a heuristic.
     """
-    if shutil.which("synctex") is None:
-        raise EditError("synctex not found; please install TeX Live")
-
     tex_path = Path(tex_path)
-    work_dir = tex_path.parent
-    tex_name = tex_path.name
-    pdf_name = tex_path.with_suffix(".pdf").name
-
+    lines = read_synctex_lines(tex_path)
     for frame in frames:
-        frame.page = _synctex_page(work_dir, tex_name, pdf_name, frame.end_line)
+        frame.page = _forward_page(lines, frame.end_line)
     return frames
+
+
+def read_synctex_lines(tex_path: Path) -> dict[int, int]:
+    """Map each line of tex_path that produced output to its first PDF page.
+
+    Reads <stem>.synctex.gz directly, so neither TeX Live's synctex binary nor
+    a full TeX install is needed (Tectonic writes the same format).
+    """
+    tex_path = Path(tex_path)
+    sync = tex_path.with_suffix(".synctex.gz")
+    if not sync.is_file():
+        raise EditError("No synctex data next to the PDF; recompile the deck")
+    try:
+        with gzip.open(sync, "rt", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except (OSError, EOFError) as exc:
+        raise EditError(f"Could not read synctex data: {exc}") from exc
+
+    target = tex_path.name
+    tags: set[str] = set()
+    first_page: dict[int, int] = {}
+    page = 0
+    for raw in text.splitlines():
+        if raw.startswith("Input:"):
+            _, tag, name = raw.split(":", 2)
+            if name and Path(name).name == target:
+                tags.add(tag)
+        elif raw.startswith("{"):
+            page = int(raw[1:]) if raw[1:].isdigit() else page
+        elif page and raw[:1] in _SYNCTEX_NODES:
+            head = raw[1:].split(":", 1)[0]
+            tag, _, line = head.partition(",")
+            if tag in tags and line.isdigit():
+                first_page.setdefault(int(line), page)
+    return first_page
+
+
+# Record kinds that carry "tag,line:" — boxes, glue, kerns, math, current point.
+_SYNCTEX_NODES = frozenset("[(vhxkg$")
+
+
+def _forward_page(lines: dict[int, int], line_no: int) -> int:
+    """Page of the nearest line with output, preferring the exact line then later ones."""
+    if line_no in lines:
+        return lines[line_no]
+    for offset in range(1, 50):
+        for candidate in (line_no + offset, line_no - offset):
+            if candidate in lines:
+                return lines[candidate]
+    return 0
 
 
 def build_frame_edit_messages(
@@ -186,39 +229,3 @@ def _strip_markdown_fences(text: str) -> str:
     if s.endswith("```"):
         s = s[: -3].rstrip()
     return s
-
-
-def _synctex_page(
-    work_dir: Path,
-    tex_name: str,
-    pdf_name: str,
-    line_no: int,
-) -> int:
-    """synctex view -i '<line>:1:<tex>' -o '<pdf>'; take the first Page:."""
-    cmd = [
-        "synctex",
-        "view",
-        "-i",
-        f"{line_no}:1:{tex_name}",
-        "-o",
-        pdf_name,
-    ]
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise EditError("synctex not found; please install TeX Live") from exc
-
-    for line in (proc.stdout or "").splitlines():
-        if line.startswith("Page:"):
-            raw = line[len("Page:") :].strip()
-            try:
-                return int(raw)
-            except ValueError:
-                return 0
-    return 0

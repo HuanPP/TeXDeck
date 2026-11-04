@@ -130,3 +130,37 @@ def test_replace_frame_preserves_other_lines() -> None:
     assert result_lines[-1] == "final line"
     # Trailing newline preserved
     assert result.endswith("\n")
+
+
+def test_synctex_reader_maps_lines_to_first_page(tmp_path: Path) -> None:
+    import gzip
+
+    from app.edit import _forward_page, read_synctex_lines
+
+    tex = tmp_path / "main.tex"
+    tex.write_text("x", encoding="utf-8")
+    body = "\n".join([
+        "SyncTeX Version:1",
+        f"Input:1:{tex}",
+        "Input:2:/texmf/beamer.cls",
+        "Content:",
+        "{1", "[1,10:0,0:1,1,0", "h2,10:0,0:1,1,0", "]", "}1",
+        "{2", "(1,20:0,0:1,1,0", "x1,20:0,0", ")", "}2",
+        "{3", "(1,20:0,0:1,1,0", "k1,30:0,0:5", "}3",
+        "Postamble:",
+    ])
+    with gzip.open(tex.with_suffix(".synctex.gz"), "wt", encoding="utf-8") as fh:
+        fh.write(body)
+
+    lines = read_synctex_lines(tex)
+    assert lines == {10: 1, 20: 2, 30: 3}
+    assert _forward_page(lines, 20) == 2  # overlays: first page wins
+    assert _forward_page(lines, 25) == 3  # nearest later line first
+    assert _forward_page(lines, 500) == 0
+
+
+def test_synctex_reader_requires_file(tmp_path: Path) -> None:
+    from app.edit import EditError, read_synctex_lines
+
+    with pytest.raises(EditError, match="synctex"):
+        read_synctex_lines(tmp_path / "main.tex")

@@ -1,16 +1,16 @@
-"""Regression: every template bundle compiles with real xelatex after cleanup."""
+"""Regression: every template bundle compiles with the real TeX engine after cleanup."""
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import fitz
 import pytest
 
 from app.config import settings
+from app import deck
 from app.deck import copy_template_bundle, get_template
-from app.edit import parse_frames
+from app.edit import parse_frames, resolve_frame_pages
 
 
 def _template_keys() -> list[str]:
@@ -40,42 +40,17 @@ def _strip_instruction_frames(tex: str) -> str:
     return result
 
 
-def _run_xelatex(work_dir: Path) -> None:
-    xelatex = shutil.which(settings.xelatex_command)
-    if xelatex is None:
-        pytest.skip(
-            f"{settings.xelatex_command!r} not found on PATH; install TeX Live to run compile tests"
-        )
-
-    import subprocess
-
-    cmd = [
-        xelatex,
-        "-interaction=nonstopmode",
-        "-halt-on-error",
-        "main.tex",
-    ]
-    # Two passes: TOC / references stabilize on the second run
-    for pass_no in (1, 2):
-        proc = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=settings.xelatex_timeout_seconds,
-            check=False,
-        )
-        if proc.returncode != 0:
-            log_path = work_dir / "main.log"
-            log_tail = ""
-            if log_path.is_file():
-                log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-2500:]
-            pytest.fail(
-                f"xelatex pass {pass_no} failed (exit {proc.returncode}) in {work_dir}\n"
-                f"--- stdout/stderr (tail) ---\n{(proc.stdout or '')[-1500:]}"
-                f"{(proc.stderr or '')[-500:]}\n"
-                f"--- main.log (tail) ---\n{log_tail}"
-            )
+def _compile(work_dir: Path) -> None:
+    """Build main.tex with the production engine runner (xelatex or Tectonic)."""
+    try:
+        engine = deck.tex_engine()
+    except deck.CompileError as exc:
+        pytest.skip(f"{exc}; install TeX Live or Tectonic to run compile tests")
+    # xelatex needs a second pass for TOC / references; Tectonic iterates itself.
+    for pass_no in range(1, 3 if engine == "xelatex" else 2):
+        ok, log = deck._run_xelatex(work_dir / "main.tex", work_dir)
+        if not ok:
+            pytest.fail(f"{engine} pass {pass_no} failed in {work_dir}\n--- log (tail) ---\n{log[-2500:]}")
 
 
 @pytest.mark.slow
@@ -104,12 +79,19 @@ def test_template_compiles_after_stripping_instruction_frames(
         assert "AI GENERATION INSTRUCTIONS" not in frame.tex
     (work / "main.tex").write_text(cleaned, encoding="utf-8")
 
-    _run_xelatex(work)
+    _compile(work)
 
     pdf_path = work / "main.pdf"
     assert pdf_path.is_file(), f"main.pdf was not produced for template {template_key}"
     doc = fitz.open(pdf_path)
     try:
         assert doc.page_count > 0, f"PDF for {template_key} has zero pages"
+        page_count = doc.page_count
     finally:
         doc.close()
+
+    # Per-slide editing maps frames to pages through the synctex file.
+    frames = resolve_frame_pages(parse_frames(cleaned), work / "main.tex")
+    pages = [frame.page for frame in frames if frame.page]
+    assert len(pages) >= len(frames) - 2, f"synctex resolved too few frames: {[f.page for f in frames]}"
+    assert pages == sorted(pages) and pages[-1] <= page_count

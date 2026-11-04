@@ -24,7 +24,8 @@ from .edit import (
     replace_frame,
     resolve_frame_pages,
 )
-from .llm import ProgressCallback, UsageTally, create_client
+from . import chatgpt
+from .llm import ProgressCallback, UsageTally, active_model, active_provider, create_client
 from .store import GenerationMeta
 
 
@@ -34,6 +35,10 @@ class FrameEditBody(BaseModel):
 
 class RefineBody(BaseModel):
     instruction: str
+
+
+class CallbackUrlBody(BaseModel):
+    url: str
 
 
 # Hard cap on PDFs per generation; the combined 200-page cap is enforced in pdf.load_pdfs.
@@ -128,7 +133,7 @@ def _apply_usage(meta: GenerationMeta, usage: UsageTally) -> None:
     """Fold one job's token tally into the meta (caller persists via save_meta)."""
     if usage.calls == 0:
         return
-    meta.llm_model = settings.llm_model
+    meta.llm_model = active_model()
     meta.llm_calls += usage.calls
     meta.llm_prompt_tokens += usage.prompt_tokens
     meta.llm_completion_tokens += usage.completion_tokens
@@ -379,6 +384,41 @@ def _plain(gen_id: str, name: str, missing: str) -> FileResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _model_status() -> dict[str, Any]:
+    return {
+        **chatgpt.status(),
+        "provider": active_provider(),
+        "model": active_model(),
+        "api_key_configured": bool(settings.llm_api_key),
+    }
+
+
+@app.get("/api/model")
+def api_model_status() -> dict[str, Any]:
+    return _model_status()
+
+
+@app.post("/api/auth/chatgpt/login")
+def api_chatgpt_login() -> dict[str, str]:
+    return {"url": chatgpt.start_login()}
+
+
+@app.post("/api/auth/chatgpt/callback")
+def api_chatgpt_callback(body: CallbackUrlBody) -> dict[str, Any]:
+    """Paste-back path for when the browser cannot reach the loopback listener."""
+    try:
+        chatgpt.complete_login_from_url(body.url)
+    except chatgpt.ChatGptError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _model_status()
+
+
+@app.delete("/api/auth/chatgpt")
+def api_chatgpt_logout() -> dict[str, Any]:
+    chatgpt.sign_out()
+    return _model_status()
 
 
 @app.get("/api/templates")

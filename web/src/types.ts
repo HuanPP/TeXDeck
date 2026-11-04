@@ -34,3 +34,12 @@ export type TaskEvent = {
   stage: string;
   error: string;
 };
+
+export type ModelStatus = {
+  provider: "api" | "chatgpt";
+  model: string;
+  signed_in: boolean;
+  email: string;
+  pending: boolean;
+  api_key_configured: boolean;
+};

@@ -10,6 +10,10 @@ dist/
 
 # Runtime artifacts (never commit)
 artifacts/
+state/
+
+# ChatGPT sign-in tokens
+.chatgpt-auth.json
 
 # Environment (keep .env.example)
 .env
@@ -33,3 +37,7 @@ ppt_bjtu_overleaf/
 
 # Private template with real institutional branding (never publish)
 templates/bjtu/
+
+# Desktop build outputs
+desktop/build/
+desktop/dist/
