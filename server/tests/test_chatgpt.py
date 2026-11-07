@@ -288,11 +288,53 @@ def test_model_routes() -> None:
     from app.main import app
 
     http = TestClient(app)
-    assert http.get("/api/model").json()["signed_in"] is False
+    assert http.get("/api/model").json()["chatgpt"]["signed_in"] is False
     url = http.post("/api/auth/chatgpt/login").json()["url"]
     assert url.startswith(chatgpt.AUTHORIZE_URL)
     bad = http.post("/api/auth/chatgpt/callback", json={"url": "http://127.0.0.1/auth/callback?state=x&code=y"})
     assert bad.status_code == 400
     _sign_in()
     assert http.get("/api/model").json()["provider"] == "chatgpt"
-    assert http.delete("/api/auth/chatgpt").json()["signed_in"] is False
+    assert http.delete("/api/auth/chatgpt").json()["chatgpt"]["signed_in"] is False
+
+
+def test_model_list_keeps_chat_models_newest_first() -> None:
+    _sign_in()
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        assert request.headers["authorization"] == "Bearer access-1"
+        return httpx.Response(200, json={"object": "list", "data": [
+            {"id": "gpt-6-sol", "created": 100},
+            {"id": "gpt-6.1-sol", "created": 200},
+            {"id": "gpt-6.1-terra", "created": 200},
+            {"id": "gpt-6-realtime", "created": 300},
+            {"id": "gpt-image-2", "created": 300},
+            {"id": "text-embedding-4", "created": 300},
+        ]})
+
+    transport = httpx.MockTransport(handler)
+    assert chatgpt.list_models(transport) == ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol"]
+    assert chatgpt.list_models(transport) == ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol"]
+    assert calls == ["https://api.openai.com/v1/models"]  # second call served from cache
+
+
+def test_model_list_failure_is_reported() -> None:
+    _sign_in()
+    transport = httpx.MockTransport(lambda request: httpx.Response(403, json={}))
+    with pytest.raises(chatgpt.ChatGptError, match="HTTP 403"):
+        chatgpt.list_models(transport)
+
+
+def test_chosen_chatgpt_model_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.main import app
+
+    http = TestClient(app)
+    _sign_in()
+    assert http.put("/api/model/model", json={"provider": "chatgpt", "model": "gpt-6-luna"}).json()["model"] == "gpt-6-luna"
+    client = create_client()
+    assert isinstance(client, ChatGptClient) and client.model == "gpt-6-luna"
+    assert client._responses.model == "gpt-6-luna"
+    assert http.put("/api/model/model", json={"provider": "chatgpt", "model": "two words"}).status_code == 400
+    assert http.put("/api/model/model", json={"provider": "api", "model": "x"}).status_code == 400

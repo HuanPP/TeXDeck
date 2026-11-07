@@ -23,7 +23,11 @@ export type GenerationMeta = {
   llm_prompt_tokens?: number;
   llm_completion_tokens?: number;
   llm_calls?: number;
+  language?: SlideLanguage;
+  error_kind?: string; // "model" when error came from the model provider
 };
+
+export type SlideLanguage = "source" | "en" | "zh";
 
 export type TemplateItem = { key: string; name: string };
 export type FrameItem = { index: number; title: string; page: number; tex: string };
@@ -35,12 +39,22 @@ export type TaskEvent = {
   error: string;
 };
 
+export type Provider = "chatgpt" | "claude-code" | "api";
+
 export type ModelStatus = {
-  provider: "api" | "chatgpt" | "claude-code";
+  provider: Provider;
   model: string;
-  signed_in: boolean;
-  email: string;
-  pending: boolean;
-  api_key_configured: boolean;
-  claude_code_available: boolean;
+  locked: boolean; // TEXDECK_LLM_PROVIDER pins the provider
+  chatgpt: { signed_in: boolean; email: string; pending: boolean; model: string };
+  claude: {
+    available: boolean;
+    signed_in: boolean;
+    email: string;
+    subscription: string;
+    pending: boolean;
+    login_error: string;
+    model: string;
+    models: { value: string; label: string }[];
+  };
+  api: { configured: boolean; base_url: string; model: string; key_hint: string; saved: boolean };
 };

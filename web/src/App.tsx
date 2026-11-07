@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 import Home from "./pages/Home";
 import Generation from "./pages/Generation";
 import ModelMenu from "./components/ModelMenu";
+import { ModelProvider } from "./model";
 
 // Key the page by generation id so navigating /g/a → /g/b (e.g. after
 // "Regenerate") remounts with fresh state instead of reusing stale
@@ -13,6 +14,7 @@ function GenerationRoute() {
 
 export default function App() {
   return (
+    <ModelProvider>
     <div className="min-h-screen">
       <header className="border-b border-[var(--color-border)] bg-[var(--color-surface-container)]">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -30,5 +32,6 @@ export default function App() {
         </Routes>
       </main>
     </div>
+    </ModelProvider>
   );
 }

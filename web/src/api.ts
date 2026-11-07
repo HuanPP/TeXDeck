@@ -1,4 +1,4 @@
-import type { FrameItem, GenerationMeta, ModelStatus, TemplateItem } from "./types";
+import type { FrameItem, GenerationMeta, ModelStatus, Provider, SlideLanguage, TemplateItem } from "./types";
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text();
@@ -44,6 +44,7 @@ export const getFrames = (id: string) =>
 
 export function createGeneration(input: {
   title: string;
+  language: SlideLanguage;
   template_key: string;
   instruction: string;
   author?: string;
@@ -53,6 +54,7 @@ export function createGeneration(input: {
 }): Promise<{ id: string }> {
   const form = new FormData();
   form.append("title", input.title);
+  form.append("language", input.language);
   form.append("template_key", input.template_key);
   form.append("instruction", input.instruction);
   form.append("author", input.author ?? "");
@@ -104,3 +106,33 @@ export const finishChatGptLogin = (url: string) =>
   });
 export const signOutChatGpt = () =>
   requestJson<ModelStatus>("/api/auth/chatgpt", { method: "DELETE" });
+export const startClaudeLogin = () =>
+  requestJson<ModelStatus & { url: string }>("/api/auth/claude/login", { method: "POST" });
+export const submitClaudeCode = (code: string) =>
+  requestJson<ModelStatus>("/api/auth/claude/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+export const cancelClaudeLogin = () =>
+  requestJson<ModelStatus>("/api/auth/claude/login", { method: "DELETE" });
+export const selectProvider = (provider: Provider) =>
+  requestJson<ModelStatus>("/api/model/provider", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+export const saveApiKey = (input: { api_key: string; base_url: string; model: string }) =>
+  requestJson<ModelStatus>("/api/model/api", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+export const setProviderModel = (provider: Provider, model: string) =>
+  requestJson<ModelStatus>("/api/model/model", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, model }),
+  });
+export const getChatGptModels = () => requestJson<{ models: string[] }>("/api/model/chatgpt/models");
+export const removeApiKey = () => requestJson<ModelStatus>("/api/model/api", { method: "DELETE" });

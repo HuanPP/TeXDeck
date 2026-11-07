@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,9 +117,9 @@ class ChatGptClient:
     """
 
     def __init__(self, on_usage: UsageCallback | None = None) -> None:
-        self._responses = chatgpt.ResponsesClient(settings.chatgpt_model)
+        self.model = chatgpt_model()
+        self._responses = chatgpt.ResponsesClient(self.model)
         self._on_usage = on_usage
-        self.model = settings.chatgpt_model
 
     def complete(
         self,
@@ -144,7 +147,7 @@ class ClaudeCodeClient:
 
     def __init__(self, on_usage: UsageCallback | None = None) -> None:
         self._on_usage = on_usage
-        self.model = settings.claude_code_model or "default"
+        self.model = claude_model()
 
     def complete(
         self,
@@ -156,7 +159,7 @@ class ClaudeCodeClient:
         del temperature
         callback = on_usage if on_usage is not None else self._on_usage
         try:
-            content = claude_code.complete(messages, callback)
+            content = claude_code.complete(messages, callback, "" if self.model == "default" else self.model)
         except claude_code.ClaudeCodeError as exc:
             raise LlmError(str(exc)) from exc
         if not content.strip():
@@ -164,44 +167,231 @@ class ClaudeCodeClient:
         return content
 
 
+# --------------------------------------------------------------------------
+# Which model to use. The page picks one of three providers; the choice and
+# any API key entered on the page live in settings.model_state_file. Values
+# from .env stay as defaults, and TEXDECK_LLM_PROVIDER other than "auto" pins
+# the provider and disables switching.
+# --------------------------------------------------------------------------
+
+PROVIDERS = ("chatgpt", "claude-code", "api")
+_state_lock = threading.Lock()
+
+
+def _read_state() -> dict[str, Any]:
+    try:
+        data = json.loads(settings.model_state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_state(data: dict[str, Any]) -> None:
+    path = settings.model_state_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # may hold an API key
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(tmp, path)
+
+
+def _set_choice(provider: str) -> None:
+    with _state_lock:
+        data = _read_state()
+        data["provider"] = provider
+        _write_state(data)
+
+
+@dataclass(frozen=True, slots=True)
+class ApiConfig:
+    api_key: str
+    base_url: str
+    model: str
+    saved: bool  # entered on the page (and removable there), not only from .env
+
+
+def api_config() -> ApiConfig:
+    saved = _read_state().get("api")
+    saved = saved if isinstance(saved, dict) else {}
+    return ApiConfig(
+        api_key=str(saved.get("api_key") or settings.llm_api_key),
+        base_url=str(saved.get("base_url") or settings.llm_base_url),
+        model=str(saved.get("model") or settings.llm_model),
+        saved=bool(saved),
+    )
+
+
+def save_api_config(api_key: str, base_url: str, model: str) -> None:
+    """Store an API key from the page and switch to it; a blank key keeps the current one."""
+    api_key, base_url, model = api_key.strip(), base_url.strip(), model.strip()
+    if not api_key:
+        api_key = api_config().api_key
+    if not (api_key and base_url and model):
+        raise LlmError("API key, base URL and model are all required")
+    with _state_lock:
+        data = _read_state()
+        data["api"] = {"api_key": api_key, "base_url": base_url, "model": model}
+        data["provider"] = "api"
+        _write_state(data)
+
+
+def _chosen_model(provider: str) -> str:
+    models = _read_state().get("models")
+    return str(models.get(provider) or "") if isinstance(models, dict) else ""
+
+
+def chatgpt_model() -> str:
+    return _chosen_model("chatgpt") or settings.chatgpt_model
+
+
+def claude_model() -> str:
+    return _chosen_model("claude-code") or settings.claude_code_model or "default"
+
+
+def set_model(provider: str, model: str) -> None:
+    """Remember which model a provider uses (the API key's model lives with the key)."""
+    model = model.strip()
+    if provider not in ("chatgpt", "claude-code"):
+        raise LlmError(f"Cannot pick a model for {provider} here")
+    if not model or len(model) > 100 or any(ch.isspace() for ch in model):
+        raise LlmError("Invalid model name")
+    with _state_lock:
+        data = _read_state()
+        models = data.get("models") if isinstance(data.get("models"), dict) else {}
+        data["models"] = {**models, provider: model}
+        _write_state(data)
+
+
+def remove_api_config() -> None:
+    with _state_lock:
+        data = _read_state()
+        data.pop("api", None)
+        if data.get("provider") == "api" and not settings.llm_api_key:
+            data.pop("provider", None)
+        _write_state(data)
+
+
+def provider_locked() -> bool:
+    return settings.llm_provider != "auto"
+
+
+def _usable(provider: str) -> bool:
+    if provider == "chatgpt":
+        return chatgpt.load_credential() is not None
+    if provider == "api":
+        return bool(api_config().api_key)
+    return provider == "claude-code"  # checked when used; a logged-out CLI reports itself
+
+
+def select_provider(provider: str) -> None:
+    if provider_locked():
+        raise LlmError(f"The model is fixed by TEXDECK_LLM_PROVIDER={settings.llm_provider}")
+    if provider not in PROVIDERS:
+        raise LlmError(f"Unknown provider: {provider}")
+    if provider == "chatgpt" and not _usable("chatgpt"):
+        raise LlmError("Sign in with ChatGPT first")
+    if provider == "api" and not _usable("api"):
+        raise LlmError("Enter an API key first")
+    if provider == "claude-code":
+        if claude_code.find_command() is None:
+            raise LlmError("Claude Code is not installed on this computer")
+        if not claude_code.auth_status(refresh=True)["logged_in"]:
+            raise LlmError("Claude Code is not signed in; connect it first")
+    _set_choice(provider)
+
+
 def active_provider() -> str:
-    """Return "chatgpt", "claude-code" or "api", resolving TEXDECK_LLM_PROVIDER=auto by sign-in state."""
-    if settings.llm_provider == "auto":
-        return "chatgpt" if chatgpt.load_credential() is not None else "api"
-    return settings.llm_provider
+    """Return "chatgpt", "claude-code" or "api".
+
+    The page's choice wins while it is usable; otherwise a ChatGPT sign-in,
+    otherwise the API key. Claude Code is only ever used once chosen.
+    """
+    if provider_locked():
+        return settings.llm_provider
+    choice = _read_state().get("provider")
+    if choice in PROVIDERS and _usable(choice):
+        return choice
+    return "chatgpt" if _usable("chatgpt") else "api"
 
 
 def active_model() -> str:
     provider = active_provider()
     if provider == "chatgpt":
-        return settings.chatgpt_model
+        return chatgpt_model()
     if provider == "claude-code":
-        return settings.claude_code_model or "default"
-    return settings.llm_model
+        return claude_model()
+    return api_config().model
+
+
+def _key_hint(key: str) -> str:
+    return f"\u2022\u2022\u2022\u2022{key[-4:]}" if len(key) >= 8 else ("\u2022\u2022\u2022\u2022" if key else "")
+
+
+def model_status() -> dict[str, Any]:
+    api = api_config()
+    return {
+        "provider": active_provider(),
+        "model": active_model(),
+        "locked": provider_locked(),
+        "chatgpt": {**chatgpt.status(), "model": chatgpt_model()},
+        "claude": {**claude_code.status(), "model": claude_model(), "models": claude_code.MODELS},
+        "api": {
+            "configured": bool(api.api_key),
+            "base_url": api.base_url,
+            "model": api.model,
+            "key_hint": _key_hint(api.api_key),
+            "saved": api.saved,
+        },
+    }
+
+
+# A finished sign-in switches to that provider (unless TEXDECK_LLM_PROVIDER pins one).
+def _signed_in(provider: str) -> Callable[[], None]:
+    return lambda: None if provider_locked() else _set_choice(provider)
+
+
+chatgpt.on_signed_in = _signed_in("chatgpt")
+claude_code.on_signed_in = _signed_in("claude-code")
+
+
+def ensure_model_ready() -> None:
+    """Fail fast, before a job starts, when the provider in use cannot run."""
+    provider = active_provider()
+    if provider == "chatgpt":
+        if chatgpt.load_credential() is None:
+            raise LlmError("ChatGPT is not signed in; connect it from the model button at the top")
+    elif provider == "claude-code":
+        if claude_code.find_command() is None:
+            raise LlmError("Claude Code is not installed on this computer; pick another model at the top")
+        if not claude_code.auth_status()["logged_in"]:
+            raise LlmError("Claude Code is not signed in; connect it again from the model button at the top")
+    elif not api_config().api_key:
+        raise LlmError("No model connected: click the model button at the top and connect one")
 
 
 def create_client(
     on_usage: UsageCallback | None = None,
 ) -> LlmClient | ChatGptClient | ClaudeCodeClient:
-    if active_provider() == "claude-code":
+    provider = active_provider()
+    if provider == "claude-code":
         if claude_code.find_command() is None:
             raise LlmError(
-                "TEXDECK_LLM_PROVIDER is claude-code but the claude CLI was not found; "
+                "Claude Code is selected but the claude CLI was not found; "
                 "install Claude Code or set TEXDECK_CLAUDE_CODE_COMMAND"
             )
         return ClaudeCodeClient(on_usage=on_usage)
-    if active_provider() == "chatgpt":
+    if provider == "chatgpt":
         if chatgpt.load_credential() is None:
             raise LlmError("TEXDECK_LLM_PROVIDER is chatgpt but nobody is signed in; sign in first")
         return ChatGptClient(on_usage=on_usage)
-    if not settings.llm_api_key:
-        raise LlmError(
-            "No model configured: sign in with ChatGPT, or set TEXDECK_LLM_API_KEY in server/.env"
-        )
+    api = api_config()
+    if not api.api_key:
+        raise LlmError("No model connected: click the model button at the top and connect one")
     client = openai.OpenAI(
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
+        api_key=api.api_key,
+        base_url=api.base_url,
         timeout=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
     )
-    return LlmClient(client, on_usage=on_usage)
+    return LlmClient(client, on_usage=on_usage, model=api.model)

@@ -12,7 +12,7 @@ Drop in a PDF, get back a Beamer deck: the compiled PDF, the `.tex` source, and 
   <img src="docs/hero.png" alt="A source PDF page on the left, the generated Beamer slide on the right" width="100%">
 </p>
 
-A vision model reads your pages as images and writes a complete `main.tex` against the template you pick. It takes about a minute. You can then rewrite one slide, or the whole deck, with a single instruction. The source on the left is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), so you can try it yourself.
+A vision model reads your pages as images and writes a complete `main.tex` against the template you pick. It takes about a minute. You can then rewrite one slide, or the whole deck, with a single instruction. The source on the left is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), so you can try it yourself. Slides follow the language of your material unless you pick English or Chinese.
 
 **No API key needed:** it runs on the ChatGPT or Claude subscription you already pay for. An API key works too.
 
@@ -37,32 +37,17 @@ cd web && npm install && npm run dev                      # UI on :5173
 
 ## Pick a model
 
-There are three ways to pay for the model. Two of them use a subscription you already have. Settings go in `.env`, or in `texdeck.env` in the desktop app's data folder.
+Click the model button in the top bar. It lists three ways to run the model; you can switch between them, and pick the model for each, at any time:
 
-**ChatGPT subscription.** Click **Sign in with ChatGPT** in the top bar. Nothing else to set.
+**ChatGPT**, on your ChatGPT plan. Click Connect, sign in, then pick one of the models your account offers.
 
-**Claude subscription, through Claude Code.** See [below](#claude-subscription-via-claude-code).
+**Claude**, on your Claude plan. Needs [Claude Code](https://code.claude.com/docs/en/setup) installed on the computer running TeXDeck. If Claude Code is already signed in, Connect is all it takes. Otherwise TeXDeck starts `claude auth login`, shows the sign-in link, and you paste the code from that page back in.
 
-**API key.** Any OpenAI-compatible vision model:
+**API key**, for any OpenAI-compatible vision model: enter the key, base URL and model name, e.g. `https://generativelanguage.googleapis.com/v1beta/openai/` with `gemini-pro-latest` (recommended; Kimi vision models also work). Text-only models won't work, because pages are sent as images.
 
-```bash
-TEXDECK_LLM_API_KEY=...
-TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-TEXDECK_LLM_MODEL=gemini-pro-latest      # recommended; Kimi vision models also work
-```
+With Claude, TeXDeck drives your own Claude Code CLI in headless mode (`claude -p`, no tools, CLAUDE.md and plugins off). The login belongs to Claude Code and TeXDeck never sees the credentials; switching away leaves it signed in. Pick Fable, Opus, Sonnet or Haiku in the panel (Sonnet by default); whether your plan includes a model is up to Anthropic, and Claude Code says so if it does not. If `ANTHROPIC_API_KEY` is set in the environment, Claude Code bills the API instead of your plan. The Docker image has no Claude Code, so Claude is for the desktop app and source installs.
 
-Text-only models won't work, because pages are sent as images.
-
-### Claude subscription via Claude Code
-
-TeXDeck starts your own `claude` CLI in headless mode (`claude -p`, no tools, CLAUDE.md and plugins off), so generation runs on whatever account that CLI is signed in with. TeXDeck never sees the credentials. Install Claude Code and sign in with `claude auth login` (your Claude subscription is the default; check with `claude auth status`; an `ANTHROPIC_API_KEY` in the environment switches the CLI to API billing), then:
-
-```bash
-TEXDECK_LLM_PROVIDER=claude-code
-TEXDECK_CLAUDE_CODE_MODEL=sonnet         # or opus, or a full model name
-```
-
-This needs the CLI on the machine running TeXDeck, so it works from source and in the desktop app but not in the Docker image.
+The choice and any API key entered there are saved next to the other app data. `.env` (or `texdeck.env` in the desktop app's data folder) can still preset the API key with `TEXDECK_LLM_API_KEY`, `TEXDECK_LLM_BASE_URL` and `TEXDECK_LLM_MODEL`.
 
 ## Templates
 

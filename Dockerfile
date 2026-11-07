@@ -32,7 +32,8 @@ RUN cd templates/navy \
     && rm -f main.aux main.log main.nav main.out main.pdf main.snm main.toc main.synctex.gz
 
 ENV TEXDECK_ARTIFACT_ROOT=/data/artifacts \
-    TEXDECK_CHATGPT_AUTH_FILE=/data/state/chatgpt-auth.json
+    TEXDECK_CHATGPT_AUTH_FILE=/data/state/chatgpt-auth.json \
+    TEXDECK_MODEL_STATE_FILE=/data/state/model-state.json
 VOLUME /data/artifacts /data/state
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--app-dir", "server", "--host", "0.0.0.0", "--port", "8000"]

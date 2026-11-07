@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileUp, RotateCw, Trash2 } from "lucide-react";
+import { ChevronRight, FileUp, RotateCw, Trash2 } from "lucide-react";
 import {
   createGeneration,
   deleteGeneration,
@@ -9,8 +9,11 @@ import {
   regenerateGeneration,
   templatePreviewUrl,
 } from "../api";
+import Segmented from "../components/Segmented";
 import StatusBadge from "../components/StatusBadge";
-import type { GenerationMeta, TemplateItem } from "../types";
+import { modelReady, useModel } from "../model";
+import { displayTitle } from "../title";
+import type { GenerationMeta, SlideLanguage, TemplateItem } from "../types";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const fmt = (iso: string) => {
@@ -33,6 +36,11 @@ export default function Home() {
   const [institute, setInstitute] = useState("");
   const [templateKey, setTemplateKey] = useState("");
   const [instruction, setInstruction] = useState("");
+  const [language, setLanguage] = useState<SlideLanguage>("source");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const { status: model, setPanelOpen } = useModel();
+  // Unknown until the status loads; do not block the button on that.
+  const ready = model === null || modelReady(model);
   const [sourceTab, setSourceTab] = useState<"pdf" | "text">("pdf");
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -103,7 +111,7 @@ export default function Home() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitError(null);
-    if (!title.trim()) return setSubmitError("Please enter a title");
+    if (!ready) return setPanelOpen(true);
     if (!templateKey) return setSubmitError("Please select a template");
     if (sourceTab === "pdf" && files.length === 0) return setSubmitError("Please add at least one PDF");
     if (sourceTab === "text" && !sourceText.trim()) return setSubmitError("Please paste text content");
@@ -112,6 +120,7 @@ export default function Home() {
     try {
       const result = await createGeneration({
         title: title.trim(),
+        language,
         template_key: templateKey,
         instruction: instruction.trim(),
         author: author.trim(),
@@ -159,7 +168,7 @@ export default function Home() {
   const q = query.trim().toLowerCase();
   const visibleItems = q
     ? items.filter((g) =>
-        `${g.title} ${g.template_name || g.template_key}`.toLowerCase().includes(q),
+        `${displayTitle(g)} ${g.template_name || g.template_key}`.toLowerCase().includes(q),
       )
     : items;
 
@@ -167,75 +176,21 @@ export default function Home() {
     <div className="space-y-10">
       <section className="app-surface p-6">
         <h1 className="mb-6 text-2xl">New generation</h1>
+        {model && !ready && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span>Connect a model first: your ChatGPT or Claude plan, or an API key.</span>
+            <button type="button" className="btn-primary px-3 py-1 text-sm"
+              onClick={() => setPanelOpen(true)}>
+              Connect a model
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="mb-2 block text-sm text-slate-600">Select template</label>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-              {templates.map((t) => {
-                const selected = t.key === templateKey;
-                return (
-                  <button key={t.key} type="button" aria-pressed={selected}
-                    onClick={() => setTemplateKey(t.key)}
-                    className={`overflow-hidden border bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
-                      selected
-                        ? "border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]"
-                        : "border-[var(--color-border)] hover:border-slate-300"
-                    }`}>
-                    <div className="aspect-video w-full bg-slate-100">
-                      {previewFailed.has(t.key) ? (
-                        <div className="flex h-full items-center justify-center px-2 text-center text-xs text-slate-500">
-                          {t.name}
-                        </div>
-                      ) : (
-                        <img src={templatePreviewUrl(t.key)} alt="" loading="lazy"
-                          className="h-full w-full object-cover"
-                          onError={() =>
-                            setPreviewFailed((prev) => new Set(prev).add(t.key))
-                          } />
-                      )}
-                    </div>
-                    <div className={`truncate px-2 py-1.5 text-sm ${selected ? "bg-sky-50" : ""}`}>
-                      {t.name}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm text-slate-600" htmlFor="title">Title</label>
-            <input id="title" className="input-field" value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Diffusion Models for Protein Design" required />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm text-slate-600" htmlFor="author">
-              Author (optional)
-            </label>
-            <input id="author" className="input-field" value={author}
-              onChange={(e) => setAuthor(e.target.value)}
-              placeholder="e.g. Jane Doe, John Smith" />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm text-slate-600" htmlFor="institute">
-              Institute (optional)
-            </label>
-            <input id="institute" className="input-field" value={institute}
-              onChange={(e) => setInstitute(e.target.value)}
-              placeholder="e.g. Dept. of Physics, MIT" />
-          </div>
-
-          <div>
-            <div className="mb-2 flex gap-2">
-              <button type="button"
-                className={sourceTab === "pdf" ? "btn-primary text-sm" : "btn-secondary text-sm"}
-                onClick={() => setSourceTab("pdf")}>Upload PDF</button>
-              <button type="button"
-                className={sourceTab === "text" ? "btn-primary text-sm" : "btn-secondary text-sm"}
-                onClick={() => setSourceTab("text")}>Paste text</button>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="text-sm text-slate-600">Material</span>
+              <Segmented label="Material" value={sourceTab} onChange={setSourceTab}
+                options={[{ value: "pdf", label: "PDF" }, { value: "text", label: "Paste text" }]} />
             </div>
             {sourceTab === "pdf" ? (
               <>
@@ -290,25 +245,106 @@ export default function Home() {
                 )}
               </>
             ) : (
-              <textarea className="input-field min-h-40" value={sourceText}
+              <textarea className="input-field min-h-40" value={sourceText} aria-label="Pasted text"
                 onChange={(e) => setSourceText(e.target.value)}
                 placeholder="Paste research report text here…" />
             )}
           </div>
 
           <div>
-            <label className="mb-2 block text-sm text-slate-600" htmlFor="instruction">
-              Extra instructions (optional)
-            </label>
-            <textarea id="instruction" className="input-field min-h-24" value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              placeholder="e.g. Keep it under 10 slides, one slide per experiment, skip the related work" />
+            <label className="mb-2 block text-sm text-slate-600">Template</label>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {templates.map((t) => {
+                const selected = t.key === templateKey;
+                return (
+                  <button key={t.key} type="button" aria-pressed={selected}
+                    onClick={() => setTemplateKey(t.key)}
+                    className={`overflow-hidden border bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
+                      selected
+                        ? "border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]"
+                        : "border-[var(--color-border)] hover:border-slate-300"
+                    }`}>
+                    <div className="aspect-video w-full bg-slate-100">
+                      {previewFailed.has(t.key) ? (
+                        <div className="flex h-full items-center justify-center px-2 text-center text-xs text-slate-500">
+                          {t.name}
+                        </div>
+                      ) : (
+                        <img src={templatePreviewUrl(t.key)} alt="" loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={() =>
+                            setPreviewFailed((prev) => new Set(prev).add(t.key))
+                          } />
+                      )}
+                    </div>
+                    <div className={`truncate px-2 py-1.5 text-sm ${selected ? "bg-sky-50" : ""}`}>
+                      {t.name}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-[1fr_auto]">
+            <div>
+              <label className="mb-2 block text-sm text-slate-600" htmlFor="title">Title (optional)</label>
+              <input id="title" className="input-field" value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Leave empty to use the document's own title" />
+            </div>
+            <div>
+              <span className="mb-2 block text-sm text-slate-600">Slide language</span>
+              <Segmented label="Slide language" value={language} onChange={setLanguage} options={[
+                { value: "source", label: "Same as material" },
+                { value: "en", label: "English" },
+                { value: "zh", label: "中文" },
+              ]} />
+            </div>
+          </div>
+
+          <div>
+            <button type="button" className="inline-flex items-center gap-1 text-sm text-[var(--color-primary)]"
+              aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
+              <ChevronRight className={`h-4 w-4 transition-transform ${moreOpen ? "rotate-90" : ""}`} />
+              More options
+              {!moreOpen && (author || institute || instruction) ? (
+                <span className="text-xs text-slate-500">(filled in)</span>
+              ) : null}
+            </button>
+            {moreOpen && (
+              <div className="mt-4 space-y-6">
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm text-slate-600" htmlFor="author">Author</label>
+                    <input id="author" className="input-field" value={author}
+                      onChange={(e) => setAuthor(e.target.value)}
+                      placeholder="e.g. Jane Doe, John Smith" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm text-slate-600" htmlFor="institute">Institute</label>
+                    <input id="institute" className="input-field" value={institute}
+                      onChange={(e) => setInstitute(e.target.value)}
+                      placeholder="e.g. Dept. of Physics, MIT" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm text-slate-600" htmlFor="instruction">
+                    Extra instructions
+                  </label>
+                  <textarea id="instruction" className="input-field min-h-24" value={instruction}
+                    onChange={(e) => setInstruction(e.target.value)}
+                    placeholder="e.g. Keep it under 10 slides, one slide per experiment, skip the related work" />
+                </div>
+              </div>
+            )}
           </div>
 
           {submitError && (
             <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{submitError}</div>
           )}
-          <button type="submit" className="btn-primary" disabled={submitting}>
+          <button type="submit" className="btn-primary" disabled={submitting || !ready}
+            title={ready ? undefined : "Connect a model first"}>
             {submitting ? "Submitting…" : "Generate"}
           </button>
         </form>
@@ -340,7 +376,7 @@ export default function Home() {
                 <button type="button" className="min-w-0 flex-1 text-left"
                   onClick={() => navigate(`/g/${g.id}`)}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate font-medium text-[var(--color-heading)]">{g.title}</span>
+                    <span className="truncate font-medium text-[var(--color-heading)]">{displayTitle(g)}</span>
                     <StatusBadge status={g.status} />
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-slate-500">
@@ -356,7 +392,7 @@ export default function Home() {
                   </div>
                 </button>
                 <button type="button" className="btn-secondary shrink-0 px-2 py-1"
-                  title="Regenerate" aria-label={`Regenerate "${g.title}"`}
+                  title="Regenerate" aria-label={`Regenerate "${displayTitle(g)}"`}
                   disabled={g.status === "running" || regeneratingId !== null}
                   onClick={() => void handleRegenerate(g.id)}>
                   <RotateCw className={`h-4 w-4 ${regeneratingId === g.id ? "animate-spin" : ""}`} />
@@ -371,7 +407,7 @@ export default function Home() {
                   </span>
                 ) : (
                   <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-red-600"
-                    title="Delete" aria-label={`Delete "${g.title}"`}
+                    title="Delete" aria-label={`Delete "${displayTitle(g)}"`}
                     onClick={() => armDelete(g.id)}>
                     <Trash2 className="h-4 w-4" />
                   </button>

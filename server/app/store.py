@@ -39,6 +39,8 @@ class GenerationMeta:
     llm_prompt_tokens: int = 0  # cumulative across all jobs on this generation
     llm_completion_tokens: int = 0
     llm_calls: int = 0  # every LLM call, including repairs and page selection
+    language: str = "source"  # slide language: "source" (match the material) | "en" | "zh"
+    error_kind: str = ""  # "model" when `error` came from the model provider; read only with `error`
 
 
 def _now_iso() -> str:
@@ -66,6 +68,7 @@ def new_generation(
     source_names: list[str],
     author: str = "",
     institute: str = "",
+    language: str = "source",
 ) -> GenerationMeta:
     gen_id, directory = _claim_generation_dir()
     now = _now_iso()
@@ -86,6 +89,7 @@ def new_generation(
         edit_count=0,
         author=author,
         institute=institute,
+        language=language,
     )
     _write_meta_file(directory / "meta.json", meta)
     return meta

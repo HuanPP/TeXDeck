@@ -50,6 +50,43 @@ class DeckRequest:
     institute: str = ""  # optional; "" if not provided
     instruction: str = ""  # free-form user request; may be ""
     source_text: str = ""  # paste-text body; "" in PDF mode
+    language: str = "source"  # "source" | "en" | "zh"
+
+
+# The page's "Slide language" choice. Requirements may still override it.
+LANGUAGE_RULES = {
+    "source": (
+        "Output language: the language of the source material (the dominant one if it "
+        "mixes languages), unless the Requirements explicitly ask for another language."
+    ),
+    "en": (
+        "Output language: English. Write every slide in English even when the source "
+        "material is in another language, unless the Requirements explicitly ask otherwise."
+    ),
+    "zh": (
+        "Output language: Simplified Chinese. Write every slide in Simplified Chinese even "
+        "when the source material is in another language, unless the Requirements "
+        "explicitly ask otherwise. Keep technical terms, names and formulas as they are."
+    ),
+}
+
+_TITLE_RE = re.compile(r"\\title\s*(?:\[[^\]]*\])?\s*\{")
+
+
+def extract_title(tex: str) -> str:
+    """Plain-text \\title{...} of a deck (brace-balanced, commands stripped); "" if absent."""
+    match = _TITLE_RE.search(tex)
+    if not match:
+        return ""
+    depth, i = 1, match.end()
+    while i < len(tex) and depth:
+        depth += {"{": 1, "}": -1}.get(tex[i], 0)
+        i += 1
+    raw = tex[match.end() : i - 1]
+    raw = re.sub(r"\\\\(\[[^\]]*\])?", " ", raw)  # line breaks
+    raw = re.sub(r"\\[a-zA-Z@]+\*?(\[[^\]]*\])?", "", raw)  # commands, keep their text args
+    raw = raw.replace("{", "").replace("}", "").replace("~", " ")
+    return re.sub(r"\s+", " ", raw).strip()[:200]
 
 
 @dataclass(slots=True)
@@ -131,7 +168,13 @@ def build_generation_messages(
         "No explanation, no markdown fences."
     )
 
-    title_parts = [f"Title: {request.title}"]
+    if request.title.strip():
+        title_parts = [f"Title: {request.title}"]
+    else:
+        title_parts = [
+            "No title was provided; use the title of the source material, or a short "
+            "fitting title if it has none."
+        ]
     if request.author.strip():
         title_parts.append(f"Author: {request.author}")
     else:
@@ -146,13 +189,7 @@ def build_generation_messages(
         )
     if request.instruction.strip():
         title_parts.append(f"Requirements: {request.instruction}")
-    # Default output language is English regardless of the source document;
-    # the user flips it by asking in Requirements ("write it in Chinese", ...).
-    title_parts.append(
-        "Output language: English. Write every slide in English even when the "
-        "source document is in another language, unless the Requirements "
-        "explicitly ask for a different language."
-    )
+    title_parts.append(LANGUAGE_RULES.get(request.language, LANGUAGE_RULES["source"]))
     title_message = "\n".join(title_parts)
 
     if documents:

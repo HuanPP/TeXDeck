@@ -22,19 +22,15 @@ APP_NAME = "TeXDeck"
 ENV_TEMPLATE = """\
 # TeXDeck settings. Lines are KEY=VALUE; restart TeXDeck after editing.
 #
-# Signing in with ChatGPT from the window needs nothing here. To use an API key
-# instead (any OpenAI-compatible vision model), fill these in:
+# Pick ChatGPT, Claude or an API key from the model button in the window;
+# nothing here is required. To preset an API key, fill these in:
 #
 # TEXDECK_LLM_API_KEY=
 # TEXDECK_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 # TEXDECK_LLM_MODEL=gemini-pro-latest
 #
-# Model used with a ChatGPT sign-in:
+# Default models; the model button can pick others:
 # TEXDECK_CHATGPT_MODEL=gpt-6.1-sol
-#
-# To run on your installed Claude Code CLI (claude -p) and the account it is
-# signed in with instead:
-# TEXDECK_LLM_PROVIDER=claude-code
 # TEXDECK_CLAUDE_CODE_MODEL=sonnet
 """
 
@@ -77,6 +73,7 @@ def configure(data: Path) -> None:
         "TEXDECK_WEB_DIST_DIR": root / "web" / "dist",
         "TEXDECK_ARTIFACT_ROOT": data / "artifacts",
         "TEXDECK_CHATGPT_AUTH_FILE": data / "chatgpt-auth.json",
+        "TEXDECK_MODEL_STATE_FILE": data / "model-state.json",
     }
     tectonic = root / "bin" / ("tectonic.exe" if os.name == "nt" else "tectonic")
     if tectonic.is_file():

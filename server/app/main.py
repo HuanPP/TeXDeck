@@ -25,7 +25,19 @@ from .edit import (
     resolve_frame_pages,
 )
 from . import chatgpt, claude_code
-from .llm import ProgressCallback, UsageTally, active_model, active_provider, create_client
+from .llm import (
+    LlmError,
+    ProgressCallback,
+    UsageTally,
+    active_model,
+    create_client,
+    ensure_model_ready,
+    model_status,
+    remove_api_config,
+    save_api_config,
+    select_provider,
+    set_model,
+)
 from .store import GenerationMeta
 
 
@@ -39,6 +51,25 @@ class RefineBody(BaseModel):
 
 class CallbackUrlBody(BaseModel):
     url: str
+
+
+class ClaudeCodeBody(BaseModel):
+    code: str
+
+
+class ProviderBody(BaseModel):
+    provider: str
+
+
+class ModelBody(BaseModel):
+    provider: str
+    model: str
+
+
+class ApiKeyBody(BaseModel):
+    api_key: str = ""
+    base_url: str
+    model: str
 
 
 # Hard cap on PDFs per generation; the combined 200-page cap is enforced in pdf.load_pdfs.
@@ -111,22 +142,36 @@ def _dump_llm(gdir: Path, stem: str, messages: list[dict[str, Any]], response: s
     (d / f"{stem}_response.txt").write_text(response, encoding="utf-8")
 
 
+def _error_kind(exc: BaseException) -> str:
+    return "model" if isinstance(exc, LlmError) else ""
+
+
 def _fail(meta: GenerationMeta, exc: BaseException) -> None:
     meta.status = "failed"
     meta.error = str(exc)
+    meta.error_kind = _error_kind(exc)
     store.save_meta(meta)
 
 
 def _edit_fail(meta: GenerationMeta, exc: BaseException) -> None:
     # Edit rolled back; finished PDF still usable; keep status (usually succeeded)
     meta.error = f"This edit failed and was rolled back: {exc}"
+    meta.error_kind = _error_kind(exc)
     store.save_meta(meta)
 
 
 def _refine_fail(meta: GenerationMeta, exc: BaseException) -> None:
     # Refine rolled back; finished PDF still usable; keep status (usually succeeded)
     meta.error = f"This refine failed and was rolled back: {exc}"
+    meta.error_kind = _error_kind(exc)
     store.save_meta(meta)
+
+
+def _require_model() -> None:
+    try:
+        ensure_model_ready()
+    except LlmError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
 
 
 def _apply_usage(meta: GenerationMeta, usage: UsageTally) -> None:
@@ -181,6 +226,7 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             institute=meta.institute,
             instruction=meta.instruction,
             source_text=source_text,
+            language=meta.language,
         )
         messages = deck.build_generation_messages(template, request, documents)
         progress("Generating slides with the model", 50)
@@ -217,7 +263,10 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             progress=compile_progress,
             llm_dump_dir=gdir / "llm",
         )
-        meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
+        final_tex = tex_path.read_text(encoding="utf-8")
+        meta.frame_count = len(parse_frames(final_tex))
+        if not meta.title:
+            meta.title = deck.extract_title(final_tex)
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
         store.save_meta(meta)
@@ -386,19 +435,50 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _model_status() -> dict[str, Any]:
-    return {
-        **chatgpt.status(),
-        **claude_code.status(),
-        "provider": active_provider(),
-        "model": active_model(),
-        "api_key_configured": bool(settings.llm_api_key),
-    }
-
-
 @app.get("/api/model")
-def api_model_status() -> dict[str, Any]:
-    return _model_status()
+def apimodel_status() -> dict[str, Any]:
+    return model_status()
+
+
+@app.put("/api/model/provider")
+def api_select_provider(body: ProviderBody) -> dict[str, Any]:
+    try:
+        select_provider(body.provider)
+    except LlmError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return model_status()
+
+
+@app.put("/api/model/model")
+def api_set_model(body: ModelBody) -> dict[str, Any]:
+    try:
+        set_model(body.provider, body.model)
+    except LlmError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return model_status()
+
+
+@app.get("/api/model/chatgpt/models")
+def api_chatgpt_models() -> dict[str, list[str]]:
+    try:
+        return {"models": chatgpt.list_models()}
+    except chatgpt.ChatGptError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/model/api")
+def api_save_api_key(body: ApiKeyBody) -> dict[str, Any]:
+    try:
+        save_api_config(body.api_key, body.base_url, body.model)
+    except LlmError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return model_status()
+
+
+@app.delete("/api/model/api")
+def api_remove_api_key() -> dict[str, Any]:
+    remove_api_config()
+    return model_status()
 
 
 @app.post("/api/auth/chatgpt/login")
@@ -413,13 +493,38 @@ def api_chatgpt_callback(body: CallbackUrlBody) -> dict[str, Any]:
         chatgpt.complete_login_from_url(body.url)
     except chatgpt.ChatGptError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _model_status()
+    return model_status()
 
 
 @app.delete("/api/auth/chatgpt")
 def api_chatgpt_logout() -> dict[str, Any]:
     chatgpt.sign_out()
-    return _model_status()
+    return model_status()
+
+
+@app.post("/api/auth/claude/login")
+def api_claude_login() -> dict[str, Any]:
+    """Connect Claude Code; "url" is empty when its CLI was already signed in."""
+    try:
+        url = claude_code.start_login()
+    except claude_code.ClaudeCodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": url, **model_status()}
+
+
+@app.post("/api/auth/claude/code")
+def api_claude_code(body: ClaudeCodeBody) -> dict[str, Any]:
+    try:
+        claude_code.submit_code(body.code)
+    except claude_code.ClaudeCodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return model_status()
+
+
+@app.delete("/api/auth/claude/login")
+def api_claude_cancel() -> dict[str, Any]:
+    claude_code.cancel_login()
+    return model_status()
 
 
 @app.get("/api/templates")
@@ -467,8 +572,9 @@ async def _read_upload_capped(file: UploadFile) -> bytes:
 
 @app.post("/api/generations")
 async def api_create_generation(
-    title: str = Form(...),
     template_key: str = Form(...),
+    title: str = Form(""),
+    language: str = Form("source"),
     instruction: str = Form(""),
     source_text: str = Form(""),
     author: str = Form(""),
@@ -479,8 +585,9 @@ async def api_create_generation(
         template = deck.get_template(template_key)
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
-    if not title.strip():
-        raise HTTPException(400, detail="Title must not be empty")
+    if language not in deck.LANGUAGE_RULES:
+        raise HTTPException(400, detail=f"Unknown slide language: {language}")
+    _require_model()
     uploads = [f for f in files if f.filename]
     if len(uploads) > MAX_UPLOAD_FILES:
         raise HTTPException(400, detail=f"At most {MAX_UPLOAD_FILES} PDF files per generation")
@@ -505,6 +612,7 @@ async def api_create_generation(
         source_names=names,
         author=(author or "").strip(),
         institute=(institute or "").strip(),
+        language=language,
     )
     gdir = store.generation_dir(meta.id)
     # source_XX.pdf index encodes reading order; original names live in meta.source_names
@@ -595,6 +703,7 @@ def api_edit_frame(gen_id: str, index: int, body: FrameEditBody) -> Response:
         raise HTTPException(422, detail=str(e)) from e
     if not any(f.index == index for f in frames):
         raise HTTPException(400, detail=f"Slide index not found: {index}")
+    _require_model()
     instruction = body.instruction
 
     def job(progress: ProgressCallback) -> None:
@@ -613,6 +722,7 @@ def api_refine_deck(gen_id: str, body: RefineBody) -> Response:
     if not body.instruction.strip():
         raise HTTPException(400, detail="Refine instruction must not be empty")
     _file(gen_id, "main.tex", "TeX not generated yet")
+    _require_model()
     instruction = body.instruction
 
     def job(progress: ProgressCallback) -> None:
@@ -628,6 +738,7 @@ def api_refine_deck(gen_id: str, body: RefineBody) -> Response:
 @app.post("/api/generations/{gen_id}/regenerate")
 def api_regenerate(gen_id: str) -> JSONResponse:
     old_meta = _load(gen_id)
+    _require_model()
     old_dir = store.generation_dir(gen_id)
     if old_meta.source_kind == "pdf":
         sources = sorted(old_dir.glob("source_*.pdf"))
@@ -650,6 +761,7 @@ def api_regenerate(gen_id: str) -> JSONResponse:
         source_names=list(old_meta.source_names),
         author=old_meta.author,
         institute=old_meta.institute,
+        language=old_meta.language,
     )
     new_dir = store.generation_dir(meta.id)
     for source in sources:

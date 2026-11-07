@@ -13,7 +13,10 @@ import {
   texUrl,
 } from "../api";
 import PdfViewer from "../components/PdfViewer";
+import Segmented from "../components/Segmented";
 import StatusBadge from "../components/StatusBadge";
+import { useModel } from "../model";
+import { displayTitle } from "../title";
 import { useTaskWs } from "../hooks/useTaskWs";
 import type { FrameItem, TaskEvent, GenerationMeta } from "../types";
 
@@ -33,8 +36,8 @@ export default function Generation() {
   const [pdfBust, setPdfBust] = useState(0);
   const [editText, setEditText] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
-  const [refineText, setRefineText] = useState("");
-  const [refineError, setRefineError] = useState<string | null>(null);
+  const [scope, setScope] = useState<"page" | "deck">("page");
+  const [texOpen, setTexOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [progress, setProgress] = useState<TaskEvent | null>(null);
@@ -46,6 +49,7 @@ export default function Generation() {
   const [logText, setLogText] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
   const sawRunningRef = useRef(false);
+  const { setPanelOpen } = useModel();
 
   const loadMeta = useCallback(async () => {
     if (!id) return;
@@ -105,7 +109,6 @@ export default function Generation() {
           await loadFrames();
           setPdfBust(Date.now());
           setEditText("");
-          setRefineText("");
         }
         if (wasActive || changed) {
           setLogText(null);
@@ -142,7 +145,6 @@ export default function Generation() {
             await loadFrames();
             setPdfBust(Date.now());
             setEditText("");
-            setRefineText("");
           }
           setLogText(null);
           setLogOpen(false);
@@ -165,7 +167,7 @@ export default function Generation() {
 
   async function handleEdit(e: FormEvent) {
     e.preventDefault();
-    if (!id || !editText.trim()) return setEditError("Please enter edit instructions");
+    if (!id || !editText.trim()) return setEditError("Please describe the change");
     if (!frame) return setEditError("This page has no editable slide");
     setEditError(null);
     setEditing(true);
@@ -184,19 +186,19 @@ export default function Generation() {
 
   async function handleRefine(e: FormEvent) {
     e.preventDefault();
-    if (!id || !refineText.trim()) return setRefineError("Please enter refine instructions");
-    setRefineError(null);
+    if (!id || !editText.trim()) return setEditError("Please describe the change");
+    setEditError(null);
     setEditing(true);
     setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting refine…", error: "" });
     try {
-      await refineGeneration(id, refineText.trim());
+      await refineGeneration(id, editText.trim());
       // Same flow as slide edits: the task state is registered before the 202
       // returns, so re-attaching the WS now cannot pick up a stale snapshot.
       setWatch(true);
     } catch (err) {
       setEditing(false);
       setProgress(null);
-      setRefineError(errMsg(err));
+      setEditError(errMsg(err));
     }
   }
 
@@ -251,6 +253,14 @@ export default function Generation() {
   // Refine failures roll back like edits but carry their own message prefix.
   const refineFailed = editFailedError.startsWith("This refine failed");
   const llmCalls = meta.llm_calls ?? 0;
+  // Model failures (signed out, quota, model unavailable) need a different
+  // model or a retry, and have no compile log to show.
+  const modelError = meta.error_kind === "model";
+  const changeModel = (
+    <button type="button" className="btn-secondary text-sm" onClick={() => setPanelOpen(true)}>
+      Change model
+    </button>
+  );
 
   const logBlock = (tone: string) => (
     <div className="space-y-2">
@@ -271,7 +281,7 @@ export default function Generation() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-2xl">{meta.title}</h1>
+            <h1 className="truncate text-2xl">{displayTitle(meta)}</h1>
             <StatusBadge status={busy ? "running" : meta.status} />
           </div>
           <p className="text-sm text-slate-500">
@@ -306,12 +316,14 @@ export default function Generation() {
               </a>
             </>
           )}
-          <button type="button" className="btn-secondary text-sm"
-            disabled={busy || meta.status === "running" || regenerating}
-            onClick={() => void handleRegenerate()}>
-            <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
-            {regenerating ? "Regenerating…" : "Regenerate"}
-          </button>
+          {!(failed && modelError) && (
+            <button type="button" className="btn-secondary text-sm"
+              disabled={busy || meta.status === "running" || regenerating}
+              onClick={() => void handleRegenerate()}>
+              <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
+              {regenerating ? "Regenerating…" : "Regenerate"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -350,7 +362,7 @@ export default function Generation() {
             </button>
           </div>
           <pre className="whitespace-pre-wrap break-words font-mono text-sm text-red-700">{editFailedError}</pre>
-          {logBlock("text-red-800")}
+          {modelError ? <div>{changeModel}</div> : logBlock("text-red-800")}
         </section>
       )}
 
@@ -360,7 +372,15 @@ export default function Generation() {
           <pre className="whitespace-pre-wrap break-words font-mono text-sm text-red-700">
             {meta.error || progress?.error || "Unknown error"}
           </pre>
-          {logBlock("text-red-800")}
+          {modelError ? (
+            <div className="flex flex-wrap gap-2">
+              {changeModel}
+              <button type="button" className="btn-primary text-sm" disabled={regenerating}
+                onClick={() => void handleRegenerate()}>
+                <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} /> Try again
+              </button>
+            </div>
+          ) : logBlock("text-red-800")}
         </section>
       )}
 
@@ -375,52 +395,49 @@ export default function Generation() {
               <h2 className="mt-1 text-lg">
                 Page {page}{frame?.title ? ` · ${frame.title}` : ""}
               </h2>
+              {frame?.tex && (
+                <button type="button" className="mt-1 text-xs text-[var(--color-primary)] hover:underline"
+                  aria-expanded={texOpen} onClick={() => setTexOpen((o) => !o)}>
+                  {texOpen ? "Hide LaTeX" : "Show LaTeX"}
+                </button>
+              )}
             </div>
-            {frame?.tex && (
-              <div className="min-h-0 flex-1 overflow-auto border border-[var(--color-border)] bg-slate-50 p-3">
+            {texOpen && frame?.tex && (
+              <div className="max-h-72 min-h-0 overflow-auto border border-[var(--color-border)] bg-slate-50 p-3">
                 <pre className="whitespace-pre-wrap break-all font-mono text-xs text-slate-600">{frame.tex}</pre>
               </div>
             )}
-            <form onSubmit={handleEdit} className="space-y-3 border-t border-[var(--color-border)] pt-4">
-              <label className="block text-sm text-slate-600" htmlFor="edit-instruction">Edit this page</label>
-              {frames.length > 0 && !frame && (
+            <form onSubmit={scope === "page" ? handleEdit : handleRefine}
+              className="space-y-3 border-t border-[var(--color-border)] pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-sm text-slate-600" htmlFor="change-instruction">Change</label>
+                <Segmented label="What to change" value={scope} onChange={setScope} disabled={busy} options={[
+                  { value: "page", label: "This page" },
+                  { value: "deck", label: "Whole deck" },
+                ]} />
+              </div>
+              {scope === "page" && frames.length > 0 && !frame && (
                 <p id="edit-no-frame-hint" className="text-xs text-slate-500">
                   This page has no editable slide (it may be an auto-generated section or
-                  continuation page). Go to a content slide to edit it.
+                  continuation page). Go to a content slide, or change the whole deck.
                 </p>
               )}
-              <textarea id="edit-instruction" className="input-field min-h-24 text-sm"
+              <textarea id="change-instruction" className="input-field min-h-28 text-sm"
                 value={editText} onChange={(e) => setEditText(e.target.value)}
-                placeholder="e.g. Change the bar chart to a line chart"
-                disabled={busy || !frame}
-                aria-describedby={frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
+                placeholder={scope === "page"
+                  ? "e.g. Change the bar chart to a line chart"
+                  : "e.g. Tighten all bullet points to one line and unify tense"}
+                disabled={busy || (scope === "page" && !frame)}
+                aria-describedby={scope === "page" && frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
               {editError && (
                 <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{editError}</div>
               )}
-              <button type="submit" className="btn-primary w-full" disabled={busy || !frame}>
-                {busy ? "Editing…" : "Submit edit"}
+              <button type="submit" className="btn-primary w-full" disabled={busy || (scope === "page" && !frame)}>
+                {busy ? "Working…" : scope === "page" ? "Apply to this page" : "Apply to every slide"}
               </button>
-            </form>
-            <form onSubmit={handleRefine}
-              className="space-y-3 border-t-2 border-[var(--color-border)] pt-4">
-              <div>
-                <label className="block text-sm text-slate-600" htmlFor="refine-instruction">
-                  Refine whole deck
-                </label>
-                <p className="mt-1 text-xs text-slate-500">
-                  Applies one instruction across every slide (a failed refine is rolled back).
-                </p>
-              </div>
-              <textarea id="refine-instruction" className="input-field min-h-24 text-sm"
-                value={refineText} onChange={(e) => setRefineText(e.target.value)}
-                placeholder="e.g. Tighten all bullet points to one line and unify tense"
-                disabled={busy} />
-              {refineError && (
-                <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{refineError}</div>
+              {scope === "deck" && (
+                <p className="text-xs text-slate-500">If the result does not compile, the deck is left as it was.</p>
               )}
-              <button type="submit" className="btn-primary w-full" disabled={busy}>
-                {busy ? "Working…" : "Refine deck"}
-              </button>
             </form>
           </aside>
         </div>

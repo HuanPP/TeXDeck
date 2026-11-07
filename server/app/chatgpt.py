@@ -402,6 +402,10 @@ def _expire(pending: _PendingLogin) -> None:
             _pending = None
 
 
+# Called after a successful sign-in; app.llm uses it to switch to ChatGPT.
+on_signed_in: Callable[[], None] | None = None
+
+
 def complete_login(
     params: dict[str, str],
     transport: httpx.BaseTransport | None = None,
@@ -466,6 +470,8 @@ def complete_login(
     cred = _credential_from(tokens, client_id, str(claims.get("email") or ""), [])
     save_credential(cred)
     _stop_server(pending)
+    if on_signed_in is not None:
+        on_signed_in()
     return cred
 
 
@@ -526,6 +532,36 @@ def to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[s
 
 
 UsageSink = Callable[[int, int], None]
+
+
+_NOT_CHAT = ("audio", "realtime", "transcribe", "tts", "image", "search", "embedding", "moderation")
+_models_cache: tuple[str, float, list[str]] | None = None
+
+
+def list_models(transport: httpx.BaseTransport | None = None) -> list[str]:
+    """Chat models this sign-in can use, newest first (cached for 10 minutes)."""
+    global _models_cache
+    cred = valid_credential()
+    if _models_cache and _models_cache[0] == cred.access and time.time() - _models_cache[1] < 600:
+        return _models_cache[2]
+    headers = {"Authorization": f"Bearer {cred.access}", "User-Agent": USER_AGENT}
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30), transport=transport) as http:
+            res = http.get(f"{RESOURCE}/models", headers=headers)
+    except httpx.HTTPError as exc:
+        raise ChatGptError(f"Could not load the model list: {exc}") from exc
+    if res.status_code != 200:
+        raise ChatGptError(f"Could not load the model list (HTTP {res.status_code})")
+    data = res.json().get("data") or []
+    entries = [
+        (str(item.get("id")), int(item.get("created") or 0))
+        for item in data
+        if isinstance(item, dict) and str(item.get("id", "")).startswith("gpt-")
+        and not any(word in str(item.get("id")) for word in _NOT_CHAT)
+    ]
+    models = [mid for mid, _ in sorted(entries, key=lambda e: (-e[1], e[0]))]
+    _models_cache = (cred.access, time.time(), models)
+    return models
 
 
 class ResponsesClient:

@@ -17,9 +17,8 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 900.0
     llm_max_retries: int = 2  # OpenAI SDK network-layer retries
 
-    # "auto" uses the ChatGPT sign-in when one exists, else the API key above.
-    # "claude-code" is never picked automatically; set it to run on the local
-    # Claude Code CLI and whatever account it is signed in with.
+    # "auto" lets the page choose (ChatGPT, Claude Code or an API key) and
+    # remembers it in model_state_file; api / chatgpt / claude-code pin one.
     llm_provider: Literal["auto", "api", "chatgpt", "claude-code"] = "auto"
     chatgpt_model: str = "gpt-6.1-sol"
     chatgpt_reasoning_effort: str = ""  # "" leaves the model default; low/medium/high
@@ -27,6 +26,8 @@ class Settings(BaseSettings):
     claude_code_command: str = "claude"
     claude_code_model: str = "sonnet"  # alias or full name; "" leaves the CLI default
     claude_code_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
+    # The page's model choice and any API key entered there (written 0600).
+    model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"

@@ -93,4 +93,23 @@ def _isolated_chatgpt_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     """Keep tests away from a developer's real ChatGPT sign-in."""
     path = tmp_path / "chatgpt-auth.json"
     monkeypatch.setattr(settings, "chatgpt_auth_file", path)
+    monkeypatch.setattr("app.chatgpt._models_cache", None)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _model_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Jobs in tests run on fake clients; skip the submit-time model check."""
+    monkeypatch.setattr("app.main.ensure_model_ready", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_claude_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests away from a developer's real Claude Code CLI and saved model choice."""
+    from app import claude_code
+
+    monkeypatch.setattr(settings, "claude_code_command", str(tmp_path / "no-claude-here"))
+    monkeypatch.setattr(settings, "model_state_file", tmp_path / "model-state.json")
+    monkeypatch.setattr(claude_code, "_auth_cache", None)
+    yield
+    claude_code.cancel_login()
