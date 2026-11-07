@@ -1,0 +1,15 @@
+[Unit]
+Description=TeXDeck app server (127.0.0.1:8790)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/texdeck/app
+EnvironmentFile=/srv/texdeck/texdeck.env
+ExecStart=/srv/texdeck/app/.venv/bin/uvicorn app.main:app --app-dir server --host 127.0.0.1 --port 8790
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

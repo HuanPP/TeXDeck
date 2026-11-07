@@ -35,6 +35,8 @@ cp server/.env.example server/.env && ./server/run.sh     # API on :8000
 cd web && npm install && npm run dev                      # UI on :5173
 ```
 
+**On a server.** Add an account first (`python -m app.auth add <username>`); from then on the page asks for a sign-in and the API refuses requests without one. [`docs/deploy`](docs/deploy) has the full setup behind Caddy and Cloudflare, with example service files.
+
 ## Pick a model
 
 Click the model button in the top bar. It lists three ways to run the model; you can switch between them, and pick the model for each, at any time:

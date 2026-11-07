@@ -1,0 +1,14 @@
+[Unit]
+Description=TeXDeck TLS reverse proxy (Caddy, :2083)
+Wants=texdeck.service
+After=texdeck.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/caddy run --config /srv/texdeck/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

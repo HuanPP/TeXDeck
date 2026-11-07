@@ -35,6 +35,8 @@ cp server/.env.example server/.env && ./server/run.sh     # API 在 :8000
 cd web && npm install && npm run dev                      # 界面在 :5173
 ```
 
+**部署到服务器**：先建一个账号（`python -m app.auth add <用户名>`），之后页面会要求登录，没有登录的请求一律被接口拒绝。[`docs/deploy`](docs/deploy) 里有放在 Caddy 和 Cloudflare 后面的完整做法和示例配置文件。
+
 ## 选模型
 
 点顶栏的模型按钮，面板里列出三种用法，随时可以切换，也可以分别选择模型：
