@@ -14,6 +14,8 @@
 
 视觉模型把页面当图片读，按你选的模板写出完整的 `main.tex`，一分钟左右出结果。之后可以用一句话改某一页，也可以改整套。左图的源文件是 [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf)，可以自己跑一遍。幻灯片默认用英文，要中文就在附加要求里写一句。
 
+**不需要 API key**：直接用你已经开通的 ChatGPT 或 Claude 订阅，也支持 API key。
+
 ## 安装
 
 **桌面版**：从 [Releases](https://github.com/HuanPP/TeXDeck/releases) 下载（macOS Apple 芯片、Windows、Linux），自带 TeX 引擎，不用另装 TeX。安装包没有签名：macOS 上右键选“打开”，Windows 上点“更多信息”，再点“仍要运行”。
@@ -35,7 +37,13 @@ cd web && npm install && npm run dev                      # 界面在 :5173
 
 ## 选模型
 
-点顶栏的 **Sign in with ChatGPT** 用你的 ChatGPT 订阅，或者给任意 OpenAI 兼容的视觉模型配 API key（写在 `.env`，桌面版写在数据目录的 `texdeck.env`）：
+模型有三种用法，其中两种直接用你已有的订阅。配置写在 `.env`，桌面版写在数据目录的 `texdeck.env`。
+
+**ChatGPT 订阅**：点顶栏的 **Sign in with ChatGPT**，不用另外配置。
+
+**Claude 订阅**：通过 Claude Code 使用，见[下文](#用-claude-code-走-claude-订阅)。
+
+**API key**：任意 OpenAI 兼容的视觉模型：
 
 ```bash
 TEXDECK_LLM_API_KEY=...
@@ -44,6 +52,17 @@ TEXDECK_LLM_MODEL=gemini-pro-latest      # 推荐；Kimi 的 vision 模型也能
 ```
 
 纯文本模型用不了，因为页面是以图片形式发给模型的。
+
+### 用 Claude Code 走 Claude 订阅
+
+TeXDeck 以无头模式启动你本机的 `claude` CLI（`claude -p`，不开工具，不加载 CLAUDE.md 和插件），用的是这个 CLI 登录的账号，TeXDeck 本身接触不到凭据。先装好 Claude Code，用 `claude auth login` 登录（默认就是 Claude 订阅，可用 `claude auth status` 确认；环境里设了 `ANTHROPIC_API_KEY` 的话 CLI 会改走 API 计费），再设置：
+
+```bash
+TEXDECK_LLM_PROVIDER=claude-code
+TEXDECK_CLAUDE_CODE_MODEL=sonnet         # 也可以是 opus 或完整模型名
+```
+
+运行 TeXDeck 的机器上要有这个 CLI，所以源码运行和桌面版可用，Docker 镜像里不行。
 
 ## 模板
 

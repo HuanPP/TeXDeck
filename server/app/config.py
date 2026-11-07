@@ -18,10 +18,15 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2  # OpenAI SDK network-layer retries
 
     # "auto" uses the ChatGPT sign-in when one exists, else the API key above.
-    llm_provider: Literal["auto", "api", "chatgpt"] = "auto"
+    # "claude-code" is never picked automatically; set it to run on the local
+    # Claude Code CLI and whatever account it is signed in with.
+    llm_provider: Literal["auto", "api", "chatgpt", "claude-code"] = "auto"
     chatgpt_model: str = "gpt-6.1-sol"
     chatgpt_reasoning_effort: str = ""  # "" leaves the model default; low/medium/high
     chatgpt_auth_file: Path = REPO_ROOT / "server" / ".chatgpt-auth.json"
+    claude_code_command: str = "claude"
+    claude_code_model: str = "sonnet"  # alias or full name; "" leaves the CLI default
+    claude_code_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"

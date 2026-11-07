@@ -8,7 +8,7 @@ from typing import Any
 
 import openai
 
-from . import chatgpt
+from . import chatgpt, claude_code
 from .config import settings
 
 ProgressCallback = Callable[[str, int], None]  # (stage description, percent 0-100)
@@ -136,18 +136,60 @@ class ChatGptClient:
         return content
 
 
+class ClaudeCodeClient:
+    """Same complete() contract as LlmClient, backed by the local Claude Code CLI.
+
+    temperature is accepted and ignored: `claude -p` does not expose it.
+    """
+
+    def __init__(self, on_usage: UsageCallback | None = None) -> None:
+        self._on_usage = on_usage
+        self.model = settings.claude_code_model or "default"
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        on_usage: UsageCallback | None = None,
+    ) -> str:
+        del temperature
+        callback = on_usage if on_usage is not None else self._on_usage
+        try:
+            content = claude_code.complete(messages, callback)
+        except claude_code.ClaudeCodeError as exc:
+            raise LlmError(str(exc)) from exc
+        if not content.strip():
+            raise LlmError("Model returned empty content")
+        return content
+
+
 def active_provider() -> str:
-    """Return "chatgpt" or "api", resolving TEXDECK_LLM_PROVIDER=auto by sign-in state."""
+    """Return "chatgpt", "claude-code" or "api", resolving TEXDECK_LLM_PROVIDER=auto by sign-in state."""
     if settings.llm_provider == "auto":
         return "chatgpt" if chatgpt.load_credential() is not None else "api"
     return settings.llm_provider
 
 
 def active_model() -> str:
-    return settings.chatgpt_model if active_provider() == "chatgpt" else settings.llm_model
+    provider = active_provider()
+    if provider == "chatgpt":
+        return settings.chatgpt_model
+    if provider == "claude-code":
+        return settings.claude_code_model or "default"
+    return settings.llm_model
 
 
-def create_client(on_usage: UsageCallback | None = None) -> LlmClient | ChatGptClient:
+def create_client(
+    on_usage: UsageCallback | None = None,
+) -> LlmClient | ChatGptClient | ClaudeCodeClient:
+    if active_provider() == "claude-code":
+        if claude_code.find_command() is None:
+            raise LlmError(
+                "TEXDECK_LLM_PROVIDER is claude-code but the claude CLI was not found; "
+                "install Claude Code or set TEXDECK_CLAUDE_CODE_COMMAND"
+            )
+        return ClaudeCodeClient(on_usage=on_usage)
     if active_provider() == "chatgpt":
         if chatgpt.load_credential() is None:
             raise LlmError("TEXDECK_LLM_PROVIDER is chatgpt but nobody is signed in; sign in first")

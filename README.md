@@ -14,6 +14,8 @@ Drop in a PDF, get back a Beamer deck: the compiled PDF, the `.tex` source, and 
 
 A vision model reads your pages as images and writes a complete `main.tex` against the template you pick. It takes about a minute. You can then rewrite one slide, or the whole deck, with a single instruction. The source on the left is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), so you can try it yourself.
 
+**No API key needed:** it runs on the ChatGPT or Claude subscription you already pay for. An API key works too.
+
 ## Install
 
 **Desktop app.** Download it from [Releases](https://github.com/HuanPP/TeXDeck/releases) (macOS Apple silicon, Windows, Linux). It bundles its own TeX engine, so you don't need a TeX install. The builds are unsigned: on macOS, right-click the app and choose Open; on Windows, choose More info, then Run anyway.
@@ -35,7 +37,13 @@ cd web && npm install && npm run dev                      # UI on :5173
 
 ## Pick a model
 
-Click **Sign in with ChatGPT** in the top bar to run on your ChatGPT plan, or set an API key for any OpenAI-compatible vision model (`.env`, or `texdeck.env` in the desktop app's data folder):
+There are three ways to pay for the model. Two of them use a subscription you already have. Settings go in `.env`, or in `texdeck.env` in the desktop app's data folder.
+
+**ChatGPT subscription.** Click **Sign in with ChatGPT** in the top bar. Nothing else to set.
+
+**Claude subscription, through Claude Code.** See [below](#claude-subscription-via-claude-code).
+
+**API key.** Any OpenAI-compatible vision model:
 
 ```bash
 TEXDECK_LLM_API_KEY=...
@@ -44,6 +52,17 @@ TEXDECK_LLM_MODEL=gemini-pro-latest      # recommended; Kimi vision models also 
 ```
 
 Text-only models won't work, because pages are sent as images.
+
+### Claude subscription via Claude Code
+
+TeXDeck starts your own `claude` CLI in headless mode (`claude -p`, no tools, CLAUDE.md and plugins off), so generation runs on whatever account that CLI is signed in with. TeXDeck never sees the credentials. Install Claude Code and sign in with `claude auth login` (your Claude subscription is the default; check with `claude auth status`; an `ANTHROPIC_API_KEY` in the environment switches the CLI to API billing), then:
+
+```bash
+TEXDECK_LLM_PROVIDER=claude-code
+TEXDECK_CLAUDE_CODE_MODEL=sonnet         # or opus, or a full model name
+```
+
+This needs the CLI on the machine running TeXDeck, so it works from source and in the desktop app but not in the Docker image.
 
 ## Templates
 

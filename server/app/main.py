@@ -24,7 +24,7 @@ from .edit import (
     replace_frame,
     resolve_frame_pages,
 )
-from . import chatgpt
+from . import chatgpt, claude_code
 from .llm import ProgressCallback, UsageTally, active_model, active_provider, create_client
 from .store import GenerationMeta
 
@@ -389,6 +389,7 @@ def health() -> dict[str, str]:
 def _model_status() -> dict[str, Any]:
     return {
         **chatgpt.status(),
+        **claude_code.status(),
         "provider": active_provider(),
         "model": active_model(),
         "api_key_configured": bool(settings.llm_api_key),

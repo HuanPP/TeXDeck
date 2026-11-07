@@ -36,10 +36,11 @@ export type TaskEvent = {
 };
 
 export type ModelStatus = {
-  provider: "api" | "chatgpt";
+  provider: "api" | "chatgpt" | "claude-code";
   model: string;
   signed_in: boolean;
   email: string;
   pending: boolean;
   api_key_configured: boolean;
+  claude_code_available: boolean;
 };

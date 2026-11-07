@@ -31,6 +31,11 @@ ENV_TEMPLATE = """\
 #
 # Model used with a ChatGPT sign-in:
 # TEXDECK_CHATGPT_MODEL=gpt-6.1-sol
+#
+# To run on your installed Claude Code CLI (claude -p) and the account it is
+# signed in with instead:
+# TEXDECK_LLM_PROVIDER=claude-code
+# TEXDECK_CLAUDE_CODE_MODEL=sonnet
 """
 
 

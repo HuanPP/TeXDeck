@@ -80,21 +80,25 @@ export default function ModelMenu() {
   }
 
   const usingChatGpt = status.provider === "chatgpt";
+  const usingClaudeCode = status.provider === "claude-code";
+  const ready = usingChatGpt || (usingClaudeCode ? status.claude_code_available : status.api_key_configured);
   const label = usingChatGpt
     ? `ChatGPT · ${status.model}`
-    : status.api_key_configured
-      ? `API · ${status.model}`
-      : "No model configured";
+    : usingClaudeCode
+      ? status.claude_code_available ? `Claude Code · ${status.model}` : "Claude Code CLI not found"
+      : status.api_key_configured
+        ? `API · ${status.model}`
+        : "No model configured";
 
   return (
     <div className="relative flex items-center gap-3 text-sm">
       <span
-        className={status.api_key_configured || usingChatGpt ? "text-slate-600" : "text-red-600"}
-        title={status.email || undefined}
+        className={ready ? "text-slate-600" : "text-red-600"}
+        title={usingClaudeCode ? "Runs on your local claude CLI and the account it is signed in with" : status.email || undefined}
       >
         {label}
       </span>
-      {status.signed_in ? (
+      {usingClaudeCode && !status.signed_in ? null : status.signed_in ? (
         <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={signOut}
           title={status.email ? `Signed in as ${status.email}` : undefined}>
           <LogOut size={14} /> Sign out
