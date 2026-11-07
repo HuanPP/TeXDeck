@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -24,7 +24,7 @@ from .edit import (
     replace_frame,
     resolve_frame_pages,
 )
-from . import chatgpt, claude_code
+from . import auth, chatgpt, claude_code
 from .llm import (
     LlmError,
     ProgressCallback,
@@ -55,6 +55,11 @@ class CallbackUrlBody(BaseModel):
 
 class ClaudeCodeBody(BaseModel):
     code: str
+
+
+class SignInBody(BaseModel):
+    username: str
+    password: str
 
 
 class ProviderBody(BaseModel):
@@ -93,6 +98,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Reachable without a session: checking and starting one.
+_OPEN_API_PATHS = {"/api/auth/session"}
+
+
+@app.middleware("http")
+async def require_sign_in(request: Request, call_next: Any) -> Response:
+    path = request.url.path
+    if path.startswith("/api/") and path not in _OPEN_API_PATHS and auth.enabled():
+        if auth.session_user(request.cookies.get(auth.COOKIE)) is None:
+            return JSONResponse({"detail": "Sign in first"}, status_code=401)
+    return await call_next(request)
 
 
 def _load(gen_id: str) -> GenerationMeta:
@@ -433,6 +450,39 @@ def _plain(gen_id: str, name: str, missing: str) -> FileResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _session_status(request: Request) -> dict[str, Any]:
+    return {"enabled": auth.enabled(), "user": auth.session_user(request.cookies.get(auth.COOKIE))}
+
+
+@app.get("/api/auth/session")
+def api_session(request: Request) -> dict[str, Any]:
+    return _session_status(request)
+
+
+@app.post("/api/auth/session")
+def api_sign_in(body: SignInBody, request: Request) -> JSONResponse:
+    # Only Cloudflare reaches the deployed origin, and it sets CF-Connecting-IP.
+    client = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
+    try:
+        token = auth.login(body.username, body.password, client)
+    except auth.AuthError as exc:
+        status = 429 if "Too many" in str(exc) else 401
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    response = JSONResponse({"enabled": True, "user": body.username.strip()})
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(
+        auth.COOKIE, token, max_age=auth.SESSION_SECONDS, httponly=True, secure=https, samesite="lax",
+    )
+    return response
+
+
+@app.delete("/api/auth/session")
+def api_sign_out() -> JSONResponse:
+    response = JSONResponse({"enabled": auth.enabled(), "user": None})
+    response.delete_cookie(auth.COOKIE)
+    return response
 
 
 @app.get("/api/model")
@@ -777,6 +827,9 @@ def api_regenerate(gen_id: str) -> JSONResponse:
 
 @app.websocket("/ws/generations/{gen_id}")
 async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
+    if auth.enabled() and auth.session_user(websocket.cookies.get(auth.COOKIE)) is None:
+        await websocket.close(code=1008, reason="Sign in first")
+        return
     try:
         store.generation_dir(gen_id)
     except ValueError:
