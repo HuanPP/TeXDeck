@@ -12,9 +12,10 @@ dist/
 artifacts/
 state/
 
-# ChatGPT sign-in tokens; model choice and API key entered on the page
+# ChatGPT sign-in tokens; model choice and API key entered on the page; sign-in accounts
 .chatgpt-auth.json
 .model-state.json
+.users.json
 
 # Environment (keep .env.example)
 .env

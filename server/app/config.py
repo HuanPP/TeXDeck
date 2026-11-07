@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     claude_code_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
     # The page's model choice and any API key entered there (written 0600).
     model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
+    # Sign-in accounts (python -m app.auth add <name>); sign-in is off while empty.
+    users_file: Path = REPO_ROOT / "server" / ".users.json"
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"
