@@ -1,6 +1,6 @@
 [project]
 name = "texdeck-server"
-version = "0.1.0"
+version = "0.2.0"
 description = "TeXDeck server: PDF/text research reports to Beamer slides"
 requires-python = ">=3.12"
 dependencies = [
