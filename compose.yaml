@@ -2,6 +2,8 @@ services:
   texdeck:
     build: .
     ports:
+      # Local only. Before exposing it, add an account so the page asks for a sign-in:
+      #   docker compose exec texdeck python -m app.auth add <username>
       - "127.0.0.1:8000:8000"
     environment:
       # Optional: you can also connect ChatGPT or enter an API key from the page.
