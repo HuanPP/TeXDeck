@@ -26,8 +26,13 @@ async function readError(res: Response): Promise<string> {
   return text.trim();
 }
 
+// A 401 means the session ended (expired, password changed, signed out
+// elsewhere); the sign-in gate listens for this and shows the sign-in page.
+export const SIGNED_OUT_EVENT = "texdeck:signed-out";
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
+  if (res.status === 401 && url !== "/api/auth/session") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
   if (!res.ok) throw new Error(await readError(res));
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -136,3 +141,13 @@ export const setProviderModel = (provider: Provider, model: string) =>
   });
 export const getChatGptModels = () => requestJson<{ models: string[] }>("/api/model/chatgpt/models");
 export const removeApiKey = () => requestJson<ModelStatus>("/api/model/api", { method: "DELETE" });
+
+export type Session = { enabled: boolean; user: string | null };
+export const getSession = () => requestJson<Session>("/api/auth/session");
+export const signIn = (username: string, password: string) =>
+  requestJson<Session>("/api/auth/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+export const signOut = () => requestJson<Session>("/api/auth/session", { method: "DELETE" });
