@@ -109,7 +109,12 @@ async def require_sign_in(request: Request, call_next: Any) -> Response:
     if path.startswith("/api/") and path not in _OPEN_API_PATHS and auth.enabled():
         if auth.session_user(request.cookies.get(auth.COOKIE)) is None:
             return JSONResponse({"detail": "Sign in first"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    # PDF/TeX/frames change in place after every edit; without this the browser
+    # heuristically reuses its stale copy on reload. ETag keeps revalidation cheap.
+    if path.startswith("/api/") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def _load(gen_id: str) -> GenerationMeta:

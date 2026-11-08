@@ -193,3 +193,9 @@ def test_create_generation_accepts_author_and_institute(
     assert meta["author"] == "Jane Doe, John Smith"
     assert meta["institute"] == "Dept. of Physics, MIT"
     assert meta["title"] == "Author Field Deck"
+
+
+def test_api_responses_are_not_cached(client: TestClient) -> None:
+    # PDF/TeX/frames are rewritten in place after edits; a reload must revalidate.
+    r = client.get("/api/templates")
+    assert r.headers["cache-control"] == "no-cache"
