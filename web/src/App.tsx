@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 import Home from "./pages/Home";
 import Generation from "./pages/Generation";
 import ModelMenu from "./components/ModelMenu";
+import InvitesMenu from "./components/InvitesMenu";
 import { AuthGate, useAuth } from "./auth";
 import { ModelProvider } from "./model";
 
@@ -14,10 +15,11 @@ function GenerationRoute() {
 }
 
 function Account() {
-  const { user, signOut } = useAuth();
+  const { user, admin, signOut } = useAuth();
   if (!user) return null;
   return (
     <span className="flex items-center gap-2 text-sm text-slate-500">
+      {admin && <InvitesMenu />}
       {user}
       <button type="button" className="text-[var(--color-primary)] hover:underline" onClick={() => void signOut()}>
         Sign out

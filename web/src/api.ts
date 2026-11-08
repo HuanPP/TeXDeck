@@ -171,8 +171,21 @@ export const getChatGptModels = () =>
   requestJson<{ models: { value: string; label: string }[] }>("/api/model/chatgpt/models");
 export const removeApiKey = () => requestJson<ModelStatus>("/api/model/api", { method: "DELETE" });
 
-export type Session = { enabled: boolean; user: string | null };
+// `registration`: sign-up with an invite code is open; `admin` hands out codes.
+export type Session = { enabled: boolean; user: string | null; admin: boolean; registration: boolean };
 export const getSession = () => requestJson<Session>("/api/auth/session");
+export const register = (invite: string, username: string, password: string) =>
+  requestJson<Session>("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ invite, username, password }),
+  });
+
+export type Invite = { code: string; created_by: string; created_at: string; used_by: string; used_at: string };
+export const listInvites = () => requestJson<Invite[]>("/api/auth/invites");
+export const createInvite = () => requestJson<Invite[]>("/api/auth/invites", { method: "POST" });
+export const revokeInvite = (code: string) =>
+  requestJson<Invite[]>(`/api/auth/invites/${encodeURIComponent(code)}`, { method: "DELETE" });
 export const signIn = (username: string, password: string) =>
   requestJson<Session>("/api/auth/session", {
     method: "POST",
