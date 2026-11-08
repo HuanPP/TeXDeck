@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 DESKTOP = Path(SPECPATH)
 ROOT = DESKTOP.parent
@@ -21,6 +21,8 @@ a = Analysis(
     datas=[
         (str(STAGE / "templates"), "templates"),
         (str(ROOT / "web" / "dist"), "web/dist"),
+        # python-pptx builds every deck from its bundled default.pptx.
+        *collect_data_files("pptx"),
     ],
     hiddenimports=collect_submodules("uvicorn") + collect_submodules("app"),
     # uvicorn falls back to asyncio without uvloop; zstandard uses its C backend.

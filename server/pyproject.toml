@@ -7,6 +7,7 @@ dependencies = [
     "fastapi==0.115.12",
     "uvicorn[standard]==0.34.0",
     "pymupdf==1.26.0",
+    "python-pptx==1.0.2",
     "openai==1.76.0",
     "pydantic-settings==2.8.1",
     "python-multipart==0.0.20",
