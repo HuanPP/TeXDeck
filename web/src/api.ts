@@ -34,8 +34,9 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (res.status === 401 && url !== "/api/auth/session") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
   if (!res.ok) throw new Error(await readError(res));
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // 202/204 from edit/refine/delete carry no body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const listTemplates = () => requestJson<TemplateItem[]>("/api/templates");
