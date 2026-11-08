@@ -217,7 +217,7 @@ def test_cancel_kills_pending_login(auto_mode) -> None:
 
     http = TestClient(app)
     http.post("/api/auth/claude/login")
-    proc = claude_code._login.proc  # type: ignore[union-attr]
+    proc = claude_code._logins[None].proc
     after = http.delete("/api/auth/claude/login").json()
     assert after["claude"]["pending"] is False
     assert proc.wait(5) is not None

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import auth
 from .config import settings
 
 UsageCallback = Callable[[int, int], None]
@@ -170,6 +171,7 @@ def complete(
                 input=(json.dumps(line) + "\n").encode("utf-8"),
                 capture_output=True,
                 cwd=tmp,
+                env=_env(),
                 timeout=settings.llm_timeout_seconds,
                 creationflags=_NO_WINDOW,
             )
@@ -207,21 +209,50 @@ def complete(
 
 _URL_RE = re.compile(r"https://\S+/oauth/authorize\?\S+")
 _AUTH_TTL_SECONDS = 10.0
-_auth_cache: tuple[float, dict[str, Any]] | None = None
+
+
+def _env() -> dict[str, str] | None:
+    """With accounts, each one signs in to its own Claude: the CLI keeps its
+    login under CLAUDE_CONFIG_DIR. Without, the CLI's usual login is used."""
+    home = auth.user_dir()
+    if home is None:
+        return None
+    config = home / "claude"
+    config.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return {**os.environ, "CLAUDE_CONFIG_DIR": str(config)}
+
+
+@dataclass(eq=False)
+class _Login:
+    proc: subprocess.Popen[bytes]
+    user: str | None
+    url: str = ""
+    error: str = ""
+    cancelled: bool = False
+    url_seen: threading.Event = field(default_factory=threading.Event)
+    done: threading.Event = field(default_factory=threading.Event)
+
+
+# Per account (None without accounts): cached status, sign-in in progress, last error.
+_login_lock = threading.Lock()
+_auth_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
+_logins: dict[str | None, _Login] = {}
+_last_error: dict[str | None, str] = {}
 
 
 def auth_status(*, refresh: bool = False) -> dict[str, Any]:
     """The CLI's own `claude auth status`, cached briefly (each call spawns the CLI)."""
-    global _auth_cache
-    if not refresh and _auth_cache and time.monotonic() - _auth_cache[0] < _AUTH_TTL_SECONDS:
-        return _auth_cache[1]
+    user = auth.current_user.get()
+    cached = _auth_cache.get(user)
+    if not refresh and cached and time.monotonic() - cached[0] < _AUTH_TTL_SECONDS:
+        return cached[1]
     info: dict[str, Any] = {"logged_in": False, "email": "", "subscription": ""}
     command = find_command()
     if command is not None:
         try:
             proc = subprocess.run(
                 [command, "auth", "status", "--json"],
-                capture_output=True, stdin=subprocess.DEVNULL, timeout=30, creationflags=_NO_WINDOW,
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=30, env=_env(), creationflags=_NO_WINDOW,
             )
             data = json.loads(proc.stdout.decode("utf-8", errors="replace"))
         except (OSError, subprocess.TimeoutExpired, ValueError):
@@ -232,7 +263,7 @@ def auth_status(*, refresh: bool = False) -> dict[str, Any]:
                 "email": str(data.get("email") or ""),
                 "subscription": str(data.get("subscriptionType") or data.get("authMethod") or ""),
             }
-    _auth_cache = (time.monotonic(), info)
+    _auth_cache[user] = (time.monotonic(), info)
     return info
 
 
@@ -243,21 +274,6 @@ on_signed_in: Callable[[], None] | None = None
 def _signed_in() -> None:
     if on_signed_in is not None:
         on_signed_in()
-
-
-@dataclass(eq=False)
-class _Login:
-    proc: subprocess.Popen[bytes]
-    url: str = ""
-    error: str = ""
-    cancelled: bool = False
-    url_seen: threading.Event = field(default_factory=threading.Event)
-    done: threading.Event = field(default_factory=threading.Event)
-
-
-_login_lock = threading.Lock()
-_login: _Login | None = None
-_last_error = ""
 
 
 def _read_url(login: _Login) -> None:
@@ -271,31 +287,29 @@ def _read_url(login: _Login) -> None:
 
 
 def _wait_for_exit(login: _Login) -> None:
-    global _login, _auth_cache, _last_error
     assert login.proc.stderr is not None
     stderr = login.proc.stderr.read().decode("utf-8", errors="replace")
     code = login.proc.wait()
     lines = [line.strip() for line in stderr.splitlines() if line.strip()]
     with _login_lock:
-        if _login is login:
-            _login = None
-        _auth_cache = None
+        if _logins.get(login.user) is login:
+            del _logins[login.user]
+        _auth_cache.pop(login.user, None)
         if login.cancelled:
             pass
         elif code == 0:
-            _last_error = ""
+            _last_error[login.user] = ""
         else:
             login.error = lines[-1] if lines else f"Claude Code sign-in exited with code {code}"
-            _last_error = login.error
+            _last_error[login.user] = login.error
     if code == 0 and not login.cancelled:
-        _signed_in()
+        auth.run_as(login.user, _signed_in)
     login.done.set()
 
 
 def start_login() -> str:
     """Begin connecting Claude Code. Returns the sign-in URL, or "" when the
     CLI is already signed in (then it is selected straight away)."""
-    global _login, _last_error
     command = _require_command()
     if auth_status(refresh=True)["logged_in"]:
         _signed_in()
@@ -305,13 +319,13 @@ def start_login() -> str:
         proc = subprocess.Popen(
             [command, "auth", "login", "--claudeai"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            creationflags=_NO_WINDOW,
+            env=_env(), creationflags=_NO_WINDOW,
         )
     except OSError as exc:
         raise ClaudeCodeError(f"Could not start Claude Code: {exc}") from exc
-    login = _Login(proc)
+    login = _Login(proc, auth.current_user.get())
     with _login_lock:
-        _login, _last_error = login, ""
+        _logins[login.user], _last_error[login.user] = login, ""
     threading.Thread(target=_read_url, args=(login,), daemon=True).start()
     threading.Thread(target=_wait_for_exit, args=(login,), daemon=True).start()
     login.url_seen.wait(30)
@@ -326,7 +340,7 @@ def start_login() -> str:
 def submit_code(code: str) -> None:
     """Pipe the code from the Claude sign-in page into the waiting CLI."""
     with _login_lock:
-        login = _login
+        login = _logins.get(auth.current_user.get())
     if login is None:
         raise ClaudeCodeError("No Claude sign-in is in progress; start again")
     assert login.proc.stdin is not None
@@ -343,9 +357,8 @@ def submit_code(code: str) -> None:
 
 
 def cancel_login() -> None:
-    global _login
     with _login_lock:
-        login, _login = _login, None
+        login = _logins.pop(auth.current_user.get(), None)
     if login is not None:
         login.cancelled = True
         if login.proc.poll() is None:
@@ -354,14 +367,15 @@ def cancel_login() -> None:
 
 def status() -> dict[str, Any]:
     available = find_command() is not None
-    auth = auth_status() if available else {}
+    info = auth_status() if available else {}
+    user = auth.current_user.get()
     with _login_lock:
-        pending, error = _login is not None, _last_error
+        pending, error = user in _logins, _last_error.get(user, "")
     return {
         "available": available,
-        "signed_in": bool(auth.get("logged_in")),
-        "email": auth.get("email", ""),
-        "subscription": auth.get("subscription", ""),
+        "signed_in": bool(info.get("logged_in")),
+        "email": info.get("email", ""),
+        "subscription": info.get("subscription", ""),
         "pending": pending,
         "login_error": error,
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import sys
 import threading
 import traceback
@@ -127,7 +128,8 @@ def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
         )
 
     try:
-        _executor.submit(runner)
+        # The job runs as whoever started it (their model and sign-ins).
+        _executor.submit(contextvars.copy_context().run, runner)
     except BaseException:
         with _lock:
             _running.discard(gen_id)

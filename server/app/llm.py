@@ -11,7 +11,7 @@ from typing import Any
 
 import openai
 
-from . import chatgpt, claude_code
+from . import auth, chatgpt, claude_code
 from .config import settings
 
 ProgressCallback = Callable[[str, int], None]  # (stage description, percent 0-100)
@@ -169,25 +169,31 @@ class ClaudeCodeClient:
 
 # --------------------------------------------------------------------------
 # Which model to use. The page picks one of three providers; the choice and
-# any API key entered on the page live in settings.model_state_file. Values
-# from .env stay as defaults, and TEXDECK_LLM_PROVIDER other than "auto" pins
-# the provider and disables switching.
+# any API key entered on the page live in settings.model_state_file, or with
+# accounts in each account's own directory. Values from .env stay as defaults
+# (the API key only without accounts: it is the server's, not each user's),
+# and TEXDECK_LLM_PROVIDER other than "auto" pins the provider.
 # --------------------------------------------------------------------------
 
 PROVIDERS = ("chatgpt", "claude-code", "api")
 _state_lock = threading.Lock()
 
 
+def _state_path() -> Path:
+    home = auth.user_dir()
+    return home / "model-state.json" if home else settings.model_state_file
+
+
 def _read_state() -> dict[str, Any]:
     try:
-        data = json.loads(settings.model_state_file.read_text(encoding="utf-8"))
+        data = json.loads(_state_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
 def _write_state(data: dict[str, Any]) -> None:
-    path = settings.model_state_file
+    path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # may hold an API key
@@ -211,11 +217,15 @@ class ApiConfig:
     saved: bool  # entered on the page (and removable there), not only from .env
 
 
+def _server_api_key() -> str:
+    return "" if auth.current_user.get() else settings.llm_api_key
+
+
 def api_config() -> ApiConfig:
     saved = _read_state().get("api")
     saved = saved if isinstance(saved, dict) else {}
     return ApiConfig(
-        api_key=str(saved.get("api_key") or settings.llm_api_key),
+        api_key=str(saved.get("api_key") or _server_api_key()),
         base_url=str(saved.get("base_url") or settings.llm_base_url),
         model=str(saved.get("model") or settings.llm_model),
         saved=bool(saved),
@@ -267,7 +277,7 @@ def remove_api_config() -> None:
     with _state_lock:
         data = _read_state()
         data.pop("api", None)
-        if data.get("provider") == "api" and not settings.llm_api_key:
+        if data.get("provider") == "api" and not _server_api_key():
             data.pop("provider", None)
         _write_state(data)
 

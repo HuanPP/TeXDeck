@@ -41,6 +41,7 @@ class GenerationMeta:
     llm_calls: int = 0  # every LLM call, including repairs and page selection
     language: str = "source"  # slide language: "source" (match the material) | "en" | "zh"
     error_kind: str = ""  # "model" when `error` came from the model provider; read only with `error`
+    owner: str = ""  # account that made it; "" without accounts (and before them: the admin's)
 
 
 def _now_iso() -> str:
@@ -69,6 +70,7 @@ def new_generation(
     author: str = "",
     institute: str = "",
     language: str = "source",
+    owner: str = "",
 ) -> GenerationMeta:
     gen_id, directory = _claim_generation_dir()
     now = _now_iso()
@@ -90,6 +92,7 @@ def new_generation(
         author=author,
         institute=institute,
         language=language,
+        owner=owner,
     )
     _write_meta_file(directory / "meta.json", meta)
     return meta

@@ -33,6 +33,7 @@ from typing import Any
 import httpx
 import zstandard
 
+from . import auth
 from .config import settings
 
 ISSUER = "https://auth.openai.com"
@@ -80,7 +81,8 @@ _file_lock = threading.Lock()
 
 
 def _auth_path() -> Path:
-    return Path(settings.chatgpt_auth_file)
+    home = auth.user_dir()
+    return home / "chatgpt-auth.json" if home else Path(settings.chatgpt_auth_file)
 
 
 def _read_store() -> dict[str, Any]:
@@ -300,12 +302,13 @@ class _PendingLogin:
     redirect: str
     client_id: str | None
     started: float
+    user: str | None = None  # account signing in; the loopback callback finishes as them
     server: HTTPServer | None = None
     error: str = ""
 
 
 _login_lock = threading.Lock()
-_pending: _PendingLogin | None = None
+_pending_by_user: dict[str | None, _PendingLogin] = {}  # one attempt per account
 
 
 def _page(title: str, body: str) -> bytes:
@@ -322,8 +325,11 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         if parsed.path != "/auth/callback":
             self.send_error(404)
             return
+        params = dict(urllib.parse.parse_qsl(parsed.query))
+        with _login_lock:
+            owner = next((p.user for p in _pending_by_user.values() if p.state == params.get("state")), None)
         try:
-            complete_login(dict(urllib.parse.parse_qsl(parsed.query)))
+            auth.run_as(owner, complete_login, params)
         except ChatGptError as exc:
             self._reply(400, _page("Sign-in failed", str(exc)))
         else:
@@ -353,7 +359,6 @@ def start_login(*, listen: bool = True) -> str:
     on this machine. When it does not (Docker, a remote host), the user pastes
     the URL the browser was sent to into complete_login_from_url instead.
     """
-    global _pending
     verifier, challenge = generate_pkce()
     state = _b64url(secrets.token_bytes(32))
     nonce = _b64url(secrets.token_bytes(32))
@@ -374,11 +379,12 @@ def start_login(*, listen: bool = True) -> str:
         redirect=redirect,
         client_id=client_id,
         started=time.time(),
+        user=auth.current_user.get(),
         server=server,
     )
     with _login_lock:
-        _stop_server(_pending)
-        _pending = pending
+        _stop_server(_pending_by_user.get(pending.user))
+        _pending_by_user[pending.user] = pending
     if server is not None:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         timer = threading.Timer(LOGIN_TIMEOUT_SECONDS, _expire, args=(pending,))
@@ -395,11 +401,10 @@ def start_login(*, listen: bool = True) -> str:
 
 
 def _expire(pending: _PendingLogin) -> None:
-    global _pending
     with _login_lock:
-        if _pending is pending:
+        if _pending_by_user.get(pending.user) is pending:
             _stop_server(pending)
-            _pending = None
+            del _pending_by_user[pending.user]
 
 
 # Called after a successful sign-in; app.llm uses it to switch to ChatGPT.
@@ -411,19 +416,19 @@ def complete_login(
     transport: httpx.BaseTransport | None = None,
 ) -> Credential:
     """Finish the pending sign-in from the callback's query parameters."""
-    global _pending
+    user = auth.current_user.get()
     with _login_lock:
-        pending = _pending
+        pending = _pending_by_user.get(user)
         if pending is None:
             raise ChatGptError("No ChatGPT sign-in is in progress; start again.")
         if time.time() - pending.started > LOGIN_TIMEOUT_SECONDS:
             _stop_server(pending)
-            _pending = None
+            del _pending_by_user[user]
             raise ChatGptError("The sign-in attempt timed out; start again.")
         if params.get("state") != pending.state:
             raise ChatGptError("This callback belongs to a different sign-in attempt.")
         # One shot: whatever happens next, this attempt is consumed.
-        _pending = None
+        del _pending_by_user[user]
 
     def fail(message: str) -> ChatGptError:
         pending.error = message
@@ -486,7 +491,7 @@ def complete_login_from_url(url: str, transport: httpx.BaseTransport | None = No
 def status() -> dict[str, Any]:
     cred = load_credential()
     with _login_lock:
-        pending = _pending
+        pending = _pending_by_user.get(auth.current_user.get())
     return {
         "signed_in": cred is not None,
         "email": cred.email if cred else "",

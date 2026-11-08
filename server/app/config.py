@@ -28,8 +28,13 @@ class Settings(BaseSettings):
     claude_code_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
     # The page's model choice and any API key entered there (written 0600).
     model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
-    # Sign-in accounts (python -m app.auth add <name>); sign-in is off while empty.
+    # Sign-in accounts (python -m app.auth add <name>); sign-in is off while empty
+    # unless registration is on. Each account's own model settings and sign-ins
+    # live in accounts/<name>/ next to this file.
     users_file: Path = REPO_ROOT / "server" / ".users.json"
+    # Invite-code sign-up (app.auth): sign-in is required, the first account
+    # signs up with the code hi_my_texdeck and then hands out codes.
+    registration: bool = False
 
     templates_dir: Path = REPO_ROOT / "templates"
     artifact_root: Path = REPO_ROOT / "artifacts"

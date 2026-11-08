@@ -89,6 +89,12 @@ class SignInBody(BaseModel):
     password: str
 
 
+class RegisterBody(BaseModel):
+    invite: str
+    username: str
+    password: str
+
+
 class ProviderBody(BaseModel):
     provider: str
 
@@ -127,15 +133,18 @@ app.add_middleware(
 )
 
 # Reachable without a session: checking and starting one.
-_OPEN_API_PATHS = {"/api/auth/session"}
+_OPEN_API_PATHS = {"/api/auth/session", "/api/auth/register"}
 
 
 @app.middleware("http")
 async def require_sign_in(request: Request, call_next: Any) -> Response:
     path = request.url.path
-    if path.startswith("/api/") and path not in _OPEN_API_PATHS and auth.enabled():
-        if auth.session_user(request.cookies.get(auth.COOKIE)) is None:
+    if auth.enabled():
+        user = auth.session_user(request.cookies.get(auth.COOKIE))
+        if path.startswith("/api/") and path not in _OPEN_API_PATHS and user is None:
             return JSONResponse({"detail": "Sign in first"}, status_code=401)
+        # Model settings, sign-ins and decks below are this account's own.
+        auth.current_user.set(user)
     response = await call_next(request)
     # PDF/TeX/frames change in place after every edit; without this the browser
     # heuristically reuses its stale copy on reload. ETag keeps revalidation cheap.
@@ -144,15 +153,25 @@ async def require_sign_in(request: Request, call_next: Any) -> Response:
     return response
 
 
+def _mine(meta: GenerationMeta) -> bool:
+    """With accounts, a deck belongs to who made it; decks from before
+    accounts existed belong to the admin."""
+    user = auth.current_user.get()
+    return user is None or meta.owner == user or (not meta.owner and auth.is_admin(user))
+
+
 def _load(gen_id: str) -> GenerationMeta:
     try:
         store.generation_dir(gen_id)
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
     try:
-        return store.load_meta(gen_id)
+        meta = store.load_meta(gen_id)
     except KeyError as e:
         raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
+    if not _mine(meta):
+        raise HTTPException(404, detail=f"Generation not found: {gen_id}")
+    return meta
 
 
 def _file(gen_id: str, name: str, missing: str) -> Path:
@@ -525,7 +544,24 @@ def health() -> dict[str, str]:
 
 
 def _session_status(request: Request) -> dict[str, Any]:
-    return {"enabled": auth.enabled(), "user": auth.session_user(request.cookies.get(auth.COOKIE))}
+    user = auth.session_user(request.cookies.get(auth.COOKIE))
+    return {"enabled": auth.enabled(), "user": user, "admin": auth.is_admin(user),
+            "registration": settings.registration}
+
+
+def _client(request: Request) -> str:
+    # Only Cloudflare reaches the deployed origin, and it sets CF-Connecting-IP.
+    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
+
+
+def _signed_in(request: Request, username: str, token: str) -> JSONResponse:
+    response = JSONResponse({"enabled": True, "user": username, "admin": auth.is_admin(username),
+                             "registration": settings.registration})
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(
+        auth.COOKIE, token, max_age=auth.SESSION_SECONDS, httponly=True, secure=https, samesite="lax",
+    )
+    return response
 
 
 @app.get("/api/auth/session")
@@ -535,26 +571,62 @@ def api_session(request: Request) -> dict[str, Any]:
 
 @app.post("/api/auth/session")
 def api_sign_in(body: SignInBody, request: Request) -> JSONResponse:
-    # Only Cloudflare reaches the deployed origin, and it sets CF-Connecting-IP.
-    client = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
     try:
-        token = auth.login(body.username, body.password, client)
+        token = auth.login(body.username, body.password, _client(request))
     except auth.AuthError as exc:
         status = 429 if "Too many" in str(exc) else 401
         raise HTTPException(status_code=status, detail=str(exc)) from exc
-    response = JSONResponse({"enabled": True, "user": body.username.strip()})
-    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    response.set_cookie(
-        auth.COOKIE, token, max_age=auth.SESSION_SECONDS, httponly=True, secure=https, samesite="lax",
-    )
-    return response
+    return _signed_in(request, body.username.strip(), token)
+
+
+@app.post("/api/auth/register")
+def api_register(body: RegisterBody, request: Request) -> JSONResponse:
+    try:
+        token = auth.register(body.invite, body.username, body.password, _client(request))
+    except auth.AuthError as exc:
+        status = 429 if "Too many" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return _signed_in(request, body.username.strip(), token)
 
 
 @app.delete("/api/auth/session")
 def api_sign_out() -> JSONResponse:
-    response = JSONResponse({"enabled": auth.enabled(), "user": None})
+    response = JSONResponse({"enabled": auth.enabled(), "user": None, "admin": False,
+                             "registration": settings.registration})
     response.delete_cookie(auth.COOKIE)
     return response
+
+
+def _require_admin() -> str:
+    user = auth.current_user.get()
+    if not auth.is_admin(user):
+        raise HTTPException(403, detail="Only the admin manages invite codes")
+    return user or ""
+
+
+@app.get("/api/auth/invites")
+def api_list_invites() -> list[dict[str, Any]]:
+    _require_admin()
+    return auth.list_invites()
+
+
+@app.post("/api/auth/invites")
+def api_create_invite() -> list[dict[str, Any]]:
+    try:
+        auth.create_invite(_require_admin())
+    except auth.AuthError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    return auth.list_invites()
+
+
+@app.delete("/api/auth/invites/{code}")
+def api_revoke_invite(code: str) -> list[dict[str, Any]]:
+    _require_admin()
+    try:
+        auth.revoke_invite(code)
+    except auth.AuthError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    return auth.list_invites()
 
 
 @app.get("/api/model")
@@ -674,7 +746,7 @@ def api_template_preview(key: str) -> FileResponse:
 
 @app.get("/api/generations")
 def api_list_generations() -> list[dict[str, Any]]:
-    return [asdict(m) for m in store.list_generations()]
+    return [asdict(m) for m in store.list_generations() if _mine(m)]
 
 
 async def _read_upload_capped(file: UploadFile) -> bytes:
@@ -735,6 +807,7 @@ async def api_create_generation(
         author=(author or "").strip(),
         institute=(institute or "").strip(),
         language=language,
+        owner=auth.current_user.get() or "",
     )
     gdir = store.generation_dir(meta.id)
     # source_XX.pdf index encodes reading order; original names live in meta.source_names
@@ -971,6 +1044,7 @@ def api_regenerate(gen_id: str) -> JSONResponse:
         author=old_meta.author,
         institute=old_meta.institute,
         language=old_meta.language,
+        owner=auth.current_user.get() or "",
     )
     new_dir = store.generation_dir(meta.id)
     for source in sources:
@@ -986,14 +1060,23 @@ def api_regenerate(gen_id: str) -> JSONResponse:
 
 @app.websocket("/ws/generations/{gen_id}")
 async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
-    if auth.enabled() and auth.session_user(websocket.cookies.get(auth.COOKIE)) is None:
-        await websocket.close(code=1008, reason="Sign in first")
-        return
+    if auth.enabled():
+        user = auth.session_user(websocket.cookies.get(auth.COOKIE))
+        if user is None:
+            await websocket.close(code=1008, reason="Sign in first")
+            return
+        auth.current_user.set(user)
     try:
         store.generation_dir(gen_id)
     except ValueError:
         await websocket.close(code=1008, reason="Invalid generation ID")
         return
+    try:
+        if not _mine(store.load_meta(gen_id)):
+            await websocket.close(code=1008, reason=f"Generation not found: {gen_id}")
+            return
+    except KeyError:
+        pass  # answered below
     await websocket.accept()
     if tasks.get(gen_id) is None:
         # No live job in this process: answer from disk instead of hanging forever

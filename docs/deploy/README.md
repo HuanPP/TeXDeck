@@ -18,13 +18,15 @@ TeX: install XeLaTeX, or download the [Tectonic](https://github.com/tectonic-typ
 
 Put settings in [`texdeck.env`](texdeck.env). Keep the data directory outside the code so redeploys leave it alone.
 
-## 2. An account
+## 2. Accounts
 
-Sign-in turns on as soon as one account exists. Until then anyone who reaches the port can use the app.
+To let people sign up with invite codes, set `TEXDECK_REGISTRATION=true` in `texdeck.env`. Sign-in is then required from the start. The first person to sign up uses the code `hi_my_texdeck`, which stops working once used, and becomes the admin; the admin hands out one-use codes from the Invites button at the top of the page (or `python -m app.auth invite` on the server). Do the first sign-up yourself right after starting the service.
+
+Without registration, sign-in turns on as soon as one account exists, and accounts are made on the server. Until then anyone who reaches the port can use the app.
 
 ```bash
 cd /srv/texdeck/app && set -a && . ../texdeck.env && set +a
-.venv/bin/python -m app.auth add <username>      # also: passwd, remove, list
+.venv/bin/python -m app.auth add <username>      # also: passwd, remove, invite, list
 ```
 
 ## 3. Services
@@ -48,4 +50,4 @@ Cloudflare keeps WebSockets open (generation progress uses one) and limits uploa
 
 ## Notes
 
-The model connection belongs to the server, not to an account: whatever ChatGPT sign-in, Claude Code login or API key is connected there is what every signed-in user runs on. Keep accounts to people who may use it. On a remote server, finish the ChatGPT sign-in by pasting the address the browser ends on back into the panel. Claude Code works if the service runs as a user whose `claude` CLI is signed in.
+Each account connects its own model and sees only its own decks: its ChatGPT sign-in, Claude sign-in and API key are kept in `accounts/<name>/` next to the users file. An API key in `texdeck.env` is not shared with accounts. Claude needs the `claude` CLI installed on the server; each account signs in to its own Claude (the CLI keeps that login under `accounts/<name>/claude`). On a remote server, finish the ChatGPT sign-in by pasting the address the browser ends on back into the panel. Decks made before accounts existed belong to the admin (the first account).

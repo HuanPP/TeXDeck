@@ -2,10 +2,12 @@ services:
   texdeck:
     build: .
     ports:
-      # Local only. Before exposing it, add an account so the page asks for a sign-in:
+      # Local only. Before exposing it, turn on invite sign-up below (first sign-up
+      # uses the code hi_my_texdeck) or add an account so the page asks for a sign-in:
       #   docker compose exec texdeck python -m app.auth add <username>
       - "127.0.0.1:8000:8000"
     environment:
+      TEXDECK_REGISTRATION: ${TEXDECK_REGISTRATION:-false}
       # Optional: you can also connect ChatGPT or enter an API key from the page.
       TEXDECK_LLM_API_KEY: ${TEXDECK_LLM_API_KEY:-}
       TEXDECK_LLM_BASE_URL: ${TEXDECK_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}

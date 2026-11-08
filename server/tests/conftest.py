@@ -111,6 +111,6 @@ def _isolated_claude_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(settings, "claude_code_command", str(tmp_path / "no-claude-here"))
     monkeypatch.setattr(settings, "model_state_file", tmp_path / "model-state.json")
     monkeypatch.setattr(settings, "users_file", tmp_path / "users.json")
-    monkeypatch.setattr(claude_code, "_auth_cache", None)
+    monkeypatch.setattr(claude_code, "_auth_cache", {})
     yield
     claude_code.cancel_login()
