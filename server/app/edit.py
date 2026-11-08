@@ -27,6 +27,13 @@ _BEGIN_FRAME_RE = re.compile(
 )
 _END_FRAME = r"\end{frame}"
 
+# Shared by single-slide edits and whole-deck revisions.
+KEEP_NOTES_RULE = (
+    "Keep each frame's \\note{...} speaker notes. When a change alters what a slide "
+    "says, update its note to match; when asked for notes, write them as \\note{...} "
+    "inside the frame, just before \\end{frame}."
+)
+
 
 def parse_frames(tex: str) -> list[Frame]:
     """Pair \\begin{frame} with \\end{frame} line by line; page starts as 0."""
@@ -160,6 +167,60 @@ def _forward_page(lines: dict[int, int], line_no: int) -> int:
     return 0
 
 
+_NOTE_RE = re.compile(r"\\note\s*(?:\[[^\]]*\])?\s*\{")
+_TEXT_CMDS = re.compile(
+    r"\\(?:textbf|textit|textsl|textsc|texttt|textrm|textsf|emph|alert|underline|"
+    r"structure|mathrm|mathbf|mathit|text|mbox|url)\s*\{([^{}]*)\}"
+)
+
+
+def frame_notes(frame_tex: str) -> str:
+    """Speaker notes of one frame: the \\note{...} bodies as plain text."""
+    notes = []
+    for m in _NOTE_RE.finditer(frame_tex):
+        depth, i = 1, m.end()
+        while i < len(frame_tex) and depth:
+            if frame_tex[i] == "\\":
+                i += 2
+                continue
+            depth += {"{": 1, "}": -1}.get(frame_tex[i], 0)
+            i += 1
+        if depth == 0:
+            notes.append(latex_to_text(frame_tex[m.end() : i - 1]))
+    return "\n\n".join(n for n in notes if n)
+
+
+_SYMBOLS = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε",
+    "theta": "θ", "lambda": "λ", "mu": "μ", "pi": "π", "rho": "ρ", "sigma": "σ", "tau": "τ",
+    "phi": "φ", "varphi": "φ", "psi": "ψ", "omega": "ω", "Gamma": "Γ", "Delta": "Δ",
+    "Theta": "Θ", "Lambda": "Λ", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "times": "×", "cdot": "·", "approx": "≈", "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥",
+    "neq": "≠", "pm": "±", "to": "→", "rightarrow": "→", "leftarrow": "←", "infty": "∞",
+    "in": "∈", "sum": "∑", "ldots": "…", "dots": "…", "%": "%",
+}
+
+
+def latex_to_text(src: str) -> str:
+    """Good-enough plain text for prose notes (not a LaTeX interpreter)."""
+    text = "\n".join(line for line in src.splitlines() if not _is_comment_line(line))
+    for _ in range(4):  # nested \textbf{\emph{..}}
+        text = _TEXT_CMDS.sub(r"\1", text)
+    text = re.sub(r"\\\\(\[[^\]]*\])?", "\n", text)
+    text = re.sub(r"\\par\b", "\n\n", text)
+    text = re.sub(r"\\([a-zA-Z]+)\b ?", lambda m: _SYMBOLS.get(m.group(1), m.group(0)), text)
+    text = re.sub(r"\\[a-zA-Z]+\*?\s*", "", text)  # remaining commands
+    # Unescaped markup first, then the escaped literals it would have eaten.
+    text = re.sub(r"(?<!\\)[${}]", "", text)
+    text = re.sub(r"(?<!\\)~", " ", text)
+    text = re.sub(r"\\([%&_#${}])", r"\1", text)
+    text = text.replace("---", "\u2014").replace("--", "\u2013")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def build_frame_edit_messages(
     frame: Frame,
     instruction: str,
@@ -171,7 +232,8 @@ def build_frame_edit_messages(
             "content": (
                 "You are a single-frame Beamer editor. Output only one complete "
                 "\\begin{frame}...\\end{frame} block. "
-                "No explanation, no markdown fences, and do not change anything outside this frame."
+                "No explanation, no markdown fences, and do not change anything outside this frame. "
+                + KEEP_NOTES_RULE
             ),
         },
         {

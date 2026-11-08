@@ -30,7 +30,7 @@ export type GenerationMeta = {
 export type SlideLanguage = "source" | "en" | "zh";
 
 export type TemplateItem = { key: string; name: string };
-export type FrameItem = { index: number; title: string; page: number; tex: string };
+export type FrameItem = { index: number; title: string; page: number; tex: string; notes: string };
 export type TaskEvent = {
   gen_id: string;
   status: TaskStatus;

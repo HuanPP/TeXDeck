@@ -70,6 +70,16 @@ LANGUAGE_RULES = {
     ),
 }
 
+# Speaker notes ride along in the source as \note{...}: Beamer leaves them out
+# of the PDF by default, the sidebar shows them and the PPTX carries them.
+NOTES_RULE = (
+    "Speaker notes: inside every content frame, just before \\end{frame}, add "
+    "\\note{...} with what the presenter says on that slide: 2-4 natural spoken "
+    "sentences in the output language that explain the slide rather than repeat its "
+    "bullets. Plain prose only (no lists, environments or display math). The title page "
+    "needs no note."
+)
+
 _TITLE_RE = re.compile(r"\\title\s*(?:\[[^\]]*\])?\s*\{")
 
 
@@ -190,6 +200,7 @@ def build_generation_messages(
     if request.instruction.strip():
         title_parts.append(f"Requirements: {request.instruction}")
     title_parts.append(LANGUAGE_RULES.get(request.language, LANGUAGE_RULES["source"]))
+    title_parts.append(NOTES_RULE)
     title_message = "\n".join(title_parts)
 
     if documents:

@@ -18,9 +18,11 @@ from . import deck, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
+    KEEP_NOTES_RULE,
     EditError,
     build_frame_edit_messages,
     extract_frame,
+    frame_notes,
     parse_frames,
     replace_frame,
     resolve_frame_pages,
@@ -381,7 +383,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
                 "content": (
                     "You are revising a complete XeLaTeX Beamer deck. "
                     "Output only the full revised, compilable document. "
-                    "No explanation, no markdown fences."
+                    "No explanation, no markdown fences. " + KEEP_NOTES_RULE
                 ),
             },
             {"role": "user", "content": template.main_tex},
@@ -741,6 +743,17 @@ def api_get_bundle(gen_id: str) -> FileResponse:
 _pptx_lock = threading.Lock()
 
 
+def _page_notes(gen_id: str) -> dict[int, str]:
+    """PDF page -> speaker notes, via the frames' synctex pages. Best effort:
+    a deck whose source cannot be parsed still exports, just without notes."""
+    tex_path = store.generation_dir(gen_id) / "main.tex"
+    try:
+        frames = resolve_frame_pages(parse_frames(tex_path.read_text(encoding="utf-8")), tex_path)
+    except (OSError, EditError):
+        return {}
+    return {f.page: n for f in frames if f.page and (n := frame_notes(f.tex))}
+
+
 @app.get("/api/generations/{gen_id}/deck.pptx")
 def api_get_pptx(gen_id: str) -> FileResponse:
     meta = _load(gen_id)
@@ -751,7 +764,7 @@ def api_get_pptx(gen_id: str) -> FileResponse:
     with _pptx_lock:
         if not out.is_file() or out.stat().st_mtime < pdf_path.stat().st_mtime:
             try:
-                pdf_to_pptx(pdf_path, out)
+                pdf_to_pptx(pdf_path, out, notes=_page_notes(gen_id))
             except PptxExportError as e:
                 raise HTTPException(422, detail=str(e)) from e
             for old in pdf_path.parent.glob("main*.pptx"):
@@ -772,7 +785,10 @@ def api_list_frames(gen_id: str) -> list[dict[str, Any]]:
         frames = resolve_frame_pages(parse_frames(tex_path.read_text(encoding="utf-8")), tex_path)
     except EditError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return [{"index": f.index, "title": f.title, "page": f.page, "tex": f.tex} for f in frames]
+    return [
+        {"index": f.index, "title": f.title, "page": f.page, "tex": f.tex, "notes": frame_notes(f.tex)}
+        for f in frames
+    ]
 
 
 @app.post("/api/generations/{gen_id}/frames/{index}/edit")

@@ -412,6 +412,21 @@ export default function Generation() {
                 <pre className="whitespace-pre-wrap break-all font-mono text-xs text-slate-600">{frame.tex}</pre>
               </div>
             )}
+            {frame && (
+              <div className="border-t border-[var(--color-border)] pt-4">
+                <p className="text-xs text-slate-500">Speaker notes</p>
+                {frame.notes ? (
+                  <p className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {frame.notes}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                    No notes for this slide. Ask for them below (e.g. "Write speaker notes for this
+                    slide"), or add them to every slide with Whole deck. Notes also go into the PPTX.
+                  </p>
+                )}
+              </div>
+            )}
             <form onSubmit={scope === "page" ? handleEdit : handleRefine}
               className="space-y-3 border-t border-[var(--color-border)] pt-4">
               <div className="flex items-center justify-between gap-2">

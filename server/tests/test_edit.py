@@ -164,3 +164,25 @@ def test_synctex_reader_requires_file(tmp_path: Path) -> None:
 
     with pytest.raises(EditError, match="synctex"):
         read_synctex_lines(tmp_path / "main.tex")
+
+
+def test_frame_notes_plain_text() -> None:
+    from app.edit import frame_notes
+
+    tex = (
+        "\\begin{frame}{Result}\n"
+        "\\begin{itemize}\\item a\\end{itemize}\n"
+        "% a comment line inside the frame\n"
+        "\\note{这一页讲 \\textbf{核心结论}：准确率提升 3\\%，成本 \\$5。\n"
+        "其中 $\\alpha$ 取 0.2~左右。\\\\ 第二行 -- 结束}\n"
+        "\\end{frame}"
+    )
+    assert frame_notes(tex) == "这一页讲 核心结论：准确率提升 3%，成本 $5。\n其中 α 取 0.2 左右。\n第二行 – 结束"
+
+
+def test_frame_notes_absent_or_nested_braces() -> None:
+    from app.edit import frame_notes
+
+    assert frame_notes("\\begin{frame}{X}\nbody\n\\end{frame}") == ""
+    tex = "\\begin{frame}\n\\note{Say {this} and \\emph{that}.}\n\\note[item]{Second.}\n\\end{frame}"
+    assert frame_notes(tex) == "Say this and that.\n\nSecond."

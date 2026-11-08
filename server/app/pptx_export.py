@@ -33,7 +33,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Pt
 
 # Bump when the output changes so cached exports are rebuilt.
-EXPORT_VERSION = 1
+EXPORT_VERSION = 2  # 2: speaker notes
 
 # Slides are scaled to PowerPoint's standard 13.333 in width so font sizes
 # read like normal slide sizes (a 9 pt beamer body becomes ~19 pt).
@@ -685,7 +685,8 @@ def _dominant_fonts(doc: fitz.Document) -> tuple[str, str, float]:
     return pick(latin, DEFAULT_LATIN), pick(cjk, DEFAULT_CJK), pick(sizes, 10.0)
 
 
-def pdf_to_pptx(pdf_path: Path, out_path: Path) -> None:
+def pdf_to_pptx(pdf_path: Path, out_path: Path, notes: dict[int, str] | None = None) -> None:
+    """notes: 1-based PDF page -> speaker notes for that slide."""
     try:
         doc = fitz.open("pdf", Path(pdf_path).read_bytes())
     except Exception as e:
@@ -710,6 +711,7 @@ def pdf_to_pptx(pdf_path: Path, out_path: Path) -> None:
 
     for page, blocks, keep, figures in pages:
         page_scale = SLIDE_WIDTH_PT / page.rect.width
+        note = (notes or {}).get(page.number + 1, "")
         rects = [r for b in blocks for r in b.glyph_rects]
         bg = _background_png(page, rects, keep, figures)
         slide = prs.slides.add_slide(blank)
@@ -727,6 +729,8 @@ def pdf_to_pptx(pdf_path: Path, out_path: Path) -> None:
             )
         for block in blocks:
             _add_text_block(slide, block, page_scale, default_latin, default_cjk)
+        if note:
+            slide.notes_slide.notes_text_frame.text = note
     pages.clear()
     doc.close()
 

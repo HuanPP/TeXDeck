@@ -89,3 +89,13 @@ def test_respace_letter_spaced_drops_guessed_spaces() -> None:
     assert text == "01 TITLE"
     assert tracking == 1.0
     assert len(xs) == len(text)
+
+
+def test_speaker_notes_go_to_the_matching_slide(tmp_path: Path) -> None:
+    pdf = tmp_path / "main.pdf"
+    out = tmp_path / "main.pptx"
+    _make_pdf(pdf)
+    pdf_to_pptx(pdf, out, notes={2: "Explain the result.\nThen pause."})
+    prs = Presentation(str(out))
+    assert not prs.slides[0].has_notes_slide
+    assert prs.slides[1].notes_slide.notes_text_frame.text == "Explain the result.\nThen pause."
