@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,12 @@ class Template:
     name: str
     dir: Path
     main_tex: str
+    # template.json as read from disk (a custom template carries its base's).
+    meta: dict[str, Any] = field(default_factory=dict)
+    # Files laid over the pack when it is copied (relative path -> bytes or a
+    # file to copy); custom templates put their palette and images here.
+    extra: dict[str, bytes | Path] = field(default_factory=dict)
+    base: str = ""  # the built-in pack a custom template derives from
 
 
 @dataclass(slots=True)
@@ -125,6 +131,15 @@ def list_templates() -> list[Template]:
 
 
 def get_template(key: str) -> Template:
+    """A built-in pack, or one of the current user's custom templates."""
+    from . import custom_templates  # imports this module
+
+    if custom_templates.is_custom_key(key):
+        return custom_templates.load(key)
+    return builtin_template(key)
+
+
+def builtin_template(key: str) -> Template:
     root = Path(settings.templates_dir)
     candidate = root / key
     meta_path = candidate / "template.json"
@@ -147,7 +162,7 @@ def _load_template_from_dir(directory: Path) -> Template:
     key = str(meta.get("key") or directory.name)
     name = str(meta.get("name") or key)
     main_tex = main_path.read_text(encoding="utf-8")
-    return Template(key=key, name=name, dir=directory, main_tex=main_tex)
+    return Template(key=key, name=name, dir=directory, main_tex=main_tex, meta=meta, base=key)
 
 
 def copy_template_bundle(template: Template, target_dir: Path) -> None:
@@ -166,6 +181,14 @@ def copy_template_bundle(template: Template, target_dir: Path) -> None:
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(src, dest)
+
+    for rel, content in template.extra.items():
+        dest = target_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, Path):
+            shutil.copyfile(content, dest)
+        else:
+            dest.write_bytes(content)
 
 
 def build_generation_messages(
@@ -717,15 +740,21 @@ def template_fingerprint(template: Template) -> str:
         h.update(b"\0")
         h.update(path.read_bytes())
         h.update(b"\0")
+    for rel, content in sorted(template.extra.items()):
+        h.update(b"extra:" + rel.encode("utf-8") + b"\0")
+        h.update(content.read_bytes() if isinstance(content, Path) else content)
+        h.update(b"\0")
     return h.hexdigest()[:12]
 
 
-def _compile_preview(tex_path: Path, work_dir: Path) -> None:
+def _compile_preview(tex_path: Path, work_dir: Path, passes: int = 0) -> None:
     """Compile the template's own main.tex; raise CompileError on failure.
 
+    passes=0 runs as many xelatex passes as page references need; drafts ask
+    for one, since a live preview does not need "page 3 of 12" right.
     Kept as a small seam so tests can substitute a fake PDF writer.
     """
-    passes = 2 if tex_engine() == "xelatex" else 1
+    passes = passes or (2 if tex_engine() == "xelatex" else 1)
     log = ""
     for _ in range(passes):
         ok, log = _run_xelatex(tex_path, work_dir)
@@ -762,6 +791,7 @@ def render_template_preview(template: Template) -> Path:
             doc = fitz.open(work_dir / "main.pdf")
             try:
                 page = doc.load_page(0)
+                layout = json.dumps(title_page_layout(page))
                 zoom = _PREVIEW_WIDTH_PX / max(page.rect.width, 1.0)
                 pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
                 tmp_png = cache_dir / f"{template.key}-{fingerprint}.png.tmp"
@@ -769,17 +799,68 @@ def render_template_preview(template: Template) -> Path:
                 pixmap.save(str(tmp_png), output="png")
             finally:
                 doc.close()
+            # Layout first: a published PNG always has its layout beside it.
+            cache_path.with_suffix(".json").write_text(layout, encoding="utf-8")
             # Atomic publish; readers never see a half-written PNG.
             tmp_png.replace(cache_path)
 
-        # Drop images of older template revisions (exact key + 12-hex-hash names
+        # Drop files of older template revisions (exact key + 12-hex-hash names
         # only, so a key that happens to be a prefix of another is never hit).
-        for sibling in cache_dir.glob(f"{template.key}-*.png"):
-            if sibling == cache_path:
+        for sibling in cache_dir.glob(f"{template.key}-*"):
+            if sibling.suffix not in (".png", ".json") or sibling.stem == cache_path.stem:
                 continue
             if re.fullmatch(r"[0-9a-f]{12}", sibling.stem[len(template.key) + 1 :]):
                 sibling.unlink(missing_ok=True)
     return cache_path
+
+
+def template_title_layout(template: Template) -> list[dict[str, Any]]:
+    """Text and logo boxes on the template's title page (see title_page_layout)."""
+    png = render_template_preview(template)
+    layout = png.with_suffix(".json")
+    if not layout.is_file():  # cached by an older version that kept no layout
+        png.unlink(missing_ok=True)
+        layout = render_template_preview(template).with_suffix(".json")
+    return json.loads(layout.read_text(encoding="utf-8"))
+
+
+def title_page_layout(page: fitz.Page) -> list[dict[str, Any]]:
+    """Boxes (fractions of the page) of the text and images drawn over the
+    background, so the background editor can show what will cover a picture."""
+    width, height = page.rect.width, page.rect.height
+    boxes: list[dict[str, Any]] = []
+
+    def add(kind: str, rect: fitz.Rect) -> None:
+        rect = rect & page.rect
+        if rect.is_empty:
+            return
+        boxes.append({
+            "kind": kind,
+            "x": round(rect.x0 / width, 4),
+            "y": round(rect.y0 / height, 4),
+            "w": round(rect.width / width, 4),
+            "h": round(rect.height / height, 4),
+        })
+
+    for block in page.get_text("blocks"):
+        if block[6] == 0 and str(block[4]).strip():
+            add("text", fitz.Rect(block[:4]))
+    for info in page.get_image_info():
+        rect = fitz.Rect(info["bbox"])
+        if rect.get_area() < 0.5 * page.rect.get_area():  # the background itself is not a guide
+            add("image", rect)
+    return boxes
+
+
+def render_template_pdf(template: Template) -> bytes:
+    """Build the template's sample deck uncached (custom-template drafts)."""
+    with tempfile.TemporaryDirectory(prefix="texdeck-draft-") as tmp:
+        work_dir = Path(tmp)
+        copy_template_bundle(template, work_dir)
+        tex_path = work_dir / "main.tex"
+        tex_path.write_text(template.main_tex, encoding="utf-8")
+        _compile_preview(tex_path, work_dir, passes=1)
+        return (work_dir / "main.pdf").read_bytes()
 
 
 def _strip_markdown_fences(text: str) -> str:

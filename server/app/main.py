@@ -31,7 +31,8 @@ from .edit import (
     resolve_frame_pages,
     text_span,
 )
-from . import auth, chatgpt, claude_code
+from . import auth, chatgpt, claude_code, custom_templates
+from .custom_templates import CustomTemplateError, TemplateNotFound
 from .llm import (
     LlmError,
     ProgressCallback,
@@ -722,26 +723,146 @@ def api_claude_cancel() -> dict[str, Any]:
 
 
 @app.get("/api/templates")
-def api_list_templates() -> list[dict[str, str]]:
-    return [{"key": t.key, "name": t.name} for t in deck.list_templates()]
+def api_list_templates() -> list[dict[str, Any]]:
+    builtin = [
+        {"key": t.key, "name": t.name, "customizable": bool(t.meta.get("customize"))}
+        for t in deck.list_templates()
+    ]
+    return builtin + custom_templates.list_custom()
+
+
+def _template_or_404(key: str) -> deck.Template:
+    try:
+        return deck.get_template(key)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+
+
+def _compile_failed(e: CompileError, what: str) -> HTTPException:
+    tail = e.log[-2000:] if e.log else ""
+    detail = f"{what}: {e}"
+    if tail:
+        detail += f"\n{tail}"
+    return HTTPException(503, detail=detail)
 
 
 @app.get("/api/templates/{key}/preview.png")
 def api_template_preview(key: str) -> FileResponse:
-    try:
-        template = deck.get_template(key)
-    except ValueError as e:
-        raise HTTPException(404, detail=str(e)) from e
+    template = _template_or_404(key)
     try:
         path = deck.render_template_preview(template)
     except CompileError as e:
-        tail = e.log[-2000:] if e.log else ""
-        detail = f"Template preview build failed: {e}"
-        if tail:
-            detail += f"\n{tail}"
-        raise HTTPException(503, detail=detail) from e
+        raise _compile_failed(e, "Template preview build failed") from e
     # Content hash lives server-side in the filename; clients must revalidate.
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/templates/{key}/layout")
+def api_template_layout(key: str) -> list[dict[str, Any]]:
+    """Text and logo boxes on the title page (guides in the background editor)."""
+    template = _template_or_404(key)
+    try:
+        return deck.template_title_layout(template)
+    except CompileError as e:
+        raise _compile_failed(e, "Template preview build failed") from e
+
+
+@app.get("/api/templates/{key}/images/{slot}")
+def api_template_image(key: str, slot: str) -> FileResponse:
+    """A template's background or logo as the deck will use it."""
+    template = _template_or_404(key)
+    rel = custom_templates.IMAGE_FILES.get(slot)
+    if rel is None:
+        raise HTTPException(404, detail=f"Unknown image: {slot}")
+    overlay = template.extra.get(rel)
+    path = overlay if isinstance(overlay, Path) else template.dir / rel
+    if not path.is_file():
+        raise HTTPException(404, detail=f"{template.name} has no {slot} image")
+    media = "image/jpeg" if path.suffix == ".jpg" else "image/png"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "no-cache"})
+
+
+# ---- template editor ----------------------------------------------------------------
+
+# Draft previews compile uncached; cap how many run at once.
+_draft_compiles = threading.BoundedSemaphore(2)
+
+
+def _draft(body: dict[str, Any]) -> custom_templates.Draft:
+    try:
+        return custom_templates.parse_draft(body)
+    except CustomTemplateError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.get("/api/template-bases")
+def api_template_bases() -> list[dict[str, Any]]:
+    return [custom_templates.base_info(t) for t in custom_templates.bases()]
+
+
+@app.post("/api/custom-templates/assets")
+async def api_upload_template_image(file: UploadFile = File(...)) -> dict[str, Any]:
+    data = await file.read(custom_templates.MAX_ASSET_BYTES + 1)
+    try:
+        return custom_templates.save_asset(data)
+    except CustomTemplateError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.get("/api/custom-templates/assets/{asset_id}")
+def api_template_asset(asset_id: str) -> FileResponse:
+    try:
+        path = custom_templates.asset_path(asset_id)
+    except CustomTemplateError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    media = "image/jpeg" if path.suffix == ".jpg" else "image/png"
+    # Content-addressed: the bytes behind an id never change.
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.post("/api/custom-templates/preview")
+def api_preview_custom_template(body: dict[str, Any]) -> Response:
+    """The sample deck with the editor's unsaved colours and images."""
+    draft = _draft(body)
+    with _draft_compiles:
+        try:
+            data = custom_templates.preview_pdf(draft)
+        except CompileError as e:
+            raise _compile_failed(e, "Preview build failed") from e
+    return Response(data, media_type="application/pdf", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/custom-templates")
+def api_create_custom_template(body: dict[str, Any]) -> dict[str, Any]:
+    return custom_templates.create(_draft(body))
+
+
+@app.get("/api/custom-templates/{key}")
+def api_get_custom_template(key: str) -> dict[str, Any]:
+    try:
+        return custom_templates.get(key)
+    except TemplateNotFound as e:
+        raise HTTPException(404, detail=str(e)) from e
+
+
+@app.put("/api/custom-templates/{key}")
+def api_update_custom_template(key: str, body: dict[str, Any]) -> dict[str, Any]:
+    draft = _draft(body)
+    try:
+        return custom_templates.update(key, draft)
+    except TemplateNotFound as e:
+        raise HTTPException(404, detail=str(e)) from e
+    except CustomTemplateError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.delete("/api/custom-templates/{key}", status_code=204)
+def api_delete_custom_template(key: str) -> Response:
+    try:
+        custom_templates.delete(key)
+    except TemplateNotFound as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return Response(status_code=204)
 
 
 @app.get("/api/generations")
@@ -777,6 +898,8 @@ async def api_create_generation(
 ) -> JSONResponse:
     try:
         template = deck.get_template(template_key)
+        if custom_templates.is_custom_key(template_key):
+            custom_templates.get(template_key)  # deleted ones only serve older decks
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
     if language not in deck.LANGUAGE_RULES:

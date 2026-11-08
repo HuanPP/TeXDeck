@@ -59,6 +59,8 @@ The choice and any API key entered there are saved next to the other app data. `
 
 The bundle has seven templates: Academic, Emerald, Graphite, Navy, Scholar, SimplePlus and Execushares. All of them handle Chinese. Licenses are listed in [NOTICE](NOTICE).
 
+To restyle one without touching LaTeX, click New template (or the palette icon on Academic, Emerald, Graphite, Navy or Scholar). The editor shows the sample deck recompiled as you change it. Pick the colours, upload a logo, and place any picture as the title-page background: move, scale, stretch and rotate it on the 16:9 page, with a blurred copy, a colour or the original background behind it. Saved templates are per account and only store the changes; the layout still comes from the built-in template.
+
 There is no prompt library. Each template's `main.tex` is a complete example deck, and the model copies it. To make your own, copy `templates/academic`, change `key` and `name` in `template.json`, and edit `main.tex`. Real charts in the example mean real charts in the output.
 
 ## Good to know

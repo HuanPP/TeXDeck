@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     registration: bool = False
 
     templates_dir: Path = REPO_ROOT / "templates"
+    # Templates made in the template editor when there are no accounts
+    # (with accounts each keeps its own in accounts/<name>/templates/).
+    custom_templates_dir: Path = REPO_ROOT / "server" / ".custom-templates"
     artifact_root: Path = REPO_ROOT / "artifacts"
     web_dist_dir: Path = REPO_ROOT / "web" / "dist"  # SPA build; served when present
 

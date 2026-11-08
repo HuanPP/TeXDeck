@@ -34,7 +34,7 @@ def test_list_templates_matches_real_disk(client: TestClient) -> None:
     assert len(body) == len(expected)
     assert {row["key"] for row in body} == {t.key for t in expected}
     for row in body:
-        assert set(row.keys()) == {"key", "name"}
+        assert set(row.keys()) == {"key", "name", "customizable"}
         assert isinstance(row["key"], str) and row["key"]
         assert isinstance(row["name"], str) and row["name"]
 

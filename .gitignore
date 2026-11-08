@@ -16,6 +16,7 @@ state/
 .chatgpt-auth.json
 .model-state.json
 .users.json
+.custom-templates/
 
 # Environment (keep .env.example)
 .env

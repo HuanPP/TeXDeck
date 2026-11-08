@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import { ChevronRight, FileUp, RotateCw, Trash2 } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ChevronRight, FileUp, Palette, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import {
   createGeneration,
   deleteGeneration,
@@ -26,6 +26,7 @@ const fmt = (iso: string) => {
 
 export default function Home() {
   const navigate = useNavigate();
+  const [search] = useSearchParams();
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [items, setItems] = useState<GenerationMeta[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -59,7 +60,9 @@ export default function Home() {
         const [tpls, gens] = await Promise.all([listTemplates(), listGenerations()]);
         setTemplates(tpls);
         setItems(gens);
-        if (tpls[0]) setTemplateKey(tpls[0].key);
+        // ?template= comes from the template editor's "Make a deck with it".
+        const wanted = tpls.find((t) => t.key === search.get("template")) ?? tpls[0];
+        if (wanted) setTemplateKey(wanted.key);
       } catch (e) {
         setLoadError(errMsg(e));
       }
@@ -256,10 +259,16 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
               {templates.map((t) => {
                 const selected = t.key === templateKey;
+                const editLink = t.custom
+                  ? { to: `/templates/${encodeURIComponent(t.key)}`, label: `Edit ${t.name}`, icon: <Pencil size={13} /> }
+                  : t.customizable
+                    ? { to: `/templates/new?base=${encodeURIComponent(t.key)}`, label: `Customize ${t.name}`, icon: <Palette size={13} /> }
+                    : null;
                 return (
-                  <button key={t.key} type="button" aria-pressed={selected}
+                  <div key={t.key} className="group relative">
+                  <button type="button" aria-pressed={selected}
                     onClick={() => setTemplateKey(t.key)}
-                    className={`overflow-hidden border bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
+                    className={`w-full overflow-hidden border bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
                       selected
                         ? "border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]"
                         : "border-[var(--color-border)] hover:border-slate-300"
@@ -277,12 +286,25 @@ export default function Home() {
                           } />
                       )}
                     </div>
-                    <div className={`truncate px-2 py-1.5 text-sm ${selected ? "bg-sky-50" : ""}`}>
+                    <div className={`truncate px-2 py-1.5 pr-8 text-sm ${selected ? "bg-sky-50" : ""}`}>
                       {t.name}
                     </div>
                   </button>
+                  {editLink && (
+                    <Link to={editLink.to} title={editLink.label} aria-label={editLink.label}
+                      className={`absolute bottom-1.5 right-1.5 flex h-6 w-6 items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:opacity-100 ${
+                        t.custom ? "" : "opacity-0 group-hover:opacity-100"}`}>
+                      {editLink.icon}
+                    </Link>
+                  )}
+                  </div>
                 );
               })}
+              <Link to="/templates/new"
+                className="flex min-h-28 flex-col items-center justify-center gap-1 border border-dashed border-slate-300 text-sm text-slate-500 no-underline hover:border-slate-400 hover:text-slate-700">
+                <Plus size={18} />
+                New template
+              </Link>
             </div>
           </div>
 

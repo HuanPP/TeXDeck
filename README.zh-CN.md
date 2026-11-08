@@ -59,6 +59,8 @@ cd web && npm install && npm run dev                      # 界面在 :5173
 
 内置七套模板：Academic、Emerald、Graphite、Navy、Scholar、SimplePlus、Execushares，都支持中文，许可证见 [NOTICE](NOTICE)。
 
+不写 LaTeX 也能改出自己的样式：点 New template（或在 Academic、Emerald、Graphite、Navy、Scholar 上点调色板图标）。编辑器边改边重新编译示例幻灯片，可以改配色、上传 logo，并把任意图片放到标题页背景上：在 16:9 页面里拖动、缩放、拉伸、旋转，空白处用模糊图、纯色或原背景填充。保存的模板按账号隔离，只存改动部分，版式仍来自内置模板。
+
 项目里没有提示词库。每套模板的 `main.tex` 都是一套完整的示例幻灯片，模型照着它写。做自己的模板：复制 `templates/academic`，改 `template.json` 里的 `key` 和 `name`，再改 `main.tex`。示例里放真图表，生成结果里就有真图表。
 
 ## 须知

@@ -1,4 +1,16 @@
-import type { FrameItem, GenerationMeta, ModelStatus, Provider, SlideLanguage, TemplateItem } from "./types";
+import type {
+  CustomTemplateSpec,
+  FrameItem,
+  GenerationMeta,
+  ImageSlot,
+  LayoutBox,
+  ModelStatus,
+  Provider,
+  SlideLanguage,
+  TemplateBase,
+  TemplateDraft,
+  TemplateItem,
+} from "./types";
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text();
@@ -119,8 +131,48 @@ export function refineGeneration(id: string, instruction: string): Promise<void>
   });
 }
 
-export const templatePreviewUrl = (key: string) =>
-  `/api/templates/${encodeURIComponent(key)}/preview.png`;
+export const templatePreviewUrl = (key: string, bust = "") =>
+  `/api/templates/${encodeURIComponent(key)}/preview.png${bust ? `?v=${encodeURIComponent(bust)}` : ""}`;
+export const templateImageUrl = (key: string, slot: ImageSlot) =>
+  `/api/templates/${encodeURIComponent(key)}/images/${slot}`;
+export const templateLayout = (key: string) =>
+  requestJson<LayoutBox[]>(`/api/templates/${encodeURIComponent(key)}/layout`);
+
+// ---- template editor ----
+export const listTemplateBases = () => requestJson<TemplateBase[]>("/api/template-bases");
+export const assetUrl = (id: string) => `/api/custom-templates/assets/${id}`;
+export function uploadTemplateImage(image: Blob): Promise<{ id: string; width: number; height: number }> {
+  const form = new FormData();
+  form.append("file", image, image.type === "image/jpeg" ? "image.jpg" : "image.png");
+  return requestJson("/api/custom-templates/assets", { method: "POST", body: form });
+}
+export async function previewTemplateDraft(draft: TemplateDraft, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch("/api/custom-templates/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+    signal,
+  });
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+  if (!res.ok) throw new Error(await readError(res));
+  return res.blob();
+}
+export const getCustomTemplate = (key: string) =>
+  requestJson<CustomTemplateSpec>(`/api/custom-templates/${encodeURIComponent(key)}`);
+export const createCustomTemplate = (draft: TemplateDraft) =>
+  requestJson<CustomTemplateSpec>("/api/custom-templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+export const updateCustomTemplate = (key: string, draft: TemplateDraft) =>
+  requestJson<CustomTemplateSpec>(`/api/custom-templates/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+export const deleteCustomTemplate = (key: string) =>
+  requestJson<void>(`/api/custom-templates/${encodeURIComponent(key)}`, { method: "DELETE" });
 export const pdfUrl = (id: string, bust = 0) =>
   `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;

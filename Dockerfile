@@ -34,7 +34,8 @@ RUN cd templates/navy \
 ENV TEXDECK_ARTIFACT_ROOT=/data/artifacts \
     TEXDECK_CHATGPT_AUTH_FILE=/data/state/chatgpt-auth.json \
     TEXDECK_MODEL_STATE_FILE=/data/state/model-state.json \
-    TEXDECK_USERS_FILE=/data/state/users.json
+    TEXDECK_USERS_FILE=/data/state/users.json \
+    TEXDECK_CUSTOM_TEMPLATES_DIR=/data/state/custom-templates
 VOLUME /data/artifacts /data/state
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--app-dir", "server", "--host", "0.0.0.0", "--port", "8000"]

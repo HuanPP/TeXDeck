@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 import Home from "./pages/Home";
 import Generation from "./pages/Generation";
+import TemplateEditor from "./pages/TemplateEditor";
 import ModelMenu from "./components/ModelMenu";
 import InvitesMenu from "./components/InvitesMenu";
 import { AuthGate, useAuth } from "./auth";
@@ -12,6 +13,12 @@ import { ModelProvider } from "./model";
 function GenerationRoute() {
   const { id } = useParams();
   return <Generation key={id} />;
+}
+
+// A fresh editor per template key, like GenerationRoute.
+function TemplateEditorRoute() {
+  const { key } = useParams();
+  return <TemplateEditor key={key} />;
 }
 
 function Account() {
@@ -48,6 +55,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/g/:id" element={<GenerationRoute />} />
+          <Route path="/templates/new" element={<TemplateEditor />} />
+          <Route path="/templates/:key" element={<TemplateEditorRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

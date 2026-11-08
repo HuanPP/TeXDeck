@@ -29,7 +29,35 @@ export type GenerationMeta = {
 
 export type SlideLanguage = "source" | "en" | "zh";
 
-export type TemplateItem = { key: string; name: string };
+export type TemplateItem = {
+  key: string;
+  name: string;
+  customizable?: boolean; // built-in pack the template editor can derive from
+  custom?: boolean; // made in the template editor
+  base?: string;
+};
+
+export type ImageSlot = "background" | "logo" | "trans_logo";
+
+export type TemplateBase = {
+  key: string;
+  name: string;
+  colors: { name: string; label: string; default: string }[];
+  images: Partial<Record<ImageSlot, string>>; // slot -> label
+};
+
+// What the editor sends: unchanged colours and images may be left out.
+export type TemplateDraft = {
+  base: string;
+  name: string;
+  colors: Record<string, string>;
+  images: Partial<Record<ImageSlot, string | null>>; // asset ids
+  editor: Record<string, unknown>;
+};
+
+export type CustomTemplateSpec = TemplateDraft & { key: string; created_at: string; updated_at: string };
+
+export type LayoutBox = { kind: "text" | "image"; x: number; y: number; w: number; h: number };
 export type FrameItem = { index: number; title: string; page: number; tex: string; notes: string };
 export type TaskEvent = {
   gen_id: string;
