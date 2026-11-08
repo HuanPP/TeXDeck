@@ -139,7 +139,8 @@ export const setProviderModel = (provider: Provider, model: string) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider, model }),
   });
-export const getChatGptModels = () => requestJson<{ models: string[] }>("/api/model/chatgpt/models");
+export const getChatGptModels = () =>
+  requestJson<{ models: { value: string; label: string }[] }>("/api/model/chatgpt/models");
 export const removeApiKey = () => requestJson<ModelStatus>("/api/model/api", { method: "DELETE" });
 
 export type Session = { enabled: boolean; user: string | null };

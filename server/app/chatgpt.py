@@ -534,12 +534,17 @@ def to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[s
 UsageSink = Callable[[int, int], None]
 
 
-_NOT_CHAT = ("audio", "realtime", "transcribe", "tts", "image", "search", "embedding", "moderation")
-_models_cache: tuple[str, float, list[str]] | None = None
+_models_cache: tuple[str, float, list[dict[str, str]]] | None = None
 
 
-def list_models(transport: httpx.BaseTransport | None = None) -> list[str]:
-    """Chat models this sign-in can use, newest first (cached for 10 minutes)."""
+def list_models(transport: httpx.BaseTransport | None = None) -> list[dict[str, str]]:
+    """Models this sign-in lists and that read images, in the server's order.
+
+    A sign-in token gets the Codex-style catalogue, not the platform one:
+    {"models": [{"slug", "display_name", "visibility", "priority",
+    "input_modalities", ...}]}. Hidden entries ("hide") are internal. Cached
+    for 10 minutes per token.
+    """
     global _models_cache
     cred = valid_credential()
     if _models_cache and _models_cache[0] == cred.access and time.time() - _models_cache[1] < 600:
@@ -552,14 +557,13 @@ def list_models(transport: httpx.BaseTransport | None = None) -> list[str]:
         raise ChatGptError(f"Could not load the model list: {exc}") from exc
     if res.status_code != 200:
         raise ChatGptError(f"Could not load the model list (HTTP {res.status_code})")
-    data = res.json().get("data") or []
     entries = [
-        (str(item.get("id")), int(item.get("created") or 0))
-        for item in data
-        if isinstance(item, dict) and str(item.get("id", "")).startswith("gpt-")
-        and not any(word in str(item.get("id")) for word in _NOT_CHAT)
+        item for item in res.json().get("models") or []
+        if isinstance(item, dict) and item.get("slug") and item.get("visibility") == "list"
+        and "image" in (item.get("input_modalities") or [])  # slides are built from page images
     ]
-    models = [mid for mid, _ in sorted(entries, key=lambda e: (-e[1], e[0]))]
+    entries.sort(key=lambda item: int(item.get("priority") or 0))
+    models = [{"value": str(m["slug"]), "label": str(m.get("display_name") or m["slug"])} for m in entries]
     _models_cache = (cred.access, time.time(), models)
     return models
 

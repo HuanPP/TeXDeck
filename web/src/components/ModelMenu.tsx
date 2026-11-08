@@ -81,7 +81,7 @@ export default function ModelMenu() {
   const [apiForm, setApiForm] = useState<{ api_key: string; base_url: string; model: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [chatgptModels, setChatgptModels] = useState<string[]>([]);
+  const [chatgptModels, setChatgptModels] = useState<{ value: string; label: string }[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef(0);
 
@@ -253,7 +253,7 @@ export default function ModelMenu() {
             detail={chatgpt.signed_in ? `Signed in${chatgpt.email ? ` as ${chatgpt.email}` : ""}` : "Not connected"}
             model={chatgpt.signed_in && (
               <ModelSelect value={chatgpt.model} disabled={busy}
-                options={chatgptModels.map((m) => ({ value: m, label: m }))}
+                options={chatgptModels}
                 onChange={(m) => pickModel("chatgpt", m)} />
             )}
             action={status.provider === "chatgpt" && chatgpt.signed_in ? inUse

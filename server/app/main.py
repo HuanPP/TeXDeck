@@ -509,7 +509,7 @@ def api_set_model(body: ModelBody) -> dict[str, Any]:
 
 
 @app.get("/api/model/chatgpt/models")
-def api_chatgpt_models() -> dict[str, list[str]]:
+def api_chatgpt_models() -> dict[str, list[dict[str, str]]]:
     try:
         return {"models": chatgpt.list_models()}
     except chatgpt.ChatGptError as exc:

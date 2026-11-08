@@ -298,25 +298,33 @@ def test_model_routes() -> None:
     assert http.delete("/api/auth/chatgpt").json()["chatgpt"]["signed_in"] is False
 
 
-def test_model_list_keeps_chat_models_newest_first() -> None:
+def test_model_list_keeps_listed_image_models_in_priority_order() -> None:
     _sign_in()
     calls: list[str] = []
+
+    def entry(slug: str, priority: int, visibility: str = "list", modalities=("text", "image")):
+        return {"slug": slug, "display_name": slug.upper(), "visibility": visibility,
+                "priority": priority, "input_modalities": list(modalities)}
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
         assert request.headers["authorization"] == "Bearer access-1"
-        return httpx.Response(200, json={"object": "list", "data": [
-            {"id": "gpt-6-sol", "created": 100},
-            {"id": "gpt-6.1-sol", "created": 200},
-            {"id": "gpt-6.1-terra", "created": 200},
-            {"id": "gpt-6-realtime", "created": 300},
-            {"id": "gpt-image-2", "created": 300},
-            {"id": "text-embedding-4", "created": 300},
+        return httpx.Response(200, json={"models": [
+            entry("gpt-6-sol", 4),
+            entry("gpt-6.1-sol", 1),
+            entry("gpt-reserve", 2, visibility="hide"),
+            entry("gpt-text-only", 3, modalities=("text",)),
+            entry("gpt-6.1-terra", 3),
         ]})
 
     transport = httpx.MockTransport(handler)
-    assert chatgpt.list_models(transport) == ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol"]
-    assert chatgpt.list_models(transport) == ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol"]
+    expected = [
+        {"value": "gpt-6.1-sol", "label": "GPT-6.1-SOL"},
+        {"value": "gpt-6.1-terra", "label": "GPT-6.1-TERRA"},
+        {"value": "gpt-6-sol", "label": "GPT-6-SOL"},
+    ]
+    assert chatgpt.list_models(transport) == expected
+    assert chatgpt.list_models(transport) == expected
     assert calls == ["https://api.openai.com/v1/models"]  # second call served from cache
 
 
