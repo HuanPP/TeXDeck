@@ -1,4 +1,27 @@
 {
   "key": "emerald",
-  "name": "Emerald"
+  "name": "Emerald",
+  "customize": {
+    "colors": [
+      {
+        "name": "maincolor",
+        "label": "Main",
+        "default": "#1A3B33"
+      },
+      {
+        "name": "airforceblue",
+        "label": "Accent",
+        "default": "#B08D4A"
+      },
+      {
+        "name": "inkblack",
+        "label": "Headings",
+        "default": "#21201C"
+      }
+    ],
+    "images": {
+      "background": "Title page background",
+      "logo": "Logo"
+    }
+  }
 }

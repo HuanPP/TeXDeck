@@ -1,4 +1,22 @@
 {
   "key": "academic",
-  "name": "Academic (Palatino)"
+  "name": "Academic (Palatino)",
+  "customize": {
+    "colors": [
+      {
+        "name": "maincolor",
+        "label": "Main",
+        "default": "#80393D"
+      },
+      {
+        "name": "airforceblue",
+        "label": "Accent",
+        "default": "#5C8AA8"
+      }
+    ],
+    "images": {
+      "background": "Title page background",
+      "logo": "Logo"
+    }
+  }
 }

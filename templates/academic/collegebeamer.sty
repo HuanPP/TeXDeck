@@ -61,9 +61,15 @@
 \geometry{paperwidth=16cm,paperheight=9cm}
 
 % logo (title page only -- content pages carry no logo in this pack)
-\pgfdeclareimage[width=0.09\paperwidth]{colorlogo}{\colorlogoPath}
-\pgfdeclareimage[width=0.09\paperwidth]{translogo}{\translogoPath}
-\pgfdeclareimage[width=0.05\paperwidth]{titlelogo}{\colorlogoPath}
+% Logos fit a box of at most #2 x #3 and keep their aspect ratio, so a logo
+% of any shape (a custom one included) stays inside its slot.
+\newcommand{\tddeclarelogo}[4]{%
+  \setbox0=\hbox{\includegraphics[width=#2,height=#3,keepaspectratio]{#4}}%
+  \edef\td@logo@args{[width=\the\wd0,height=\the\ht0]{#1}{#4}}%
+  \expandafter\pgfdeclareimage\td@logo@args}
+\tddeclarelogo{colorlogo}{2.5\dimexpr0.09\paperwidth\relax}{0.09\paperwidth}{\colorlogoPath}
+\tddeclarelogo{translogo}{2.5\dimexpr0.09\paperwidth\relax}{0.09\paperwidth}{\translogoPath}
+\tddeclarelogo{titlelogo}{2.5\dimexpr0.05\paperwidth\relax}{0.05\paperwidth}{\colorlogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
 \setbeamertemplate{headline}{} % no per-slide logo: classic university-press restraint
@@ -365,3 +371,6 @@
 % coloured texttt
 \newcommand{\ctexttt}[1]{\texttt{\textcolor{maincolor}{#1}}}
 \newcommand{\btexttt}[1]{\texttt{\textcolor{airforceblue}{#1}}}
+
+% Custom templates (TeXDeck template editor) override the palette here.
+\InputIfFileExists{brand-colors.tex}{}{}

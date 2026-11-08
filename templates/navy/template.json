@@ -1,4 +1,37 @@
 {
   "key": "navy",
-  "name": "Navy"
+  "name": "Navy",
+  "customize": {
+    "colors": [
+      {
+        "name": "maincolor",
+        "label": "Main",
+        "default": "#123456"
+      },
+      {
+        "name": "airforceblue",
+        "label": "Accent",
+        "default": "#5E7691"
+      },
+      {
+        "name": "bandsteel",
+        "label": "Band subtitle",
+        "default": "#A9B8C9"
+      },
+      {
+        "name": "reporttext",
+        "label": "Body text",
+        "default": "#28303D"
+      },
+      {
+        "name": "reportmuted",
+        "label": "Muted text",
+        "default": "#6E7988"
+      }
+    ],
+    "images": {
+      "background": "Title page background",
+      "trans_logo": "Logo on the title band"
+    }
+  }
 }

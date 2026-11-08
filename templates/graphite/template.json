@@ -1,4 +1,33 @@
 {
   "key": "graphite",
-  "name": "Graphite"
+  "name": "Graphite",
+  "customize": {
+    "colors": [
+      {
+        "name": "maincolor",
+        "label": "Main",
+        "default": "#19191C"
+      },
+      {
+        "name": "airforceblue",
+        "label": "Accent",
+        "default": "#5A5A60"
+      },
+      {
+        "name": "reporttext",
+        "label": "Body text",
+        "default": "#26262A"
+      },
+      {
+        "name": "reportmuted",
+        "label": "Muted text",
+        "default": "#6E6E74"
+      }
+    ],
+    "images": {
+      "background": "Title page background",
+      "logo": "Logo",
+      "trans_logo": "Logo on dark backgrounds"
+    }
+  }
 }

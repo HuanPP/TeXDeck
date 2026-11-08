@@ -1,4 +1,28 @@
 {
   "key": "scholar",
-  "name": "Scholar"
+  "name": "Scholar",
+  "customize": {
+    "colors": [
+      {
+        "name": "maincolor",
+        "label": "Main",
+        "default": "#3665C1"
+      },
+      {
+        "name": "airforceblue",
+        "label": "Block titles",
+        "default": "#5C8AA8"
+      },
+      {
+        "name": "morelightgray",
+        "label": "Block background",
+        "default": "#E6E6E6"
+      }
+    ],
+    "images": {
+      "background": "Title page background",
+      "logo": "Logo",
+      "trans_logo": "Logo on dark backgrounds"
+    }
+  }
 }

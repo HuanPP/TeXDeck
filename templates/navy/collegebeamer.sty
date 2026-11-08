@@ -122,12 +122,17 @@
 \geometry{paperwidth=16cm,paperheight=9cm}
 
 % logo
-\pgfdeclareimage[width=0.06\paperwidth]{colorlogo}{\colorlogoPath}
-\pgfdeclareimage[width=0.06\paperwidth]{translogo}{\translogoPath}
-% small knockout logo living inside the navy frametitle band (right end);
-% the PNG canvas is mostly transparent padding (glyph ~42% of height), so the
-% declared height over-scales to land the visible mark at ~0.37cm
-\pgfdeclareimage[height=0.88cm]{bandlogo}{\translogoPath}
+% Logos fit a box of at most #2 x #3 and keep their aspect ratio, so a logo
+% of any shape (a custom one included) stays inside its slot.
+\newcommand{\tddeclarelogo}[4]{%
+  \setbox0=\hbox{\includegraphics[width=#2,height=#3,keepaspectratio]{#4}}%
+  \edef\td@logo@args{[width=\the\wd0,height=\the\ht0]{#1}{#4}}%
+  \expandafter\pgfdeclareimage\td@logo@args}
+\tddeclarelogo{colorlogo}{2.5\dimexpr0.06\paperwidth\relax}{0.06\paperwidth}{\colorlogoPath}
+\tddeclarelogo{translogo}{2.5\dimexpr0.06\paperwidth\relax}{0.06\paperwidth}{\translogoPath}
+% small knockout logo living inside the navy frametitle band (right end):
+% the visible mark is 0.37cm high, a wide one may grow leftwards to 1.2cm
+\tddeclarelogo{bandlogo}{1.2cm}{0.37cm}{\translogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
 % no standalone headline: the brand mark sits inside the frametitle band,
@@ -341,7 +346,8 @@
         \usebeamerfont{frametitle}\insertframetitle%
         \hfill
         {\usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}\insertframesubtitle}%
-        \hspace{0.30cm}\smash{\raisebox{-0.34cm}{\pgfuseimage{bandlogo}}}%
+        % mark centred 0.114cm above the baseline, 0.9cm + 0.28cm from the right edge
+        \hspace{0.575cm}\smash{\raisebox{\dimexpr0.1137cm-0.5\height\relax}{\pgfuseimage{bandlogo}}}\hspace{0.282cm}%
     \end{beamercolorbox}%
     \vskip0.20cm%
 }
@@ -437,3 +443,6 @@
 \newcommand{\btexttt}[1]{\texttt{\textcolor{airforceblue}{#1}}}
 
 \ProvidesPackage{collegeBeamer}
+
+% Custom templates (TeXDeck template editor) override the palette here.
+\InputIfFileExists{brand-colors.tex}{}{}

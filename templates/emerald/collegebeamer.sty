@@ -146,9 +146,15 @@
 % EDITORIAL identity: the brand mark appears on the title page only (masthead
 % position, top-left). Content pages carry no logo — the oversized serif
 % frametitle and whitespace are the chrome.
-\pgfdeclareimage[width=0.055\paperwidth]{colorlogo}{\colorlogoPath}
-\pgfdeclareimage[width=0.055\paperwidth]{translogo}{\translogoPath}
-\pgfdeclareimage[width=0.045\paperwidth]{titlelogo}{\colorlogoPath}
+% Logos fit a box of at most #2 x #3 and keep their aspect ratio, so a logo
+% of any shape (a custom one included) stays inside its slot.
+\newcommand{\tddeclarelogo}[4]{%
+  \setbox0=\hbox{\includegraphics[width=#2,height=#3,keepaspectratio]{#4}}%
+  \edef\td@logo@args{[width=\the\wd0,height=\the\ht0]{#1}{#4}}%
+  \expandafter\pgfdeclareimage\td@logo@args}
+\tddeclarelogo{colorlogo}{2.5\dimexpr0.055\paperwidth\relax}{0.055\paperwidth}{\colorlogoPath}
+\tddeclarelogo{translogo}{2.5\dimexpr0.055\paperwidth\relax}{0.055\paperwidth}{\translogoPath}
+\tddeclarelogo{titlelogo}{2.5\dimexpr0.045\paperwidth\relax}{0.045\paperwidth}{\colorlogoPath}
 \newcommand{\@makelogo}{colorlogo}
 
 % empty headline: frametitle template below owns the top whitespace
@@ -466,3 +472,6 @@
 % coloured texttt
 \newcommand{\ctexttt}[1]{\texttt{\textcolor{maincolor}{#1}}}
 \newcommand{\btexttt}[1]{\texttt{\textcolor{airforceblue}{#1}}}
+
+% Custom templates (TeXDeck template editor) override the palette here.
+\InputIfFileExists{brand-colors.tex}{}{}
