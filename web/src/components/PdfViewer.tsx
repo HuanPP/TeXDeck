@@ -26,23 +26,15 @@ export default function PdfViewer({ file, onPageChange }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [containerWidth, setContainerWidth] = useState(0);
-  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const ignoreScroll = useRef(0);
-  const scrollRaf = useRef(0);
   const pageNumberRef = useRef(1);
-  const restoreRef = useRef<number | null>(null);
-  const renderedRef = useRef(0);
   pageNumberRef.current = pageNumber;
 
   useEffect(() => {
-    // New file (initial load or post-edit recompile): remember the current page
-    // and restore it once the new document renders, instead of jumping to page 1.
-    restoreRef.current = pageNumberRef.current;
-    renderedRef.current = 0;
+    // New file (initial load or post-edit recompile): keep the current page
+    // (clamped in handleDocumentLoad) instead of jumping back to page 1.
     setNumPages(0);
     setLoadError(null);
-    pageRefs.current.clear();
   }, [file]);
 
   useEffect(() => {
@@ -55,71 +47,40 @@ export default function PdfViewer({ file, onPageChange }: Props) {
     return () => observer.disconnect();
   }, [file, loadError]);
 
-  useEffect(() => () => cancelAnimationFrame(scrollRaf.current), []);
-
-  function scrollToPage(n: number, smooth: boolean) {
-    const container = scrollRef.current;
-    const el = pageRefs.current.get(n);
-    if (!container || !el) return;
-    const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTo({
-      top: container.scrollTop + delta - 16,
-      behavior: smooth ? "smooth" : "auto",
-    });
-  }
-
   function goToPage(next: number) {
     const n = Math.max(1, numPages ? Math.min(next, numPages) : next);
+    if (n === pageNumberRef.current) return;
     setPageNumber(n);
     onPageChange?.(n);
-    ignoreScroll.current = Date.now() + 400;
-    scrollToPage(n, true);
+    scrollRef.current?.scrollTo({ top: 0, left: 0 });
   }
 
-  function handleScroll() {
-    if (scrollRaf.current) return;
-    scrollRaf.current = requestAnimationFrame(() => {
-      scrollRaf.current = 0;
-      if (Date.now() < ignoreScroll.current || !scrollRef.current || !numPages) return;
-      restoreRef.current = null; // user scrolled: don't yank the view afterwards
-      const top = scrollRef.current.getBoundingClientRect().top;
-      let best = 1;
-      let bestDist = Infinity;
-      for (let i = 1; i <= numPages; i++) {
-        const el = pageRefs.current.get(i);
-        if (!el) continue;
-        const dist = Math.abs(el.getBoundingClientRect().top - top - 24);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = i;
-        }
+  // Left/Right (and PageUp/PageDown) flip pages unless the user is typing.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        goToPage(pageNumberRef.current - 1);
+      } else if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        goToPage(pageNumberRef.current + 1);
       }
-      if (best !== pageNumber) {
-        setPageNumber(best);
-        onPageChange?.(best);
-      }
-    });
-  }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   function handleDocumentLoad(pdf: { numPages: number }) {
     setNumPages(pdf.numPages);
-    if (restoreRef.current === null) return;
-    const target = Math.min(restoreRef.current, pdf.numPages);
-    restoreRef.current = target;
+    const target = Math.min(pageNumberRef.current, pdf.numPages);
     if (target !== pageNumberRef.current) {
       // Old page no longer exists (deck shrank): clamp and tell the sidebar.
       setPageNumber(target);
       onPageChange?.(target);
     }
-  }
-
-  function handlePageRender() {
-    renderedRef.current += 1;
-    if (restoreRef.current === null || !numPages || renderedRef.current < numPages) return;
-    const target = Math.min(restoreRef.current, numPages);
-    restoreRef.current = null;
-    ignoreScroll.current = Date.now() + 600;
-    scrollToPage(target, false);
   }
 
   if (!file) {
@@ -160,19 +121,16 @@ export default function PdfViewer({ file, onPageChange }: Props) {
           disabled={zoom >= MAX_ZOOM}
           onClick={() => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}>+</button>
       </div>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4" onScroll={handleScroll}>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
         <Document file={file} onLoadSuccess={handleDocumentLoad}
           onLoadError={(err) => setLoadError(err.message)}
           loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
-          <div className="mx-auto flex w-fit flex-col gap-4">
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
-              <div key={n} ref={(el) => { if (el) pageRefs.current.set(n, el); else pageRefs.current.delete(n); }}
-                className="border border-[var(--color-border)] bg-white shadow-sm">
-                <Page pageNumber={n} width={pageWidth} renderTextLayer renderAnnotationLayer
-                  onRenderSuccess={handlePageRender} />
-              </div>
-            ))}
-          </div>
+          {numPages > 0 && (
+            <div className="mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm">
+              <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
+                renderTextLayer renderAnnotationLayer />
+            </div>
+          )}
         </Document>
       </div>
     </div>
