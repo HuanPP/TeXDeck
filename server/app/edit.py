@@ -302,9 +302,9 @@ def locate_line(tex: str, text: str, frame: Frame | None = None) -> tuple[int, s
     """Source line (1-based number, raw text) that typesets `text`, clicked on a slide.
 
     Lines are compared as plain text (markup stripped, whitespace ignored) by
-    their longest common run with the clicked text, so a PDF line that is
-    only part of a wrapped source line, or a line with inline math, still
-    matches. The frame shown on the page is searched first; the whole file
+    the characters they share with the clicked text in runs of two or more,
+    so a PDF line that is only part of a wrapped source line, or a line with
+    inline math, still matches. The frame shown on the page is searched first; the whole file
     is the fallback (title page fields live in the preamble).
     """
     target = re.sub(r"\s+", "", text)
@@ -313,8 +313,8 @@ def locate_line(tex: str, text: str, frame: Frame | None = None) -> tuple[int, s
     lines = tex.splitlines()
     need = min(len(target), max(2, int(len(target) * 0.6)))
 
-    def best(numbers: range) -> tuple[int, int] | None:
-        found: tuple[int, int] | None = None
+    def best(numbers: range) -> tuple[int, tuple[int, int]] | None:
+        found: tuple[int, tuple[int, int]] | None = None
         for n in numbers:
             line = lines[n - 1]
             if not line.strip() or _is_comment_line(line):
@@ -323,9 +323,12 @@ def locate_line(tex: str, text: str, frame: Frame | None = None) -> tuple[int, s
             if not flat:
                 continue
             m = difflib.SequenceMatcher(None, target, flat, autojunk=False)
-            size = m.find_longest_match(0, len(target), 0, len(flat)).size
-            if size >= need and (found is None or size > found[1]):
-                found = (n, size)
+            # Matched runs add up, so a sentence broken by inline math still counts.
+            size = sum(b.size for b in m.get_matching_blocks() if b.size >= 2)
+            # Ties go to the line whose length is closest to the clicked text.
+            score = (size, -abs(len(flat) - len(target)))
+            if size >= need and (found is None or score > found[1]):
+                found = (n, score)
         return found
 
     hit = best(range(frame.start_line, frame.end_line + 1)) if frame else None
@@ -341,3 +344,209 @@ def replace_line(tex: str, line_no: int, old: str, new: str) -> str:
         raise EditError("The source changed since you clicked; click the text again")
     lines[line_no - 1] = new
     return "\n".join(lines)
+
+
+# --- Plain-text editing of one source line ---------------------------------
+#
+# A clicked line is shown as the words on the slide, not as LaTeX: the line is
+# split into literal characters and markup, the run of characters the user
+# clicked is found, and edits to that run are written back character by
+# character so the markup around and inside it (\item, \title{..}, \textbf{..})
+# stays put.
+
+# Font/emphasis wrappers whose one argument is ordinary slide text.
+_WRAPPERS = frozenset(
+    "textbf textit emph alert structure underline texttt textsf textrm textsc "
+    "textup textsl textmd textnormal mbox".split()
+)
+_ESCAPED = "%&#_${} "  # \% \& ... and "\ " typeset as the character itself
+_SPACES = frozenset("quad qquad enspace enskip thinspace space".split())
+
+
+@dataclass
+class _Tok:
+    kind: str  # "char", "open" (wrapper start), "close" (wrapper end), "markup"
+    start: int
+    end: int
+    char: str = ""
+
+
+def _tokenize_line(line: str) -> list[_Tok]:
+    toks: list[_Tok] = []
+    stack: list[str] = []  # "wrap" / "brace" / "bracket" for open groups
+    i, n = 0, len(line)
+    after_cmd = False  # a "[" right after a command name opens its optional argument
+    while i < n:
+        c = line[i]
+        if c == "%":
+            toks.append(_Tok("markup", i, n))
+            break
+        if c == "\\" and i + 1 < n:
+            env = re.match(r"\\(begin|end)\{[^{}]*\}", line[i:])
+            if env:  # the environment name is not slide text
+                toks.append(_Tok("markup", i, i + env.end()))
+                i, after_cmd = i + env.end(), True
+                continue
+            m = re.match(r"\\([a-zA-Z]+)\*?", line[i:])
+            if m:
+                name, j = m.group(1), i + m.end()
+                if name in _SPACES:
+                    toks.append(_Tok("char", i, j, " "))
+                    i, after_cmd = j, False
+                    continue
+                if name in _WRAPPERS and j < n and line[j] == "{":
+                    toks.append(_Tok("open", i, j + 1))
+                    stack.append("wrap")
+                    i, after_cmd = j + 1, False
+                    continue
+                toks.append(_Tok("markup", i, j))
+                i, after_cmd = j, True
+                continue
+            if line[i + 1] == "(":
+                close = line.find("\\)", i + 2)
+                end = n if close < 0 else close + 2
+                toks.append(_Tok("markup", i, end))
+                i, after_cmd = end, False
+                continue
+            nxt = line[i + 1]
+            if nxt == "\\":  # line break, maybe with [skip] after it
+                toks.append(_Tok("char", i, i + 2, "\n"))
+                i, after_cmd = i + 2, True
+                continue
+            if nxt in _ESCAPED or nxt in ",;:!":
+                toks.append(_Tok("char", i, i + 2, nxt if nxt in _ESCAPED else " "))
+            else:
+                toks.append(_Tok("markup", i, i + 2))
+            i, after_cmd = i + 2, False
+            continue
+        if c == "$":
+            j = i + 1
+            while j < n and not (line[j] == "$" and line[j - 1] != "\\"):
+                j += 1
+            end = min(n, j + 1)
+            if line[i:i + 2] == "$$":
+                close = line.find("$$", i + 2)
+                end = n if close < 0 else close + 2
+            toks.append(_Tok("markup", i, end))
+            i, after_cmd = end, False
+            continue
+        if c == "{":
+            toks.append(_Tok("markup", i, i + 1))
+            stack.append("brace")
+        elif c == "}":
+            kind = stack.pop() if stack and stack[-1] != "bracket" else "brace"
+            toks.append(_Tok("close" if kind == "wrap" else "markup", i, i + 1))
+            i, after_cmd = i + 1, True  # \cmd{..}[..] is rare, but {..}{..} chains are common
+            continue
+        elif c == "[" and after_cmd:
+            toks.append(_Tok("markup", i, i + 1))
+            stack.append("bracket")
+        elif c == "]" and stack and stack[-1] == "bracket":
+            stack.pop()
+            toks.append(_Tok("markup", i, i + 1))
+            i, after_cmd = i + 1, True
+            continue
+        elif c == "&":  # table column separator
+            toks.append(_Tok("markup", i, i + 1))
+        elif c == "~":
+            toks.append(_Tok("char", i, i + 1, " "))
+        else:
+            toks.append(_Tok("char", i, i + 1, c))
+        i, after_cmd = i + 1, False
+    return toks
+
+
+@dataclass
+class TextSpan:
+    start: int  # source offsets of the editable part of the line
+    end: int
+    text: str  # what the editor shows
+    raw: bool  # True: `text` is LaTeX (the run has math or other commands)
+
+
+def text_span(line: str, clicked: str) -> TextSpan:
+    """The part of `line` that typesets `clicked`, as plain text when possible.
+
+    The run starts at the first and ends at the last character matching the
+    clicked text, then grows over neighbouring characters and emphasis
+    wrappers until it meets other markup, so a wrapped PDF line still edits
+    the whole sentence and \\title[short]{long} edits only the long title.
+    If the run contains math or another command, that run's LaTeX source is
+    returned (raw); if it is not a balanced piece of the line, the whole line.
+    """
+    whole = TextSpan(0, len(line), line, True)
+    toks = _tokenize_line(line)
+    chars = [k for k, t in enumerate(toks) if t.kind == "char" and not t.char.isspace()]
+    target = "".join(c.casefold()[:1] for c in re.sub(r"\s+", "", clicked))
+    flat = "".join(toks[k].char.casefold()[:1] for k in chars)
+    if not target or not flat:
+        return whole
+    blocks = difflib.SequenceMatcher(None, target, flat, autojunk=False).get_matching_blocks()
+    hit = [b for b in blocks if b.size >= 2] or [b for b in blocks if b.size]
+    if not hit:
+        return whole
+    a, b = chars[hit[0].b], chars[hit[-1].b + hit[-1].size - 1]
+    def inside(t: _Tok) -> bool:  # what a sentence may run through: text, emphasis, math
+        return t.kind != "markup" or line[t.start] == "$" or line.startswith("\\(", t.start)
+
+    while a > 0 and inside(toks[a - 1]):
+        a -= 1
+    while b + 1 < len(toks) and inside(toks[b + 1]):
+        b += 1
+    while a <= b and toks[a].kind == "char" and toks[a].char.isspace():
+        a += 1
+    while b >= a and toks[b].kind == "char" and toks[b].char.isspace():
+        b -= 1
+    start, end = toks[a].start, toks[b].end
+    if all(t.kind != "markup" for t in toks[a:b + 1]):
+        return TextSpan(start, end, "".join(t.char for t in toks[a:b + 1]), False)
+    # Math or other commands inside: show just this sentence's source, if it
+    # is a self-contained piece of the line.
+    depth = 0
+    for t in toks[a:b + 1]:
+        src = line[t.start:t.end]
+        if t.kind in ("open", "close") or src in "{}[]" and t.kind == "markup":
+            depth += 1 if src.endswith(("{", "[")) else -1
+            if depth < 0:
+                return whole
+    return TextSpan(start, end, line[start:end], True) if depth == 0 else whole
+
+
+_ESCAPES = {
+    "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "%": r"\%", "&": r"\&",
+    "#": r"\#", "_": r"\_", "$": r"\$", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def escape_text(text: str) -> str:
+    """Plain text as LaTeX; a new line becomes a line break."""
+    lines = re.split(r"[ \t]*\n\s*", text)
+    return "\\\\ ".join("".join(_ESCAPES.get(c, c) for c in part) for part in lines)
+
+
+def replace_text_span(line: str, start: int, end: int, new_text: str) -> str:
+    """Write an edited plain-text run back into its source line.
+
+    Characters are diffed against the run as shown; only changed characters
+    are touched, so emphasis around unchanged words survives and new text
+    joins the group of the character before it. New text is escaped.
+    """
+    if not 0 <= start <= end <= len(line):
+        raise EditError("The source changed since you clicked; click the text again")
+    toks = [t for t in _tokenize_line(line) if t.kind == "char" and start <= t.start and t.end <= end]
+    old_text = "".join(t.char for t in toks)
+    edits: list[tuple[int, int, str]] = []
+    ops = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False).get_opcodes()
+    for op, i1, i2, j1, j2 in ops:
+        if op == "equal":
+            continue
+        insert = escape_text(new_text[j1:j2])
+        if i1 == i2:  # pure insertion: after the previous character, else before the next
+            at = toks[i1 - 1].end if i1 > 0 else (toks[0].start if toks else start)
+            edits.append((at, at, insert))
+            continue
+        edits.append((toks[i1].start, toks[i1].end, insert))
+        edits.extend((t.start, t.end, "") for t in toks[i1 + 1:i2])
+    for s, e, rep in sorted(edits, key=lambda x: (x[0], x[1]), reverse=True):
+        line = line[:s] + rep + line[e:]
+    return line

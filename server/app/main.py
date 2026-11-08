@@ -27,7 +27,9 @@ from .edit import (
     parse_frames,
     replace_frame,
     replace_line,
+    replace_text_span,
     resolve_frame_pages,
+    text_span,
 )
 from . import auth, chatgpt, claude_code
 from .llm import (
@@ -60,7 +62,12 @@ class LocateBody(BaseModel):
 class LineEditBody(BaseModel):
     line: int
     old: str
-    new: str
+    # Either the whole new line, or new plain text for old[start:end] (escaped
+    # and written back around the markup by the server).
+    new: str | None = None
+    start: int | None = None
+    end: int | None = None
+    text: str | None = None
 
 
 class RefineBody(BaseModel):
@@ -884,22 +891,30 @@ def api_locate_text(gen_id: str, body: LocateBody) -> dict[str, Any]:
     if hit is None:
         raise HTTPException(404, detail="Could not find this text in the LaTeX source")
     line, source = hit
-    return {"line": line, "source": source}
+    span = text_span(source, body.text)
+    return {"line": line, "source": source, "start": span.start, "end": span.end,
+            "text": span.text, "raw": span.raw}
 
 
 @app.post("/api/generations/{gen_id}/source-line")
 def api_edit_source_line(gen_id: str, body: LineEditBody) -> Response:
     _load(gen_id)
     tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
-    if body.new == body.old:
-        raise HTTPException(400, detail="Nothing changed")
     try:
-        replace_line(tex_path.read_text(encoding="utf-8"), body.line, body.old, body.new)
+        if body.text is not None and body.start is not None and body.end is not None:
+            new = replace_text_span(body.old, body.start, body.end, body.text)
+        elif body.new is not None:
+            new = body.new
+        else:
+            raise HTTPException(422, detail="Send the new line or the new text")
+        if new == body.old:
+            raise HTTPException(400, detail="Nothing changed")
+        replace_line(tex_path.read_text(encoding="utf-8"), body.line, body.old, new)
     except EditError as e:
         raise HTTPException(409, detail=str(e)) from e
 
     def job(progress: ProgressCallback) -> None:
-        _run_line_edit(gen_id, body.line, body.old, body.new, progress)
+        _run_line_edit(gen_id, body.line, body.old, new, progress)
 
     try:
         tasks.start(gen_id, job)
