@@ -65,3 +65,13 @@ p { line-height: 1.7; }
   background: var(--color-surface);
   border-color: #cbd5e1;
 }
+
+/* Click-to-edit on the PDF preview: the text layer is transparent, so show
+   what is clickable on hover. */
+.deck-editable .textLayer span {
+  cursor: text;
+}
+.deck-editable .textLayer span:hover {
+  background: rgb(54 101 193 / 0.14);
+  border-radius: 2px;
+}

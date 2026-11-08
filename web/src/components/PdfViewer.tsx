@@ -16,12 +16,47 @@ const MAX_FIT_WIDTH = 1100;
 const MAX_PAGE_WIDTH = 2000;
 const THUMB_WIDTH = 104;
 
+export type TextClick = { text: string; page: number; rect: DOMRect };
+
 type Props = {
   file: string | null;
   onPageChange?: (page: number) => void;
+  // Called when the user clicks (not drag-selects) text on the page.
+  onTextClick?: (click: TextClick) => void;
 };
 
-export default function PdfViewer({ file, onPageChange }: Props) {
+// The visible line around a clicked text-layer span. pdf.js splits a line into
+// several spans (font changes, inline math); join the neighbours on the same
+// baseline, but stop at wide gaps so the other column is not pulled in.
+function lineAround(span: HTMLElement): { text: string; rect: DOMRect } {
+  const layer = span.closest(".textLayer");
+  const base = span.getBoundingClientRect();
+  if (!layer) return { text: span.textContent ?? "", rect: base };
+  const mid = (base.top + base.bottom) / 2;
+  const row = Array.from(layer.querySelectorAll<HTMLElement>("span"))
+    .filter((s) => !s.querySelector("span") && (s.textContent ?? "").trim())
+    .map((s) => ({ s, r: s.getBoundingClientRect() }))
+    .filter(({ r }) => r.top <= mid && r.bottom >= mid)
+    .sort((a, b) => a.r.left - b.r.left);
+  const at = row.findIndex(({ s }) => s === span || s.contains(span));
+  if (at < 0) return { text: span.textContent ?? "", rect: base };
+  const gap = base.height * 1.5;
+  let lo = at;
+  let hi = at;
+  while (lo > 0 && row[lo].r.left - row[lo - 1].r.right < gap) lo--;
+  while (hi < row.length - 1 && row[hi + 1].r.left - row[hi].r.right < gap) hi++;
+  const part = row.slice(lo, hi + 1);
+  const left = Math.min(...part.map(({ r }) => r.left));
+  const right = Math.max(...part.map(({ r }) => r.right));
+  const top = Math.min(...part.map(({ r }) => r.top));
+  const bottom = Math.max(...part.map(({ r }) => r.bottom));
+  return {
+    text: part.map(({ s }) => s.textContent ?? "").join(""),
+    rect: new DOMRect(left, top, right - left, bottom - top),
+  };
+}
+
+export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -144,7 +179,16 @@ export default function PdfViewer({ file, onPageChange }: Props) {
         loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
           {numPages > 0 && (
-            <div className="mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm">
+            <div className={`mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick ? " deck-editable" : ""}`}
+              onClick={(e) => {
+                if (!onTextClick) return;
+                const selection = window.getSelection();
+                if (selection && !selection.isCollapsed) return; // selecting to copy, not editing
+                const span = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span");
+                if (!span || !(span.textContent ?? "").trim()) return;
+                const { text, rect } = lineAround(span);
+                onTextClick({ text, page: Math.min(pageNumber, numPages), rect });
+              }}>
               <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
                 renderTextLayer renderAnnotationLayer />
             </div>

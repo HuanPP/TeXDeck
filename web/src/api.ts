@@ -82,6 +82,23 @@ export function editFrame(id: string, index: number, instruction: string): Promi
   });
 }
 
+// Direct text fixes from the preview: find the source line behind clicked
+// text, then replace that line (recompiles without the model).
+export const locateText = (id: string, page: number, text: string) =>
+  requestJson<{ line: number; source: string }>(`/api/generations/${id}/locate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ page, text }),
+  });
+
+export function editSourceLine(id: string, line: number, old: string, next: string): Promise<void> {
+  return requestJson(`/api/generations/${id}/source-line`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ line, old, new: next }),
+  });
+}
+
 export const regenerateGeneration = (id: string) =>
   requestJson<{ id: string }>(`/api/generations/${id}/regenerate`, { method: "POST" });
 

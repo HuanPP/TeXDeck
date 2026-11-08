@@ -4,8 +4,10 @@ import { Download, FileText, Package, Presentation, RotateCw } from "lucide-reac
 import {
   bundleUrl,
   editFrame,
+  editSourceLine,
   getFrames,
   getGeneration,
+  locateText,
   logUrl,
   pdfUrl,
   pptxUrl,
@@ -13,7 +15,8 @@ import {
   regenerateGeneration,
   texUrl,
 } from "../api";
-import PdfViewer from "../components/PdfViewer";
+import PdfViewer, { type TextClick } from "../components/PdfViewer";
+import QuickEdit, { type QuickEditState } from "../components/QuickEdit";
 import Segmented from "../components/Segmented";
 import StatusBadge from "../components/StatusBadge";
 import { useModel } from "../model";
@@ -83,6 +86,42 @@ export default function Generation() {
   const metaUpdated = meta?.updated_at;
   const progressRunning = progress?.status === "running";
   const busy = editing || progressRunning;
+
+  // Click-to-edit: text clicked on the preview opens its LaTeX source line.
+  const [quick, setQuick] = useState<QuickEditState | null>(null);
+  const quickSeq = useRef(0);
+  const closeQuick = useCallback(() => setQuick(null), []);
+
+  function handleTextClick({ text, page: clickedPage, rect }: TextClick) {
+    if (!id || busy) return;
+    const seq = ++quickSeq.current;
+    setQuick({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY, status: "locating", value: "" });
+    locateText(id, clickedPage, text).then(
+      (hit) => {
+        if (seq !== quickSeq.current) return;
+        setQuick((q) => q && { ...q, status: "ready", line: hit.line, source: hit.source, value: hit.source });
+      },
+      (err) => {
+        if (seq !== quickSeq.current) return;
+        setQuick((q) => q && { ...q, status: "ready", error: `${errMsg(err)}. Describe the change under This page instead.` });
+      },
+    );
+  }
+
+  async function saveQuick() {
+    if (!id || !quick || quick.line === undefined || quick.source === undefined) return;
+    setQuick({ ...quick, status: "saving", error: undefined });
+    try {
+      await editSourceLine(id, quick.line, quick.source, quick.value);
+      setQuick(null);
+      setEditError(null);
+      setEditing(true);
+      setProgress({ gen_id: id, status: "running", percent: 0, stage: "Saving your change…", error: "" });
+      setWatch(true);
+    } catch (err) {
+      setQuick((q) => q && { ...q, status: "ready", error: errMsg(err) });
+    }
+  }
 
   const onWsReconnect = useCallback(() => {
     // The server re-sends the task state itself on reconnect; refetch meta in
@@ -392,7 +431,8 @@ export default function Generation() {
       {succeeded && (
         <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[1fr_320px]">
           <section className="app-surface flex min-h-[60vh] min-w-0 flex-col p-3">
-            <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage} />
+            <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage}
+              onTextClick={busy ? undefined : handleTextClick} />
           </section>
           <aside className="app-surface flex flex-col gap-4 p-4">
             <div>
@@ -436,6 +476,11 @@ export default function Generation() {
                   { value: "deck", label: "Whole deck" },
                 ]} />
               </div>
+              {scope === "page" && (
+                <p className="text-xs text-slate-500">
+                  To fix wording, click the text on the slide and edit it directly.
+                </p>
+              )}
               {scope === "page" && frames.length > 0 && !frame && (
                 <p id="edit-no-frame-hint" className="text-xs text-slate-500">
                   This page has no editable slide (it may be an auto-generated section or
@@ -461,6 +506,11 @@ export default function Generation() {
             </form>
           </aside>
         </div>
+      )}
+
+      {quick && (
+        <QuickEdit state={quick} onClose={closeQuick} onSave={() => void saveQuick()}
+          onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })} />
       )}
 
       <Link to="/" className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>
