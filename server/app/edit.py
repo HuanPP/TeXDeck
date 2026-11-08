@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import gzip
 import re
 from dataclasses import dataclass
@@ -291,3 +292,52 @@ def _strip_markdown_fences(text: str) -> str:
     if s.endswith("```"):
         s = s[: -3].rstrip()
     return s
+
+
+def _flat(s: str) -> str:
+    return re.sub(r"\s+", "", latex_to_text(s))
+
+
+def locate_line(tex: str, text: str, frame: Frame | None = None) -> tuple[int, str] | None:
+    """Source line (1-based number, raw text) that typesets `text`, clicked on a slide.
+
+    Lines are compared as plain text (markup stripped, whitespace ignored) by
+    their longest common run with the clicked text, so a PDF line that is
+    only part of a wrapped source line, or a line with inline math, still
+    matches. The frame shown on the page is searched first; the whole file
+    is the fallback (title page fields live in the preamble).
+    """
+    target = re.sub(r"\s+", "", text)
+    if not target:
+        return None
+    lines = tex.splitlines()
+    need = min(len(target), max(2, int(len(target) * 0.6)))
+
+    def best(numbers: range) -> tuple[int, int] | None:
+        found: tuple[int, int] | None = None
+        for n in numbers:
+            line = lines[n - 1]
+            if not line.strip() or _is_comment_line(line):
+                continue
+            flat = _flat(line)
+            if not flat:
+                continue
+            m = difflib.SequenceMatcher(None, target, flat, autojunk=False)
+            size = m.find_longest_match(0, len(target), 0, len(flat)).size
+            if size >= need and (found is None or size > found[1]):
+                found = (n, size)
+        return found
+
+    hit = best(range(frame.start_line, frame.end_line + 1)) if frame else None
+    if hit is None:
+        hit = best(range(1, len(lines) + 1))
+    return (hit[0], lines[hit[0] - 1]) if hit else None
+
+
+def replace_line(tex: str, line_no: int, old: str, new: str) -> str:
+    """Swap one source line, refusing if it is no longer what the user saw."""
+    lines = tex.split("\n")
+    if not 1 <= line_no <= len(lines) or lines[line_no - 1] != old:
+        raise EditError("The source changed since you clicked; click the text again")
+    lines[line_no - 1] = new
+    return "\n".join(lines)

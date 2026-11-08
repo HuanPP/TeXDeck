@@ -23,8 +23,10 @@ from .edit import (
     build_frame_edit_messages,
     extract_frame,
     frame_notes,
+    locate_line,
     parse_frames,
     replace_frame,
+    replace_line,
     resolve_frame_pages,
 )
 from . import auth, chatgpt, claude_code
@@ -48,6 +50,17 @@ from .store import GenerationMeta
 
 class FrameEditBody(BaseModel):
     instruction: str
+
+
+class LocateBody(BaseModel):
+    page: int
+    text: str
+
+
+class LineEditBody(BaseModel):
+    line: int
+    old: str
+    new: str
 
 
 class RefineBody(BaseModel):
@@ -363,6 +376,46 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         progress("Done", 100)
     except Exception as exc:
         _apply_usage(meta, usage)
+        _edit_fail(meta, exc)
+        raise
+
+
+def _run_line_edit(gen_id: str, line: int, old: str, new: str, progress: ProgressCallback) -> None:
+    """Direct text fix from the preview: swap one source line and recompile, no model."""
+    meta = store.load_meta(gen_id)
+    tex_path = store.generation_dir(gen_id) / "main.tex"
+    try:
+        progress("Applying your change", 10)
+        original = tex_path.read_text(encoding="utf-8")
+        new_tex = replace_line(original, line, old, new)
+        edit_dir = store.next_edit_dir(gen_id)
+        (edit_dir / "main.tex").write_text(new_tex, encoding="utf-8")
+        (edit_dir / "edit.json").write_text(
+            json.dumps(
+                {"kind": "direct", "line": line, "old": old, "new": new,
+                 "time": datetime.now(timezone.utc).isoformat()},
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        tex_path.write_text(new_tex, encoding="utf-8")
+        progress("Compiling", 40)
+        try:
+            deck.compile_tex(tex_path, client=None)
+        except Exception as compile_exc:
+            tex_path.write_text(original, encoding="utf-8")
+            deck.compile_tex(tex_path, client=None)
+            raise RuntimeError(
+                "LaTeX could not compile the changed line (check braces and special "
+                "characters such as % & _ #); the slide was left as it was"
+            ) from compile_exc
+        meta.edit_count += 1
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        progress("Done", 100)
+    except Exception as exc:
         _edit_fail(meta, exc)
         raise
 
@@ -808,6 +861,45 @@ def api_edit_frame(gen_id: str, index: int, body: FrameEditBody) -> Response:
 
     def job(progress: ProgressCallback) -> None:
         _run_edit(gen_id, index, instruction, progress)
+
+    try:
+        tasks.start(gen_id, job)
+    except tasks.TaskBusy as e:
+        raise HTTPException(409, detail=str(e)) from e
+    return Response(status_code=202)
+
+
+@app.post("/api/generations/{gen_id}/locate")
+def api_locate_text(gen_id: str, body: LocateBody) -> dict[str, Any]:
+    """Map text clicked on a PDF page to the source line that produces it."""
+    _load(gen_id)
+    tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
+    tex = tex_path.read_text(encoding="utf-8")
+    try:
+        frames = resolve_frame_pages(parse_frames(tex), tex_path)
+    except EditError:
+        frames = []  # no synctex / odd source: search the whole file instead
+    frame = next((f for f in frames if f.page == body.page), None)
+    hit = locate_line(tex, body.text, frame)
+    if hit is None:
+        raise HTTPException(404, detail="Could not find this text in the LaTeX source")
+    line, source = hit
+    return {"line": line, "source": source}
+
+
+@app.post("/api/generations/{gen_id}/source-line")
+def api_edit_source_line(gen_id: str, body: LineEditBody) -> Response:
+    _load(gen_id)
+    tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
+    if body.new == body.old:
+        raise HTTPException(400, detail="Nothing changed")
+    try:
+        replace_line(tex_path.read_text(encoding="utf-8"), body.line, body.old, body.new)
+    except EditError as e:
+        raise HTTPException(409, detail=str(e)) from e
+
+    def job(progress: ProgressCallback) -> None:
+        _run_line_edit(gen_id, body.line, body.old, body.new, progress)
 
     try:
         tasks.start(gen_id, job)
