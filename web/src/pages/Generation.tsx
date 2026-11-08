@@ -4,7 +4,7 @@ import { Download, FileText, Package, Presentation, RotateCw } from "lucide-reac
 import {
   bundleUrl,
   editFrame,
-  editSourceLine,
+  editSourceText,
   getFrames,
   getGeneration,
   locateText,
@@ -87,7 +87,7 @@ export default function Generation() {
   const progressRunning = progress?.status === "running";
   const busy = editing || progressRunning;
 
-  // Click-to-edit: text clicked on the preview opens its LaTeX source line.
+  // Click-to-edit: text clicked on the preview opens an editor for it.
   const [quick, setQuick] = useState<QuickEditState | null>(null);
   const quickSeq = useRef(0);
   const closeQuick = useCallback(() => setQuick(null), []);
@@ -99,7 +99,7 @@ export default function Generation() {
     locateText(id, clickedPage, text).then(
       (hit) => {
         if (seq !== quickSeq.current) return;
-        setQuick((q) => q && { ...q, status: "ready", line: hit.line, source: hit.source, value: hit.source });
+        setQuick((q) => q && { ...q, status: "ready", hit, value: hit.text });
       },
       (err) => {
         if (seq !== quickSeq.current) return;
@@ -109,10 +109,10 @@ export default function Generation() {
   }
 
   async function saveQuick() {
-    if (!id || !quick || quick.line === undefined || quick.source === undefined) return;
+    if (!id || !quick?.hit) return;
     setQuick({ ...quick, status: "saving", error: undefined });
     try {
-      await editSourceLine(id, quick.line, quick.source, quick.value);
+      await editSourceText(id, quick.hit, quick.value);
       setQuick(null);
       setEditError(null);
       setEditing(true);

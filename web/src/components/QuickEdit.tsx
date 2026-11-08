@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import type { LocatedText } from "../api";
 
 export type QuickEditState = {
   // Page coordinates (scroll included) just below the clicked line.
   x: number;
   y: number;
   status: "locating" | "ready" | "saving";
-  line?: number;
-  source?: string;
+  hit?: LocatedText;
   value: string;
   error?: string;
 };
@@ -21,19 +21,20 @@ type Props = {
 
 const WIDTH = 460;
 
-// Small editor anchored under text clicked on the preview. It edits the raw
-// LaTeX source line behind that text; saving recompiles without the model.
+// Small editor anchored under text clicked on the preview. It shows the words
+// as on the slide (LaTeX only when the sentence has math or other commands);
+// saving recompiles without the model.
 export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (state.status === "ready" && state.source !== undefined) {
+    if (state.status === "ready" && state.hit) {
       const area = areaRef.current;
       area?.focus();
       area?.setSelectionRange(area.value.length, area.value.length);
     }
-  }, [state.status, state.source]);
+  }, [state.status, state.hit]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -54,28 +55,30 @@ export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
   }, [onClose]);
 
   const left = Math.max(8, Math.min(state.x, window.scrollX + window.innerWidth - WIDTH - 16));
-  const changed = state.source !== undefined && state.value !== state.source;
+  const hit = state.hit;
+  const changed = hit !== undefined && state.value !== hit.text;
 
   return createPortal(
     <div ref={boxRef} role="dialog" aria-label="Edit text"
       className="absolute z-50 border border-[var(--color-border)] bg-white p-3 shadow-lg"
       style={{ left, top: state.y + 8, width: WIDTH }}>
       {state.status === "locating" && <p className="text-sm text-slate-500">Finding this text in the source…</p>}
-      {state.source !== undefined && (
+      {hit && (
         <>
           <label htmlFor="quick-edit" className="text-xs text-slate-500">
-            LaTeX source, line {state.line}
+            {hit.raw ? `LaTeX source, line ${hit.line}` : "Text on the slide"}
           </label>
           <textarea id="quick-edit" ref={areaRef} rows={3} value={state.value}
             disabled={state.status === "saving"}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && changed) {
+              // Enter saves; Shift+Enter starts a new line on the slide.
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                onSave();
+                if (changed) onSave();
               }
             }}
-            className="input-field mt-1 w-full font-mono text-sm" />
+            className={`input-field mt-1 w-full text-sm ${hit.raw ? "font-mono" : ""}`} />
         </>
       )}
       {state.error && (
@@ -83,11 +86,11 @@ export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
       )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <p className="text-xs text-slate-500">
-          {state.source !== undefined ? "Saves this line and recompiles; no model call." : ""}
+          {hit ? "Enter saves and recompiles; no model call." : ""}
         </p>
         <div className="flex shrink-0 gap-2">
           <button type="button" className="btn-secondary px-3 py-1 text-sm" onClick={onClose}>Cancel</button>
-          {state.source !== undefined && (
+          {hit && (
             <button type="button" className="btn-primary px-3 py-1 text-sm"
               disabled={!changed || state.status === "saving"} onClick={onSave}>
               {state.status === "saving" ? "Saving…" : "Save"}

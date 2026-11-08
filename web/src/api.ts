@@ -84,18 +84,26 @@ export function editFrame(id: string, index: number, instruction: string): Promi
 
 // Direct text fixes from the preview: find the source line behind clicked
 // text, then replace that line (recompiles without the model).
+// `text` is source[start:end]: plain slide text, or LaTeX when `raw` (the
+// sentence has math or other commands in it).
+export type LocatedText = { line: number; source: string; start: number; end: number; text: string; raw: boolean };
+
 export const locateText = (id: string, page: number, text: string) =>
-  requestJson<{ line: number; source: string }>(`/api/generations/${id}/locate`, {
+  requestJson<LocatedText>(`/api/generations/${id}/locate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ page, text }),
   });
 
-export function editSourceLine(id: string, line: number, old: string, next: string): Promise<void> {
+// Plain text is escaped and written back around the markup by the server.
+export function editSourceText(id: string, hit: LocatedText, value: string): Promise<void> {
+  const change = hit.raw
+    ? { new: hit.source.slice(0, hit.start) + value + hit.source.slice(hit.end) }
+    : { start: hit.start, end: hit.end, text: value };
   return requestJson(`/api/generations/${id}/source-line`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ line, old, new: next }),
+    body: JSON.stringify({ line: hit.line, old: hit.source, ...change }),
   });
 }
 
