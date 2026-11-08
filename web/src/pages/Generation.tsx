@@ -391,7 +391,7 @@ export default function Generation() {
 
       {succeeded && (
         <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[1fr_320px]">
-          <section className="app-surface flex min-h-[60vh] flex-col p-3">
+          <section className="app-surface flex min-h-[60vh] min-w-0 flex-col p-3">
             <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage} />
           </section>
           <aside className="app-surface flex flex-col gap-4 p-4">

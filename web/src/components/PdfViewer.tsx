@@ -14,6 +14,7 @@ const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 const MAX_FIT_WIDTH = 1100;
 const MAX_PAGE_WIDTH = 2000;
+const THUMB_WIDTH = 104;
 
 type Props = {
   file: string | null;
@@ -26,7 +27,10 @@ export default function PdfViewer({ file, onPageChange }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [containerWidth, setContainerWidth] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const thumbRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const pageNumberRef = useRef(1);
   pageNumberRef.current = pageNumber;
 
@@ -37,8 +41,10 @@ export default function PdfViewer({ file, onPageChange }: Props) {
     setLoadError(null);
   }, [file]);
 
+  // Measure the always-mounted root: the scroll area lives inside <Document>,
+  // which renders nothing until the PDF has loaded.
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = rootRef.current;
     if (!el) return;
     const update = () => setContainerWidth(el.clientWidth);
     update();
@@ -54,6 +60,18 @@ export default function PdfViewer({ file, onPageChange }: Props) {
     onPageChange?.(n);
     scrollRef.current?.scrollTo({ top: 0, left: 0 });
   }
+
+  // Keep the current page's thumbnail in view without scrolling the window.
+  useEffect(() => {
+    const strip = stripRef.current;
+    const thumb = thumbRefs.current.get(pageNumber);
+    if (!strip || !thumb) return;
+    const left = thumb.offsetLeft;
+    const right = left + thumb.offsetWidth;
+    if (left < strip.scrollLeft || right > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollTo({ left: left - (strip.clientWidth - thumb.offsetWidth) / 2, behavior: "smooth" });
+    }
+  }, [pageNumber, numPages]);
 
   // Left/Right (and PageUp/PageDown) flip pages unless the user is typing.
   useEffect(() => {
@@ -100,7 +118,7 @@ export default function PdfViewer({ file, onPageChange }: Props) {
   const pageWidth = Math.round(Math.min(fitWidth * zoom, MAX_PAGE_WIDTH));
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 w-full flex-col">
       <div className="mb-3 flex shrink-0 flex-wrap items-center justify-center gap-3 border border-[var(--color-border)] bg-white px-3 py-2">
         <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={pageNumber <= 1}
           onClick={() => goToPage(pageNumber - 1)}>Prev</button>
@@ -121,18 +139,35 @@ export default function PdfViewer({ file, onPageChange }: Props) {
           disabled={zoom >= MAX_ZOOM}
           onClick={() => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}>+</button>
       </div>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
-        <Document file={file} onLoadSuccess={handleDocumentLoad}
-          onLoadError={(err) => setLoadError(err.message)}
-          loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
+      <Document file={file} onLoadSuccess={handleDocumentLoad} className="flex min-h-0 flex-1 flex-col"
+        onLoadError={(err) => setLoadError(err.message)}
+        loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
           {numPages > 0 && (
             <div className="mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm">
               <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
                 renderTextLayer renderAnnotationLayer />
             </div>
           )}
-        </Document>
-      </div>
+        </div>
+        {numPages > 1 && (
+          <div ref={stripRef} className="relative mt-3 flex shrink-0 gap-2 overflow-x-auto pb-1"
+            aria-label="Pages">
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
+              <button key={n} type="button" onClick={() => goToPage(n)}
+                ref={(el) => { if (el) thumbRefs.current.set(n, el); else thumbRefs.current.delete(n); }}
+                aria-label={`Page ${n}`} aria-current={n === pageNumber ? "page" : undefined}
+                className={`shrink-0 border-2 bg-white p-0.5 ${n === pageNumber
+                  ? "border-[var(--color-primary)]"
+                  : "border-transparent opacity-80 hover:border-slate-300 hover:opacity-100"}`}>
+                <Page pageNumber={n} width={THUMB_WIDTH} renderTextLayer={false} renderAnnotationLayer={false}
+                  loading={<div className="bg-slate-100" style={{ width: THUMB_WIDTH, height: THUMB_WIDTH * 9 / 16 }} />} />
+                <span className="block pt-0.5 text-center font-mono text-[10px] text-slate-500">{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </Document>
     </div>
   );
 }
