@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import gzip
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -198,7 +199,7 @@ _SYMBOLS = {
     "Theta": "Θ", "Lambda": "Λ", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
     "times": "×", "cdot": "·", "approx": "≈", "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥",
     "neq": "≠", "pm": "±", "to": "→", "rightarrow": "→", "leftarrow": "←", "infty": "∞",
-    "in": "∈", "sum": "∑", "ldots": "…", "dots": "…", "%": "%",
+    "in": "∈", "sum": "∑", "ldots": "…", "dots": "…", "%": "%", "Vert": "∥", "parallel": "∥",
 }
 
 
@@ -209,7 +210,7 @@ def latex_to_text(src: str) -> str:
         text = _TEXT_CMDS.sub(r"\1", text)
     text = re.sub(r"\\\\(\[[^\]]*\])?", "\n", text)
     text = re.sub(r"\\par\b", "\n\n", text)
-    text = re.sub(r"\\([a-zA-Z]+)\b ?", lambda m: _SYMBOLS.get(m.group(1), m.group(0)), text)
+    text = re.sub(r"\\([a-zA-Z]+)(?![a-zA-Z]) ?", lambda m: _SYMBOLS.get(m.group(1), m.group(0)), text)
     text = re.sub(r"\\[a-zA-Z]+\*?\s*", "", text)  # remaining commands
     # Unescaped markup first, then the escaped literals it would have eaten.
     text = re.sub(r"(?<!\\)[${}]", "", text)
@@ -294,47 +295,83 @@ def _strip_markdown_fences(text: str) -> str:
     return s
 
 
-def _flat(s: str) -> str:
-    return re.sub(r"\s+", "", latex_to_text(s))
+def _fold(text: str) -> str:
+    """Comparable form of slide text, one character per input character.
+
+    NFKC maps the math alphabet in PDF text (𝑚, 𝐶, ℝ) to plain letters as
+    written in the source; case is folded for small caps. Whitespace is dropped.
+    """
+    return "".join(_DASHES.get(c) or unicodedata.normalize("NFKC", c).casefold()[:1]
+                   for c in text if not c.isspace())
 
 
-def locate_line(tex: str, text: str, frame: Frame | None = None) -> tuple[int, str] | None:
+# PDF text has the typeset dash where the source has -- or ---; both sides
+# compare as one hyphen (repeated hyphens are dropped from source text).
+_DASHES = {"\u2013": "-", "\u2014": "-", "\u2212": "-"}
+
+
+def _shared_runs(target: str, flat: str) -> list[difflib.Match]:
+    """Runs `target` shares with `flat`, in order, as the clicked text would
+    appear in the source: together. Runs under three characters are
+    coincidence ("01" in "2012") unless the clicked text is that short, and
+    only the best group of runs within twice the clicked length counts, so
+    scattered pieces of a long paragraph do not add up to a match."""
+    least = min(3, len(target))
+    blocks = [b for b in difflib.SequenceMatcher(None, target, flat, autojunk=False).get_matching_blocks()
+              if b.size >= least]
+    best: list[difflib.Match] = []
+    best_size = 0
+    for i, first in enumerate(blocks):
+        size = 0
+        for j in range(i, len(blocks)):
+            if blocks[j].b + blocks[j].size - first.b > 2 * len(target):
+                break
+            size += blocks[j].size
+            if size > best_size:
+                best, best_size = blocks[i:j + 1], size
+    return best
+
+
+def locate_line(
+    tex: str, text: str, frame: Frame | None = None, frames: list[Frame] | None = None
+) -> tuple[int, str] | None:
     """Source line (1-based number, raw text) that typesets `text`, clicked on a slide.
 
-    Lines are compared as plain text (markup stripped, whitespace ignored) by
-    the characters they share with the clicked text in runs of two or more,
-    so a PDF line that is only part of a wrapped source line, or a line with
-    inline math, still matches. The frame shown on the page is searched first; the whole file
-    is the fallback (title page fields live in the preamble).
+    Only lines that can typeset the page are searched: the page's frame (if
+    the page has one; section pages do not) and everything outside frames
+    (title fields in the preamble, \\section). Without `frames`, the whole file. Lines are compared as plain
+    text by the characters they share with the clicked text in runs of three
+    or more, so part of a wrapped line, or a sentence broken by inline math,
+    still matches. Ties go to the line whose clicked sentence the text
+    covers most (a heading "讨论" over a sentence containing it, a TikZ
+    label over prose), then to the page's frame.
     """
-    target = re.sub(r"\s+", "", text)
+    target = _fold(text)
     if not target:
         return None
     lines = tex.splitlines()
     need = min(len(target), max(2, int(len(target) * 0.6)))
+    others = {n for f in frames or [] if f is not frame for n in range(f.start_line, f.end_line + 1)}
+    numbers = [n for n in range(1, len(lines) + 1) if n not in others]
 
-    def best(numbers: range) -> tuple[int, tuple[int, int]] | None:
-        found: tuple[int, tuple[int, int]] | None = None
-        for n in numbers:
-            line = lines[n - 1]
-            if not line.strip() or _is_comment_line(line):
-                continue
-            flat = _flat(line)
-            if not flat:
-                continue
-            m = difflib.SequenceMatcher(None, target, flat, autojunk=False)
-            # Matched runs add up, so a sentence broken by inline math still counts.
-            size = sum(b.size for b in m.get_matching_blocks() if b.size >= 2)
-            # Ties go to the line whose length is closest to the clicked text.
-            score = (size, -abs(len(flat) - len(target)))
-            if size >= need and (found is None or score > found[1]):
-                found = (n, score)
-        return found
-
-    hit = best(range(frame.start_line, frame.end_line + 1)) if frame else None
-    if hit is None:
-        hit = best(range(1, len(lines) + 1))
-    return (hit[0], lines[hit[0] - 1]) if hit else None
+    found: tuple[tuple[int, bool, float], int] | None = None
+    for n in numbers:
+        line = lines[n - 1]
+        if not line.strip() or _is_comment_line(line):
+            continue
+        flat = _fold(_visible_text(line))
+        if not flat:
+            continue
+        size = sum(b.size for b in _shared_runs(target, flat))
+        if size < need:
+            continue
+        in_frame = frame is not None and frame.start_line <= n <= frame.end_line
+        span = text_span(line, text)
+        sentence = _fold(_visible_text(line[span.start:span.end])) or flat
+        score = (size, size / max(len(sentence), size), in_frame)
+        if found is None or score > found[0]:
+            found = (score, n)
+    return (found[1], lines[found[1] - 1]) if found else None
 
 
 def replace_line(tex: str, line_no: int, old: str, new: str) -> str:
@@ -456,6 +493,23 @@ def _tokenize_line(line: str) -> list[_Tok]:
     return toks
 
 
+def _visible_text(line: str) -> str:
+    """Roughly what `line` puts on the slide: its characters, inline math and
+    symbol commands as text; command names, environment names and arguments
+    of \\begin, & and comments left out."""
+    out: list[str] = []
+    for t in _tokenize_line(line):
+        src = line[t.start:t.end]
+        if t.kind == "char":
+            out.append(t.char)
+        elif t.kind == "markup" and (src.startswith("$") or src.startswith("\\(")):
+            # Sub/superscripts and thin spaces leave no character of their own.
+            out.append(re.sub(r"[_^]", "", latex_to_text(re.sub(r"\\[,;:!]", "", src))))
+        elif t.kind == "markup" and src[1:] in _SYMBOLS:
+            out.append(_SYMBOLS[src[1:]])
+    return re.sub(r"-+", "-", "".join(out))
+
+
 @dataclass
 class TextSpan:
     start: int  # source offsets of the editable part of the line
@@ -476,13 +530,13 @@ def text_span(line: str, clicked: str) -> TextSpan:
     """
     whole = TextSpan(0, len(line), line, True)
     toks = _tokenize_line(line)
-    chars = [k for k, t in enumerate(toks) if t.kind == "char" and not t.char.isspace()]
-    target = "".join(c.casefold()[:1] for c in re.sub(r"\s+", "", clicked))
-    flat = "".join(toks[k].char.casefold()[:1] for k in chars)
+    chars = [k for k, t in enumerate(toks) if t.kind == "char" and not t.char.isspace()
+             and not (t.char == "-" and k and toks[k - 1].char == "-")]
+    target = _fold(clicked)
+    flat = "".join(_fold(toks[k].char) for k in chars)
     if not target or not flat:
         return whole
-    blocks = difflib.SequenceMatcher(None, target, flat, autojunk=False).get_matching_blocks()
-    hit = [b for b in blocks if b.size >= 2] or [b for b in blocks if b.size]
+    hit = _shared_runs(target, flat)
     if not hit:
         return whole
     a, b = chars[hit[0].b], chars[hit[-1].b + hit[-1].size - 1]

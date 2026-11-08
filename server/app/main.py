@@ -887,7 +887,7 @@ def api_locate_text(gen_id: str, body: LocateBody) -> dict[str, Any]:
     except EditError:
         frames = []  # no synctex / odd source: search the whole file instead
     frame = next((f for f in frames if f.page == body.page), None)
-    hit = locate_line(tex, body.text, frame)
+    hit = locate_line(tex, body.text, frame, frames)
     if hit is None:
         raise HTTPException(404, detail="Could not find this text in the LaTeX source")
     line, source = hit

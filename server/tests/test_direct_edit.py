@@ -173,3 +173,50 @@ def test_replace_text_span_keeps_markup_and_escapes() -> None:
     title = r"\title[短]{长标题}"
     span = text_span(title, "长标题")
     assert replace_text_span(title, span.start, span.end, "新的_标题{x}") == r"\title[短]{新的\_标题\{x\}}"
+
+
+_SCOPED = r"""\documentclass{beamer}
+\title{论文研读}
+\begin{document}
+\section{实验与讨论}
+\begin{frame}{章节导览}
+01 \quad 问题与方法\\
+02 \quad 实验与讨论
+\end{frame}
+\begin{frame}{总结与讨论}
+\item 将配置转化为 DRL 问题。
+\begin{block}{讨论}
+\node (m) {历史掩码 $m$};
+\item $m\in\{0,1\}^{9}$：已选通道的历史掩码。
+\end{block}
+\end{frame}
+\end{document}
+"""
+
+
+def test_locate_searches_only_what_can_typeset_the_page() -> None:
+    frames = parse_frames(_SCOPED)
+    summary = frames[1]
+    # The headline shows the section name; the outline frame on another page
+    # has the same words but cannot be on this page.
+    assert locate_line(_SCOPED, "2 实验与讨论", summary, frames)[0] == 4
+    # On the outline page itself, its own line wins over the \section.
+    assert locate_line(_SCOPED, "02 实验与讨论", frames[0], frames)[0] == 7
+    assert locate_line(_SCOPED, "论文研读", summary, frames)[0] == 2
+
+
+def test_locate_ranks_by_coverage_and_reads_math_letters() -> None:
+    frames = parse_frames(_SCOPED)
+    # "讨论" is the block title, not the frame title that contains it.
+    assert locate_line(_SCOPED, "讨论", frames[1], frames)[0] == 11
+    # PDF text uses math italic letters (U+1D45A) for $m$.
+    assert locate_line(_SCOPED, "历史掩码\U0001d45a", frames[1], frames)[0] == 12
+
+
+def test_locate_on_a_section_page_uses_text_outside_frames() -> None:
+    frames = parse_frames(_SCOPED)
+    # A page made by \section has no frame of its own; the outline frame
+    # elsewhere repeats the name but is not on this page.
+    assert locate_line(_SCOPED, "实验与讨论", None, frames)[0] == 4
+    # Scattered pieces of a sentence do not add up to a match.
+    assert locate_line(_SCOPED, "将问题配置", frames[1], frames) is None
