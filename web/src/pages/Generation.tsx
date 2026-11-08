@@ -92,11 +92,12 @@ export default function Generation() {
   const quickSeq = useRef(0);
   const closeQuick = useCallback(() => setQuick(null), []);
 
-  function handleTextClick({ text, page: clickedPage, rect }: TextClick) {
+  function handleTextClick(click: TextClick) {
+    const { page: clickedPage, rect } = click;
     if (!id || busy) return;
     const seq = ++quickSeq.current;
     setQuick({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY, status: "locating", value: "" });
-    locateText(id, clickedPage, text).then(
+    locateText(id, clickedPage, click).then(
       (hit) => {
         if (seq !== quickSeq.current) return;
         setQuick((q) => q && { ...q, status: "ready", hit, value: hit.text });

@@ -220,3 +220,46 @@ def test_locate_on_a_section_page_uses_text_outside_frames() -> None:
     assert locate_line(_SCOPED, "实验与讨论", None, frames)[0] == 4
     # Scattered pieces of a sentence do not add up to a match.
     assert locate_line(_SCOPED, "将问题配置", frames[1], frames) is None
+
+
+_BLOCKS = r"""\begin{frame}{架构}
+\node (a) {Self-attention\\+ Add \& Norm};
+\node (b) {Masked self-attention\\+ Add \& Norm};
+\begin{enumerate}
+\item Install the desktop app or launch Docker.
+\item Connect a supported vision model.
+\end{enumerate}
+\begin{equation}
+R_{\rm terminal}
+=w_{\rm acc}R_{\rm acc}
+\end{equation}
+\end{frame}
+"""
+
+
+def test_locate_tells_wrapped_fragments_and_repeated_labels_apart_by_neighbours() -> None:
+    frames = parse_frames(_BLOCKS)
+    # Two identical labels: the one whose source carries on into the line above.
+    assert locate_line(_BLOCKS, "+ Add & Norm", frames[0], frames, before="Self-attention")[0] == 2
+    assert locate_line(_BLOCKS, "Masked self-", frames[0], frames, after="attention")[0] == 3
+    # A wrapped fragment belongs to the line that continues it.
+    assert locate_line(_BLOCKS, "attention", frames[0], frames, before="Masked self-", after="+ Add & Norm")[0] == 3
+
+
+def test_locate_joins_consecutive_lines_only_when_each_is_needed() -> None:
+    frames = parse_frames(_BLOCKS)
+    # A display formula split over two source lines is one candidate.
+    assert locate_line(_BLOCKS, "Rterminal = waccRacc", frames[0], frames) == (
+        9, "R_{\\rm terminal}\n=w_{\\rm acc}R_{\\rm acc}")
+    # The "." of the generated "2." would join the previous item; one character
+    # is not a line's worth of evidence.
+    assert locate_line(_BLOCKS, "2. Connect a supported vision model.", frames[0], frames) == (
+        6, r"\item Connect a supported vision model.")
+
+
+def test_replace_line_swaps_several_lines() -> None:
+    old = "R_{\\rm terminal}\n=w_{\\rm acc}R_{\\rm acc}"
+    out = replace_line(_BLOCKS, 9, old, "R_{\\rm end}=1")
+    assert "R_{\\rm end}=1\n\\end{equation}" in out
+    with pytest.raises(EditError):
+        replace_line(_BLOCKS, 8, old, "x")

@@ -88,11 +88,12 @@ export function editFrame(id: string, index: number, instruction: string): Promi
 // sentence has math or other commands in it).
 export type LocatedText = { line: number; source: string; start: number; end: number; text: string; raw: boolean };
 
-export const locateText = (id: string, page: number, text: string) =>
+// `before` and `after` are the lines just above and below the clicked one.
+export const locateText = (id: string, page: number, click: { text: string; before: string; after: string }) =>
   requestJson<LocatedText>(`/api/generations/${id}/locate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ page, text }),
+    body: JSON.stringify({ page, text: click.text, before: click.before, after: click.after }),
   });
 
 // Plain text is escaped and written back around the markup by the server.

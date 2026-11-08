@@ -310,13 +310,16 @@ def _fold(text: str) -> str:
 _DASHES = {"\u2013": "-", "\u2014": "-", "\u2212": "-"}
 
 
+_LEAST_RUN = 3  # shorter shared runs are coincidence ("01" in "2012", a full stop)
+
+
 def _shared_runs(target: str, flat: str) -> list[difflib.Match]:
     """Runs `target` shares with `flat`, in order, as the clicked text would
     appear in the source: together. Runs under three characters are
     coincidence ("01" in "2012") unless the clicked text is that short, and
     only the best group of runs within twice the clicked length counts, so
     scattered pieces of a long paragraph do not add up to a match."""
-    least = min(3, len(target))
+    least = min(_LEAST_RUN, len(target))
     blocks = [b for b in difflib.SequenceMatcher(None, target, flat, autojunk=False).get_matching_blocks()
               if b.size >= least]
     best: list[difflib.Match] = []
@@ -333,53 +336,98 @@ def _shared_runs(target: str, flat: str) -> list[difflib.Match]:
 
 
 def locate_line(
-    tex: str, text: str, frame: Frame | None = None, frames: list[Frame] | None = None
+    tex: str,
+    text: str,
+    frame: Frame | None = None,
+    frames: list[Frame] | None = None,
+    before: str = "",
+    after: str = "",
 ) -> tuple[int, str] | None:
-    """Source line (1-based number, raw text) that typesets `text`, clicked on a slide.
+    """Source that typesets `text`, clicked on a slide: (first line number,
+    the line or consecutive lines joined by newlines).
 
     Only lines that can typeset the page are searched: the page's frame (if
     the page has one; section pages do not) and everything outside frames
-    (title fields in the preamble, \\section). Without `frames`, the whole file. Lines are compared as plain
-    text by the characters they share with the clicked text in runs of three
-    or more, so part of a wrapped line, or a sentence broken by inline math,
-    still matches. Ties go to the line whose clicked sentence the text
-    covers most (a heading "讨论" over a sentence containing it, a TikZ
-    label over prose), then to the page's frame.
+    (title fields in the preamble, \\section). Without `frames`, the whole
+    file. TeX reads consecutive non-blank lines as one paragraph, so a
+    candidate is a line or a run of such lines (a display formula split over
+    lines) in which every line matches at least a run's worth of the clicked
+    text that the others do not.
+
+    Candidates are compared as plain text by the characters they share with
+    the clicked text (see _shared_runs). Ties go to the candidate that
+    carries the clicked text on into the lines `before` and `after` it on
+    the slide (a wrapped fragment, one of several identical labels), then to
+    the one whose clicked sentence the text covers most (a heading "讨论"
+    over a sentence containing it), then to the page's frame, then to fewer
+    lines.
     """
     target = _fold(text)
     if not target:
         return None
+    head = _fold(before)
+    around = head + target + _fold(after)
     lines = tex.splitlines()
     need = min(len(target), max(2, int(len(target) * 0.6)))
+    least = min(_LEAST_RUN, len(target))  # what counts as a line's own contribution
     others = {n for f in frames or [] if f is not frame for n in range(f.start_line, f.end_line + 1)}
-    numbers = [n for n in range(1, len(lines) + 1) if n not in others]
-
-    found: tuple[tuple[int, bool, float], int] | None = None
-    for n in numbers:
+    shown = {}  # line number -> folded visible text
+    for n in range(1, len(lines) + 1):
         line = lines[n - 1]
-        if not line.strip() or _is_comment_line(line):
-            continue
-        flat = _fold(_visible_text(line))
-        if not flat:
-            continue
-        size = sum(b.size for b in _shared_runs(target, flat))
-        if size < need:
-            continue
-        in_frame = frame is not None and frame.start_line <= n <= frame.end_line
-        span = text_span(line, text)
-        sentence = _fold(_visible_text(line[span.start:span.end])) or flat
-        score = (size, size / max(len(sentence), size), in_frame)
-        if found is None or score > found[0]:
-            found = (score, n)
-    return (found[1], lines[found[1] - 1]) if found else None
+        if n not in others and line.strip() and not _is_comment_line(line):
+            shown[n] = _fold(_visible_text(line))
+
+    found: tuple[tuple[int, int, float, bool, int], int, int] | None = None
+    for first in shown:
+        flat, last, size = "", first, 0
+        while last in shown:
+            # A further line joins only if the clicked text itself matches more.
+            grown = sum(b.size for b in _shared_runs(target, flat + shown[last]))
+            if last > first and grown - size < least:
+                break
+            flat, size = flat + shown[last], grown
+            last += 1
+            if not flat or size < need:
+                continue
+            # ... and the first line must be needed as well.
+            if last - 1 > first and size - sum(b.size for b in _shared_runs(target, flat[len(shown[first]):])) < least:
+                continue
+            source = "\n".join(lines[first - 1:last - 1])
+            span = text_span(source, text)
+            sentence = _fold(_visible_text(source[span.start:span.end])) or flat
+            score = (
+                size,
+                _continuation(around, len(head), len(head) + len(target), flat),
+                size / max(len(sentence), size),
+                frame is not None and frame.start_line <= first <= frame.end_line,
+                first - last,
+            )
+            if found is None or score > found[0]:
+                found = (score, first, last - 1)
+    if found is None:
+        return None
+    return found[1], "\n".join(lines[found[1] - 1:found[2]])
+
+
+def _continuation(around: str, start: int, end: int, flat: str) -> int:
+    """How far `flat` continues the clicked text around[start:end] into its
+    neighbours: the parts of shared runs that cross the click's edges.
+    Words of the neighbours found elsewhere in `flat` are no evidence."""
+    total = 0
+    for b in _shared_runs(around, flat):
+        if b.a < end and b.a + b.size > start:
+            total += max(0, start - b.a) + max(0, b.a + b.size - end)
+    return total
 
 
 def replace_line(tex: str, line_no: int, old: str, new: str) -> str:
-    """Swap one source line, refusing if it is no longer what the user saw."""
+    """Swap the source line(s) `old` starting at line_no, refusing if they are
+    no longer what the user saw."""
     lines = tex.split("\n")
-    if not 1 <= line_no <= len(lines) or lines[line_no - 1] != old:
+    count = old.count("\n") + 1
+    if not 1 <= line_no <= len(lines) - count + 1 or "\n".join(lines[line_no - 1:line_no - 1 + count]) != old:
         raise EditError("The source changed since you clicked; click the text again")
-    lines[line_no - 1] = new
+    lines[line_no - 1:line_no - 1 + count] = new.split("\n")
     return "\n".join(lines)
 
 
@@ -415,9 +463,12 @@ def _tokenize_line(line: str) -> list[_Tok]:
     after_cmd = False  # a "[" right after a command name opens its optional argument
     while i < n:
         c = line[i]
-        if c == "%":
-            toks.append(_Tok("markup", i, n))
-            break
+        if c == "%":  # a comment runs to the end of its source line
+            stop = line.find("\n", i)
+            stop = n if stop < 0 else stop
+            toks.append(_Tok("markup", i, stop))
+            i = stop
+            continue
         if c == "\\" and i + 1 < n:
             env = re.match(r"\\(begin|end)\{[^{}]*\}", line[i:])
             if env:  # the environment name is not slide text
@@ -487,8 +538,8 @@ def _tokenize_line(line: str) -> list[_Tok]:
             toks.append(_Tok("markup", i, i + 1))
         elif c == "~":
             toks.append(_Tok("char", i, i + 1, " "))
-        else:
-            toks.append(_Tok("char", i, i + 1, c))
+        else:  # a line break inside a paragraph is a space to TeX
+            toks.append(_Tok("char", i, i + 1, " " if c == "\n" else c))
         i, after_cmd = i + 1, False
     return toks
 

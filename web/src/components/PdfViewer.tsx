@@ -16,7 +16,7 @@ const MAX_FIT_WIDTH = 1100;
 const MAX_PAGE_WIDTH = 2000;
 const THUMB_WIDTH = 104;
 
-export type TextClick = { text: string; page: number; rect: DOMRect };
+export type TextClick = { text: string; before: string; after: string; page: number; rect: DOMRect };
 
 type Props = {
   file: string | null;
@@ -25,21 +25,22 @@ type Props = {
   onTextClick?: (click: TextClick) => void;
 };
 
-// The visible line around a clicked text-layer span. pdf.js splits a line into
+type Piece = { s: HTMLElement; r: DOMRect };
+
+function pieces(layer: Element): Piece[] {
+  return Array.from(layer.querySelectorAll<HTMLElement>("span"))
+    .filter((s) => !s.querySelector("span") && (s.textContent ?? "").trim())
+    .map((s) => ({ s, r: s.getBoundingClientRect() }));
+}
+
+// The visible line around a text-layer span. pdf.js splits a line into
 // several spans (font changes, inline math); join the neighbours on the same
 // baseline, but stop at wide gaps so the other column is not pulled in.
-function lineAround(span: HTMLElement): { text: string; rect: DOMRect } {
-  const layer = span.closest(".textLayer");
-  const base = span.getBoundingClientRect();
-  if (!layer) return { text: span.textContent ?? "", rect: base };
+function lineOf(all: Piece[], piece: Piece): { text: string; rect: DOMRect } {
+  const base = piece.r;
   const mid = (base.top + base.bottom) / 2;
-  const row = Array.from(layer.querySelectorAll<HTMLElement>("span"))
-    .filter((s) => !s.querySelector("span") && (s.textContent ?? "").trim())
-    .map((s) => ({ s, r: s.getBoundingClientRect() }))
-    .filter(({ r }) => r.top <= mid && r.bottom >= mid)
-    .sort((a, b) => a.r.left - b.r.left);
-  const at = row.findIndex(({ s }) => s === span || s.contains(span));
-  if (at < 0) return { text: span.textContent ?? "", rect: base };
+  const row = all.filter(({ r }) => r.top <= mid && r.bottom >= mid).sort((a, b) => a.r.left - b.r.left);
+  const at = row.findIndex(({ s }) => s === piece.s);
   const gap = base.height * 1.5;
   let lo = at;
   let hi = at;
@@ -54,6 +55,32 @@ function lineAround(span: HTMLElement): { text: string; rect: DOMRect } {
     text: part.map(({ s }) => s.textContent ?? "").join(""),
     rect: new DOMRect(left, top, right - left, bottom - top),
   };
+}
+
+// The line directly above or below in the same column: text of about the
+// same size, overlapping horizontally, less than a line height away.
+function neighbour(all: Piece[], line: DOMRect, height: number, dir: -1 | 1): string {
+  const near = all.filter(({ r }) => {
+    const gap = dir < 0 ? line.top - r.bottom : r.top - line.bottom;
+    return gap > -height * 0.3 && gap < height && Math.abs(r.height - height) < height * 0.25
+      && r.left < line.right && r.right > line.left;
+  });
+  if (!near.length) return "";
+  near.sort((a, b) => (dir < 0 ? b.r.bottom - a.r.bottom : a.r.top - b.r.top));
+  return lineOf(all, near[0]).text;
+}
+
+// The clicked line, plus the lines around it as context: a wrapped fragment
+// or a repeated label is told apart by what surrounds it.
+function lineAround(span: HTMLElement): { text: string; before: string; after: string; rect: DOMRect } {
+  const layer = span.closest(".textLayer");
+  const own = { s: span, r: span.getBoundingClientRect() };
+  if (!layer) return { text: span.textContent ?? "", before: "", after: "", rect: own.r };
+  const all = pieces(layer);
+  const piece = all.find(({ s }) => s === span || s.contains(span)) ?? own;
+  const line = lineOf(all, piece);
+  const h = piece.r.height;
+  return { ...line, before: neighbour(all, line.rect, h, -1), after: neighbour(all, line.rect, h, 1) };
 }
 
 export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
@@ -186,8 +213,7 @@ export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
                 if (selection && !selection.isCollapsed) return; // selecting to copy, not editing
                 const span = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span");
                 if (!span || !(span.textContent ?? "").trim()) return;
-                const { text, rect } = lineAround(span);
-                onTextClick({ text, page: Math.min(pageNumber, numPages), rect });
+                onTextClick({ ...lineAround(span), page: Math.min(pageNumber, numPages) });
               }}>
               <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
                 renderTextLayer renderAnnotationLayer />

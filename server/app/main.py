@@ -57,6 +57,8 @@ class FrameEditBody(BaseModel):
 class LocateBody(BaseModel):
     page: int
     text: str
+    before: str = ""  # the lines just above and below the clicked one on the slide
+    after: str = ""
 
 
 class LineEditBody(BaseModel):
@@ -887,7 +889,7 @@ def api_locate_text(gen_id: str, body: LocateBody) -> dict[str, Any]:
     except EditError:
         frames = []  # no synctex / odd source: search the whole file instead
     frame = next((f for f in frames if f.page == body.page), None)
-    hit = locate_line(tex, body.text, frame, frames)
+    hit = locate_line(tex, body.text, frame, frames, body.before, body.after)
     if hit is None:
         raise HTTPException(404, detail="Could not find this text in the LaTeX source")
     line, source = hit
