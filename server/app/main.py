@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ from .llm import (
     select_provider,
     set_model,
 )
+from .pptx_export import EXPORT_VERSION as PPTX_EXPORT_VERSION
+from .pptx_export import PptxExportError, pdf_to_pptx
 from .store import GenerationMeta
 
 
@@ -732,6 +735,32 @@ def api_get_bundle(gen_id: str) -> FileResponse:
         raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
     return FileResponse(
         path, media_type="application/zip", filename=(meta.title or gen_id).replace("/", "_") + ".zip"
+    )
+
+
+_pptx_lock = threading.Lock()
+
+
+@app.get("/api/generations/{gen_id}/deck.pptx")
+def api_get_pptx(gen_id: str) -> FileResponse:
+    meta = _load(gen_id)
+    pdf_path = _file(gen_id, "main.pdf", "PDF not generated yet")
+    # Versioned name: an improved exporter must not serve decks cached by the old one.
+    out = pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}.pptx")
+    # Built on first download and rebuilt whenever an edit recompiles the PDF.
+    with _pptx_lock:
+        if not out.is_file() or out.stat().st_mtime < pdf_path.stat().st_mtime:
+            try:
+                pdf_to_pptx(pdf_path, out)
+            except PptxExportError as e:
+                raise HTTPException(422, detail=str(e)) from e
+            for old in pdf_path.parent.glob("main*.pptx"):
+                if old != out:
+                    old.unlink(missing_ok=True)
+    return FileResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=(meta.title or gen_id).replace("/", "_") + ".pptx",
     )
 
 

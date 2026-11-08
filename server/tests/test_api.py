@@ -199,3 +199,41 @@ def test_api_responses_are_not_cached(client: TestClient) -> None:
     # PDF/TeX/frames are rewritten in place after edits; a reload must revalidate.
     r = client.get("/api/templates")
     assert r.headers["cache-control"] == "no-cache"
+
+
+def test_pptx_endpoint_caches_and_rebuilds(client: TestClient) -> None:
+    import os
+
+    import fitz
+
+    from app.pptx_export import EXPORT_VERSION
+    from app.store import generation_dir, new_generation
+
+    meta = new_generation(
+        title="My/Deck", template_key="navy", template_name="Navy",
+        instruction="", source_kind="text", source_names=[],
+    )
+    gdir = generation_dir(meta.id)
+    doc = fitz.open()
+    page = doc.new_page(width=453.54, height=255.12)
+    page.insert_text((30, 60), "Slide", fontsize=14)
+    doc.save(gdir / "main.pdf")
+    (gdir / "main.v0.pptx").write_bytes(b"stale")  # left by an older exporter
+    r = client.get(f"/api/generations/{meta.id}/deck.pptx")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert "My_Deck.pptx" in r.headers["content-disposition"]
+    cached = gdir / f"main.v{EXPORT_VERSION}.pptx"
+    assert cached.is_file() and not (gdir / "main.v0.pptx").exists()
+
+    # Unchanged PDF: served from cache.
+    before = cached.stat().st_mtime_ns
+    assert client.get(f"/api/generations/{meta.id}/deck.pptx").status_code == 200
+    assert cached.stat().st_mtime_ns == before
+
+    # Recompiled PDF (newer mtime): rebuilt.
+    os.utime(gdir / "main.pdf", ns=(before + 10**9, before + 10**9))
+    assert client.get(f"/api/generations/{meta.id}/deck.pptx").status_code == 200
+    assert cached.stat().st_mtime_ns > before
+
+    assert client.get("/api/generations/20000101-000000-0000/deck.pptx").status_code == 404

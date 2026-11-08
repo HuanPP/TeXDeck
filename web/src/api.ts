@@ -99,6 +99,7 @@ export const pdfUrl = (id: string, bust = 0) =>
   `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
+export const pptxUrl = (id: string) => `/api/generations/${id}/deck.pptx`;
 export const logUrl = (id: string) => `/api/generations/${id}/log`;
 
 export const getModelStatus = () => requestJson<ModelStatus>("/api/model");

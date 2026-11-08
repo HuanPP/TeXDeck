@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Download, FileText, Package, RotateCw } from "lucide-react";
+import { Download, FileText, Package, Presentation, RotateCw } from "lucide-react";
 import {
   bundleUrl,
   editFrame,
@@ -8,6 +8,7 @@ import {
   getGeneration,
   logUrl,
   pdfUrl,
+  pptxUrl,
   refineGeneration,
   regenerateGeneration,
   texUrl,
@@ -307,6 +308,10 @@ export default function Generation() {
             <>
               <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
                 <Download className="h-4 w-4" /> PDF
+              </a>
+              <a className="btn-secondary text-sm" href={pptxUrl(id)} download
+                title="Editable PowerPoint: text boxes over the PDF's own graphics">
+                <Presentation className="h-4 w-4" /> PPTX
               </a>
               <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
                 <FileText className="h-4 w-4" /> main.tex
