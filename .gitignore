@@ -19,6 +19,7 @@ state/
 .custom-templates/
 # agy (Antigravity CLI) home without accounts: its sign-in token
 .agy-home/
+.memory.json
 
 # Environment (keep .env.example)
 .env

@@ -233,8 +233,10 @@ def build_generation_messages(
     request: DeckRequest,
     documents: list[PdfDocument],
     figure_blocks: list[dict[str, Any]] | None = None,
+    memory_note: str = "",
 ) -> list[dict[str, Any]]:
-    """figure_blocks: the user's images as figures.prompt_blocks renders them."""
+    """figure_blocks: the user's images as figures.prompt_blocks renders them.
+    memory_note: what is remembered about this user (memory.note()), if anything."""
     system = (
         "Output only one complete, compilable XeLaTeX Beamer document. "
         "No explanation, no markdown fences."
@@ -265,6 +267,8 @@ def build_generation_messages(
     title_parts.append(NOTES_RULE)
     title_parts.append(DIAGRAM_RULE)
     title_parts.append(SOURCE_IMAGES_RULE)
+    if memory_note:
+        title_parts.append(memory_note)
     if figure_blocks:
         title_parts.append(PLACEMENT_RULE)
     else:

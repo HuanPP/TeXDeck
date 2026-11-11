@@ -74,6 +74,7 @@ def configure(data: Path) -> None:
         "TEXDECK_ARTIFACT_ROOT": data / "artifacts",
         "TEXDECK_CHATGPT_AUTH_FILE": data / "chatgpt-auth.json",
         "TEXDECK_MODEL_STATE_FILE": data / "model-state.json",
+        "TEXDECK_MEMORY_FILE": data / "memory.json",
         "TEXDECK_CUSTOM_TEMPLATES_DIR": data / "custom-templates",
     }
     tectonic = root / "bin" / ("tectonic.exe" if os.name == "nt" else "tectonic")

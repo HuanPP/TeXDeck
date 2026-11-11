@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     agy_home: Path = REPO_ROOT / "server" / ".agy-home"
     # The page's model choice and any API key entered there (written 0600).
     model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
+    # What the model remembers about the user (app.memory); per account with accounts.
+    memory_file: Path = REPO_ROOT / "server" / ".memory.json"
     # Sign-in accounts (python -m app.auth add <name>); sign-in is off while empty
     # unless registration is on. Each account's own model settings and sign-ins
     # live in accounts/<name>/ next to this file.

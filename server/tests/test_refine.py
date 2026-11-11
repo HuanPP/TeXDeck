@@ -118,7 +118,8 @@ def test_run_refine_success(
     assert "No explanation, no markdown fences." in messages[0]["content"]
     assert r"\documentclass" in messages[1]["content"]  # template main.tex
     assert messages[2]["content"] == _ORIGINAL
-    assert messages[3]["content"] == "Revision request:\nAdd a second slide"
+    assert messages[3]["content"].startswith("Revision request:\nAdd a second slide\n")
+    assert "<memory>" in messages[3]["content"]  # may add to what is remembered
 
 
 def test_run_refine_retries_once_on_invalid_output(

@@ -114,3 +114,11 @@ def _isolated_claude_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(claude_code, "_auth_cache", {})
     yield
     claude_code.cancel_login()
+
+
+@pytest.fixture(autouse=True)
+def _memory_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Never read or write the developer's own memory file."""
+    path = tmp_path / "memory.json"
+    monkeypatch.setattr(settings, "memory_file", path)
+    return path

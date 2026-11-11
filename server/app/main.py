@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, figures, layout, pdf, store, tasks
+from . import deck, figures, layout, memory, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -323,7 +323,9 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
         )
         figure_blocks = figures.prompt_blocks(gdir, meta.figures) if meta.figures else None
         figure_files = deck.figure_files(gdir)
-        messages = deck.build_generation_messages(template, request, documents, figure_blocks)
+        messages = deck.build_generation_messages(
+            template, request, documents, figure_blocks, memory.note()
+        )
         progress("Generating slides with the model", 50)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
@@ -396,13 +398,15 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         if frame is None:
             raise RuntimeError(f"Slide index not found: {index}")
         template = deck.get_template(meta.template_key)
-        messages = build_frame_edit_messages(
-            frame, instruction, template.main_tex, figures.catalog(meta.figures) if meta.figures else ""
+        context = "\n\n".join(
+            part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context()) if part
         )
+        messages = build_frame_edit_messages(frame, instruction, template.main_tex, context)
         progress("Editing one slide with the model", 30)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, f"edit_{index}", messages, response)
+        response, learned = memory.split_reply(response)
         new_frame = extract_frame(response)
         deck.check_body(deck.strip_tex_comments(new_frame), deck.figure_files(gdir))
         new_tex = replace_frame(original, frame, new_frame)
@@ -435,6 +439,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
                     f"restore of original also failed: {restore_exc}"
                 ) from compile_exc
             raise
+        memory.remember(learned)
         meta.edit_count += 1
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
@@ -499,18 +504,23 @@ def _run_batch(
         original = tex_path.read_text(encoding="utf-8")
         tex = apply_text_changes(original, texts) if texts else original
         client = None
+        learned: dict[str, list[str]] = {}
         template = deck.get_template(meta.template_key)
         if pages:
             frames = parse_frames(tex)
             by_index = {f.index: f for f in frames}
             requests = [(by_index[i], instruction) for i, instruction in pages]
-            context = figures.catalog(meta.figures) if meta.figures else ""
+            context = "\n\n".join(
+                part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context())
+                if part
+            )
             messages = build_frames_edit_messages(requests, template.main_tex, context)
             label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
             progress(f"Editing {label} with the model", 20)
             client = create_client(on_usage=usage.add)
             response = client.complete(messages)
             _dump_llm(gdir, f"batch_{meta.edit_count + 1}", messages, response)
+            response, learned = memory.split_reply(response)
             new = extract_frames(response, [i for i, _ in pages])
             files = deck.figure_files(gdir)
             for frame_tex in new.values():
@@ -558,6 +568,7 @@ def _run_batch(
                 require_all_figures=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
                 stem=f"batch_{meta.edit_count + 1}_layout",
             )
+        memory.remember(learned)
         meta.edit_count += 1
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
@@ -591,7 +602,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
             },
             {"role": "user", "content": template.main_tex},
             {"role": "user", "content": original},
-            {"role": "user", "content": "Revision request:\n" + instruction},
+            {"role": "user", "content": "Revision request:\n" + instruction + "\n\n" + memory.edit_context()},
         ]
         if meta.figures:
             messages.insert(3, {"role": "user", "content": figures.catalog(meta.figures)})
@@ -599,6 +610,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, stem, messages, response)
+        response, learned = memory.split_reply(response)
         progress("Validating model output", 55)
         try:
             tex = deck.extract_tex(response, template, deck.figure_files(gdir))
@@ -616,6 +628,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
             ]
             response = client.complete(retry)
             _dump_llm(gdir, f"{stem}_retry", retry, response)
+            response, learned = memory.split_reply(response)
             tex = deck.extract_tex(response, template, deck.figure_files(gdir))
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
@@ -651,6 +664,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
             require_all_figures=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
             stem=f"{stem}_layout",
         )
+        memory.remember(learned)
         meta.refine_count += 1
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
@@ -886,6 +900,21 @@ def api_agy_cancel() -> dict[str, Any]:
 def api_agy_logout() -> dict[str, Any]:
     agy.sign_out()
     return model_status()
+
+
+class MemoryBody(BaseModel):
+    habits: list[str] = []
+    mistakes: list[str] = []
+
+
+@app.get("/api/memory")
+def api_get_memory() -> dict[str, list[str]]:
+    return memory.load()
+
+
+@app.put("/api/memory")
+def api_save_memory(body: MemoryBody) -> dict[str, list[str]]:
+    return memory.save(body.model_dump())
 
 
 @app.get("/api/templates")
