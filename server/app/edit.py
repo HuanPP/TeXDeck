@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .deck import DIAGRAM_RULE
+
 
 class EditError(RuntimeError):
     """Single-frame edit failed; message is user-facing English."""
@@ -236,7 +238,7 @@ def build_frame_edit_messages(
                 "You are a single-frame Beamer editor. Output only one complete "
                 "\\begin{frame}...\\end{frame} block. "
                 "No explanation, no markdown fences, and do not change anything outside this frame. "
-                + KEEP_NOTES_RULE
+                + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
             ),
         },
         {
@@ -252,6 +254,64 @@ def build_frame_edit_messages(
             ),
         },
     ]
+
+
+_FRAME_MARK_RE = re.compile(r"^%+\s*FRAME\s+(\d+)\s*$", re.MULTILINE)
+
+
+def build_frames_edit_messages(
+    requests: list[tuple[Frame, str]],
+    template_main_tex: str,
+    context: str = "",
+) -> list[dict[str, Any]]:
+    """One call that revises several frames; each comes back after a `%% FRAME n` line.
+
+    context: anything every change needs to know (the deck's image files...).
+    """
+    parts = [
+        f"%% FRAME {frame.index}\n{frame.tex}\n\nChange for frame {frame.index}:\n{instruction}"
+        for frame, instruction in requests
+    ]
+    content = "\n\n".join(parts)
+    if context:
+        content = f"{context}\n\n{content}"
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are editing several frames of a Beamer deck at once. For every frame "
+                "below, output the complete revised frame: first a line `%% FRAME <number>`, "
+                "then its whole \\begin{frame}...\\end{frame} block. Output exactly these "
+                "frames, in the given order, and nothing else: no explanation, no markdown "
+                "fences, nothing outside the frames. " + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
+            ),
+        },
+        {"role": "user", "content": template_main_tex},
+        {"role": "user", "content": content},
+    ]
+
+
+def extract_frames(response: str, indices: list[int]) -> dict[int, str]:
+    """The `%% FRAME n` blocks of a multi-frame reply; every requested frame must be there."""
+    text = _strip_markdown_fences(response)
+    marks = list(_FRAME_MARK_RE.finditer(text))
+    found: dict[int, str] = {}
+    for k, mark in enumerate(marks):
+        index = int(mark.group(1))
+        end = marks[k + 1].start() if k + 1 < len(marks) else len(text)
+        if index in indices and index not in found:
+            found[index] = extract_frame(text[mark.end() : end])
+    missing = [i for i in indices if i not in found]
+    if missing:
+        raise EditError(f"Model did not return slide(s) {', '.join(map(str, missing))}")
+    return found
+
+
+def replace_frames(tex: str, frames: list[Frame], new: dict[int, str]) -> str:
+    """Swap several frames; bottom-up, so earlier line numbers stay valid."""
+    for frame in sorted((f for f in frames if f.index in new), key=lambda f: f.start_line, reverse=True):
+        tex = replace_frame(tex, frame, new[frame.index])
+    return tex
 
 
 def extract_frame(response: str) -> str:

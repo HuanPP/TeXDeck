@@ -147,36 +147,6 @@ def test_jpeg_previews_are_labelled_jpeg(tmp_path: Path) -> None:
     assert block["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
-# ---- layout checks ----------------------------------------------------------------------
-
-_RECORDS = [
-    {"file": "figures/fig-01.png", "name": "a.png", "note": "", "width": 40, "height": 20},
-    {"file": "figures/fig-02.jpg", "name": "b.jpg", "note": "", "width": 30, "height": 60},
-]
-
-
-def test_layout_issues_finds_unused_images() -> None:
-    tex = _deck(_frame("A", _FIG1))
-    issues = figures.layout_issues(tex, "", _RECORDS, require_all=True)
-    assert len(issues) == 1 and "figures/fig-02.jpg" in issues[0]
-    assert figures.layout_issues(tex, "", _RECORDS, require_all=False) == []
-
-
-def test_layout_issues_maps_overflow_to_slides_with_images() -> None:
-    tex = _deck(_frame("Text only", "words"), _frame("Pictures", _FIG1 + "\n" + _FIG2))
-    lines = tex.splitlines()
-    text_end = lines.index(r"\end{frame}") + 1
-    pic_end = len(lines) - 1
-    log = (
-        f"Overfull \\vbox (30.0pt too high) detected at line {text_end}\n"
-        f"Overfull \\vbox (1.5pt too high) detected at line {pic_end}\n"
-        f"Overfull \\vbox (80.2pt too high) detected at line {pic_end}\n"
-    )
-    issues = figures.layout_issues(tex, log, _RECORDS, require_all=True)
-    assert len(issues) == 1
-    assert 'slide "Pictures" at source lines' in issues[0] and "80pt" in issues[0]
-
-
 # ---- end to end through the API and the generation job ---------------------------
 
 

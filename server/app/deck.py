@@ -109,6 +109,17 @@ SOURCE_IMAGES_RULE = (
     "content you cannot reproduce faithfully; state what they show in words instead."
 )
 
+# Users kept asking to fix these by hand: arrows too short to see, edge labels
+# sitting on node text, chart labels running into each other.
+DIAGRAM_RULE = (
+    "Diagrams and charts: nothing may touch or overlap. In TikZ, place nodes far enough "
+    "apart that every arrow shows at least 1cm of line between the node borders, and put "
+    "edge labels beside the arrow (above, below or sloped) clear of every node and of other "
+    "labels. In pgfplots, keep tick and category labels short; when they are long or many, "
+    "use a smaller font, wrap them (text width with align=center) or rotate them, and widen "
+    "the plot, so that neighbouring labels never run into each other."
+)
+
 # User images live here, relative to the deck's compile directory.
 FIGURE_DIR = "figures"
 
@@ -252,6 +263,7 @@ def build_generation_messages(
         title_parts.append(f"Requirements: {request.instruction}")
     title_parts.append(LANGUAGE_RULES.get(request.language, LANGUAGE_RULES["source"]))
     title_parts.append(NOTES_RULE)
+    title_parts.append(DIAGRAM_RULE)
     title_parts.append(SOURCE_IMAGES_RULE)
     if figure_blocks:
         title_parts.append(PLACEMENT_RULE)

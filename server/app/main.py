@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, figures, pdf, store, tasks
+from . import deck, figures, layout, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -334,13 +334,12 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             progress=compile_progress,
             llm_dump_dir=gdir / "llm",
         )
-        if meta.figures:
-            progress("Checking image placement", 95)
-            figures.fix_layout(
-                gdir, template, meta.figures, client, compiled.log,
-                require_all=True, requirements=meta.instruction,
-                dump=lambda stem, m, r: _dump_llm(gdir, stem, m, r),
-            )
+        progress("Checking the layout", 95)
+        layout.check_and_fix(
+            gdir, template, meta.figures, client, compiled.log,
+            require_all_figures=True, requirements=meta.instruction,
+            dump=lambda stem, m, r: _dump_llm(gdir, stem, m, r), progress=progress,
+        )
         final_tex = tex_path.read_text(encoding="utf-8")
         meta.frame_count = len(parse_frames(final_tex))
         if not meta.title:
@@ -479,7 +478,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
                 "content": (
                     "You are revising a complete XeLaTeX Beamer deck. "
                     "Output only the full revised, compilable document. "
-                    "No explanation, no markdown fences. " + KEEP_NOTES_RULE
+                    "No explanation, no markdown fences. " + KEEP_NOTES_RULE + " " + deck.DIAGRAM_RULE
                 ),
             },
             {"role": "user", "content": template.main_tex},
@@ -538,13 +537,12 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
                     f"restore of original also failed: {restore_exc}"
                 ) from compile_exc
             raise
-        if meta.figures:
-            # The request may drop an image on purpose; only overflow is checked.
-            figures.fix_layout(
-                gdir, template, meta.figures, client, compiled.log,
-                require_all=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
-                stem=f"{stem}_layout",
-            )
+        # The request may drop an image on purpose, so unused images are fine here.
+        layout.check_and_fix(
+            gdir, template, meta.figures, client, compiled.log,
+            require_all_figures=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
+            stem=f"{stem}_layout",
+        )
         meta.refine_count += 1
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
