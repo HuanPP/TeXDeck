@@ -563,8 +563,9 @@ def _plain(gen_id: str, name: str, missing: str) -> FileResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    # "jobs": deploy.sh waits for 0 before restarting, which would kill them.
+    return {"status": "ok", "jobs": tasks.running_count()}
 
 
 def _session_status(request: Request) -> dict[str, Any]:

@@ -23,7 +23,7 @@ def client(artifact_root: Path) -> TestClient:
 def test_health(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.json() == {"status": "ok", "jobs": 0}
 
 
 def test_list_templates_matches_real_disk(client: TestClient) -> None:

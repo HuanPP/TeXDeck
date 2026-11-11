@@ -61,6 +61,12 @@ def _set_and_broadcast(state: TaskState) -> None:
             pass
 
 
+def running_count() -> int:
+    """Jobs queued or running; a restart would kill them."""
+    with _lock:
+        return len(_running)
+
+
 def is_running(gen_id: str) -> bool:
     with _lock:
         return gen_id in _running
