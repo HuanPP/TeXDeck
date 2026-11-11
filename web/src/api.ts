@@ -227,6 +227,19 @@ export const setProviderModel = (provider: Provider, model: string) =>
   });
 export const getChatGptModels = () =>
   requestJson<{ models: { value: string; label: string }[] }>("/api/model/chatgpt/models");
+export const getAgyModels = () =>
+  requestJson<{ models: { value: string; label: string }[] }>("/api/model/agy/models");
+export const startAgyLogin = () =>
+  requestJson<ModelStatus & { url: string }>("/api/auth/agy/login", { method: "POST" });
+export const submitAgyCode = (code: string) =>
+  requestJson<ModelStatus>("/api/auth/agy/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+export const cancelAgyLogin = () =>
+  requestJson<ModelStatus>("/api/auth/agy/login", { method: "DELETE" });
+export const signOutAgy = () => requestJson<ModelStatus>("/api/auth/agy", { method: "DELETE" });
 export const removeApiKey = () => requestJson<ModelStatus>("/api/model/api", { method: "DELETE" });
 
 // `registration`: sign-up with an invite code is open; `admin` hands out codes.

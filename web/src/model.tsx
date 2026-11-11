@@ -19,6 +19,7 @@ export function modelReady(status: ModelStatus | null): boolean {
   if (!status) return false;
   if (status.provider === "chatgpt") return status.chatgpt.signed_in;
   if (status.provider === "claude-code") return status.claude.available && status.claude.signed_in;
+  if (status.provider === "agy") return status.agy.available && status.agy.signed_in;
   return status.api.configured;
 }
 

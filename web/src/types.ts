@@ -76,7 +76,7 @@ export type TaskEvent = {
   error: string;
 };
 
-export type Provider = "chatgpt" | "claude-code" | "api";
+export type Provider = "chatgpt" | "claude-code" | "agy" | "api";
 
 export type ModelStatus = {
   provider: Provider;
@@ -92,6 +92,15 @@ export type ModelStatus = {
     login_error: string;
     model: string;
     models: { value: string; label: string }[];
+  };
+  agy: {
+    available: boolean;
+    unavailable_reason: string;
+    signed_in: boolean;
+    email: string;
+    pending: boolean;
+    login_error: string;
+    model: string;
   };
   api: { configured: boolean; base_url: string; model: string; key_hint: string; saved: boolean };
 };

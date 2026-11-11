@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import {
+  cancelAgyLogin,
   cancelClaudeLogin,
   finishChatGptLogin,
+  getAgyModels,
   getChatGptModels,
   getModelStatus,
   removeApiKey,
   saveApiKey,
   selectProvider,
   setProviderModel,
+  signOutAgy,
   signOutChatGpt,
+  startAgyLogin,
   startChatGptLogin,
   startClaudeLogin,
+  submitAgyCode,
   submitClaudeCode,
 } from "../api";
 import { modelReady, useModel } from "../model";
@@ -19,9 +24,9 @@ import type { Provider } from "../types";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const CLAUDE_CODE_SETUP = "https://code.claude.com/docs/en/setup";
-const NAMES: Record<Provider, string> = { chatgpt: "ChatGPT", "claude-code": "Claude", api: "API key" };
+const NAMES: Record<Provider, string> = { chatgpt: "ChatGPT", "claude-code": "Claude", agy: "Antigravity", api: "API key" };
 
-type Login = { kind: "chatgpt" | "claude"; url: string };
+type Login = { kind: "chatgpt" | "claude" | "agy"; url: string };
 
 function Row(props: {
   name: string;
@@ -73,7 +78,8 @@ function ModelSelect(props: {
 }
 
 // Header control: one button showing the model in use; its panel connects
-// ChatGPT, Claude (through Claude Code) or an API key and switches between them.
+// ChatGPT, Claude (through Claude Code), Antigravity (through agy) or an API
+// key and switches between them.
 export default function ModelMenu() {
   const { status, loadError, setStatus, panelOpen, setPanelOpen } = useModel();
   const [login, setLogin] = useState<Login | null>(null);
@@ -82,6 +88,7 @@ export default function ModelMenu() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [chatgptModels, setChatgptModels] = useState<{ value: string; label: string }[]>([]);
+  const [agyModels, setAgyModels] = useState<{ value: string; label: string }[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef(0);
 
@@ -109,6 +116,12 @@ export default function ModelMenu() {
     getChatGptModels().then((r) => setChatgptModels(r.models)).catch(() => setChatgptModels([]));
   }, [panelOpen, chatgptSignedIn]);
 
+  const agySignedIn = status?.agy.signed_in ?? false;
+  useEffect(() => {
+    if (!panelOpen || !agySignedIn) return;
+    getAgyModels().then((r) => setAgyModels(r.models)).catch(() => setAgyModels([]));
+  }, [panelOpen, agySignedIn]);
+
   // While a sign-in is open, poll until it completes on its own (the ChatGPT
   // loopback listener, or Claude Code finishing in a browser tab it opened).
   useEffect(() => {
@@ -117,11 +130,13 @@ export default function ModelMenu() {
       getModelStatus()
         .then((s) => {
           setStatus(s);
-          const side = login.kind === "chatgpt" ? s.chatgpt : s.claude;
+          const side = login.kind === "chatgpt" ? s.chatgpt : login.kind === "claude" ? s.claude : s.agy;
           if (!side.pending) {
             setLogin(null);
             if (!side.signed_in) {
-              setError((login.kind === "claude" && s.claude.login_error) || "Sign-in did not complete; try again.");
+              const cliError = login.kind === "claude" ? s.claude.login_error
+                : login.kind === "agy" ? s.agy.login_error : "";
+              setError(cliError || "Sign-in did not complete; try again.");
             }
           }
         })
@@ -144,6 +159,7 @@ export default function ModelMenu() {
 
   const closeForms = () => {
     if (login?.kind === "claude") cancelClaudeLogin().then(setStatus).catch(() => undefined);
+    if (login?.kind === "agy") cancelAgyLogin().then(setStatus).catch(() => undefined);
     setLogin(null);
     setApiForm(null);
     setPasted("");
@@ -167,6 +183,18 @@ export default function ModelMenu() {
       if (url) setLogin({ kind: "claude", url });
     });
 
+  // agy waits about a minute for the code, so open Google's page right away.
+  const connectAgy = () =>
+    run(async () => {
+      closeForms();
+      const { url, ...next } = await startAgyLogin();
+      setStatus(next);
+      if (url) {
+        setLogin({ kind: "agy", url });
+        window.open(url, "_blank", "noopener");
+      }
+    });
+
   const use = (provider: Provider) => run(async () => setStatus(await selectProvider(provider)));
   const pickModel = (provider: Provider, model: string) =>
     run(async () => setStatus(await setProviderModel(provider, model)));
@@ -178,6 +206,9 @@ export default function ModelMenu() {
     return run(async () => {
       if (current.kind === "chatgpt") {
         setStatus(await finishChatGptLogin(pasted.trim()));
+      } else if (current.kind === "agy") {
+        setLogin(null); // agy exits after one code, right or wrong
+        setStatus(await submitAgyCode(pasted.trim()));
       } else {
         setLogin(null); // Claude Code exits after one code, right or wrong
         setStatus(await submitClaudeCode(pasted.trim()));
@@ -201,7 +232,7 @@ export default function ModelMenu() {
     return shown ? <span className="text-xs text-red-600">{shown}</span> : null;
   }
 
-  const { chatgpt, claude, api } = status;
+  const { chatgpt, claude, agy, api } = status;
   const ready = modelReady(status);
   const label = ready ? `${NAMES[status.provider]} · ${status.model}` : "Connect a model";
 
@@ -305,6 +336,38 @@ export default function ModelMenu() {
                   the link, approve, and paste the code the page shows.
                 </p>
                 {pasteForm("Code from the Claude page:", "Paste the code")}
+              </>
+            )}
+          </Row>
+
+          <Row
+            name="Antigravity"
+            blurb="Your Google Antigravity plan, through the agy CLI in a sandbox"
+            detail={!agy.available ? agy.unavailable_reason
+              : agy.signed_in ? (agy.email ? `Signed in as ${agy.email}` : "Signed in")
+                : "Not connected"}
+            model={agy.available && agy.signed_in && (
+              <ModelSelect value={agy.model} options={agyModels} disabled={busy}
+                onChange={(m) => pickModel("agy", m)} />
+            )}
+            action={!agy.available ? null
+              : status.provider === "agy" ? inUse
+                : agy.signed_in ? useBtn("agy")
+                  : login?.kind === "agy" ? null : connectBtn(connectAgy)}
+            links={agy.available && agy.signed_in && (
+              <button type="button" className={linkBtn} disabled={busy}
+                onClick={() => run(async () => setStatus(await signOutAgy()))}>
+                Sign out
+              </button>
+            )}
+          >
+            {login?.kind === "agy" && (
+              <>
+                <p className="mb-2 text-xs text-slate-600">
+                  Sign in on the Google page that opened, then paste the authorization code it shows.
+                  agy waits about a minute; if it gives up, connect again.
+                </p>
+                {pasteForm("Authorization code from Google:", "Paste the code")}
               </>
             )}
           </Row>
