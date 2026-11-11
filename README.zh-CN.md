@@ -12,7 +12,7 @@
   <img src="docs/hero.png" alt="左侧是源 PDF 页，右侧是生成的 Beamer 幻灯片" width="100%">
 </p>
 
-视觉模型把页面当图片读，按你选的模板写出完整的 `main.tex`，一分钟左右出结果。之后可以用一句话改某一页，也可以改整套。左图的源文件是 [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf)，可以自己跑一遍。幻灯片语言默认跟随材料，也可以在表单里指定中文或英文。
+视觉模型把页面当图片读，按你选的模板写出完整的 `main.tex`，一分钟左右出结果。之后可以用一句话改某一页，也可以改整套。左图的源文件是 [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf)，可以自己跑一遍。幻灯片语言默认跟随材料，也可以在表单里指定中文或英文。表单里还可以加入自己的照片、截图或 logo，每张可附一句放在哪里的备注，由模型决定放在哪一页、多大、怎样排版。
 
 **不需要 API key**：直接用你已经开通的 ChatGPT 或 Claude 订阅，也支持 API key。
 
@@ -39,15 +39,19 @@ cd web && npm install && npm run dev                      # 界面在 :5173
 
 ## 选模型
 
-点顶栏的模型按钮，面板里列出三种用法，随时可以切换，也可以分别选择模型：
+点顶栏的模型按钮，面板里列出四种用法，随时可以切换，也可以分别选择模型：
 
 **ChatGPT**：用你的 ChatGPT 订阅，点 Connect 登录，再从账号可用的模型里选一个。
 
 **Claude**：用你的 Claude 订阅。运行 TeXDeck 的电脑上要装有 [Claude Code](https://code.claude.com/docs/en/setup)。Claude Code 已经登录的话，点 Connect 就能用；没登录的话，TeXDeck 会启动 `claude auth login` 并显示登录链接，授权后把页面给出的代码粘贴回来。
 
+**Antigravity**：用你的 Google Antigravity 订阅，经 `agy` 命令行调用，只支持 Linux（见下文）。点 Connect，在打开的 Google 页面登录，一分钟内把授权码粘贴回来。
+
 **API key**：任意 OpenAI 兼容的视觉模型，填入 key、Base URL 和模型名，例如 `https://generativelanguage.googleapis.com/v1beta/openai/` 配 `gemini-pro-latest`（推荐；Kimi 的 vision 模型也能用）。纯文本模型用不了，因为页面是以图片形式发给模型的。
 
 用 Claude 时，TeXDeck 以无头模式驱动你本机的 Claude Code（`claude -p`，不开工具，不加载 CLAUDE.md 和插件）。登录状态归 Claude Code 管，TeXDeck 接触不到凭据，切换到别的方式也不会让它退出登录。模型在面板里选 Fable、Opus、Sonnet 或 Haiku，默认 Sonnet；订阅是否包含某个模型由 Anthropic 决定，不包含时 Claude Code 会直接报错说明。环境里设了 `ANTHROPIC_API_KEY` 的话，Claude Code 会改走 API 计费。Docker 镜像里没有 Claude Code，Claude 只适用于桌面版和源码运行。
+
+agy 是一个工具关不掉的编程 agent：它能读任何被指到的文件，配置宽松时还会自行执行命令，夹带指令的 PDF 可以利用这一点。所以 TeXDeck 只在 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`）沙箱里运行 agy，它只能看到只读的系统文件、自己的登录和本次请求的临时目录。没有 `bwrap` 的环境（macOS、Windows、Docker 镜像）不提供 Antigravity。每个账号各自登录一份独立的 agy，与你在终端里用的 agy 互不相干。它的输入只接受文字，图片以文件形式交给 agent 自己打开，因此比其他方式慢。
 
 面板里的选择和填入的 API key 会保存在应用数据目录。也仍然可以在 `.env`（桌面版是数据目录的 `texdeck.env`）里用 `TEXDECK_LLM_API_KEY`、`TEXDECK_LLM_BASE_URL`、`TEXDECK_LLM_MODEL` 预设 API key。
 
