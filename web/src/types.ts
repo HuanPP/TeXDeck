@@ -26,6 +26,9 @@ export type GenerationMeta = {
   language?: SlideLanguage;
   error_kind?: string; // "model" when error came from the model provider
   figures?: FigureItem[]; // user images placed on the slides
+  // Pages of the compiled PDF (frame_count counts \begin{frame} only, so it
+  // misses the title, section and Q&A pages the template adds). 0 if unknown.
+  pdf_pages?: number;
 };
 
 export type FigureItem = {

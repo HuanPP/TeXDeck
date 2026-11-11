@@ -209,3 +209,19 @@ def test_bundle_zip_contents(artifact_root: Path) -> None:
     assert not any(n.startswith("llm/") for n in names)
     assert not any(n.startswith("pages/") for n in names)
     assert "meta.json" not in names
+
+
+def test_pdf_pages_counted_and_backfilled_without_touching_updated_at(artifact_root, make_pdf) -> None:
+    import shutil
+
+    from app import store
+
+    meta = store.new_generation(title="T", template_key="navy", template_name="Navy",
+                                instruction="", source_kind="text", source_names=[])
+    meta.status = "succeeded"
+    store.save_meta(meta)
+    shutil.copy(make_pdf("deck.pdf", 15), store.generation_dir(meta.id) / "main.pdf")
+    before = store.load_meta(meta.id).updated_at
+    store.backfill_pdf_pages(store.load_meta(meta.id))
+    after = store.load_meta(meta.id)
+    assert after.pdf_pages == 15 and after.updated_at == before

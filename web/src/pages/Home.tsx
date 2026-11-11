@@ -504,7 +504,7 @@ export default function Home() {
                       </span>
                     )}
                     <span>{fmt(g.created_at)}</span>
-                    {g.frame_count > 0 && <span>{g.frame_count} pages</span>}
+                    {(g.pdf_pages || g.frame_count) > 0 && <span>{g.pdf_pages || g.frame_count} pages</span>}
                   </div>
                 </button>
                 <button type="button" className="btn-secondary shrink-0 px-2 py-1"

@@ -196,7 +196,7 @@ def _load(gen_id: str) -> GenerationMeta:
         raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
     if not _mine(meta):
         raise HTTPException(404, detail=f"Generation not found: {gen_id}")
-    return meta
+    return store.backfill_pdf_pages(meta)
 
 
 def _file(gen_id: str, name: str, missing: str) -> Path:
@@ -372,6 +372,7 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             meta.title = deck.extract_title(final_tex)
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
+        store.count_pdf_pages(meta)
         store.save_meta(meta)
         if not settings.keep_page_renders:
             # Page renders only feed the LLM; on success they are dead weight.
@@ -443,6 +444,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         meta.edit_count += 1
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
+        store.count_pdf_pages(meta)
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
@@ -484,6 +486,7 @@ def _run_line_edit(gen_id: str, line: int, old: str, new: str, progress: Progres
             ) from compile_exc
         meta.edit_count += 1
         meta.status, meta.error = "succeeded", ""
+        store.count_pdf_pages(meta)
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
@@ -573,6 +576,7 @@ def _run_batch(
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
+        store.count_pdf_pages(meta)
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
@@ -669,6 +673,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
+        store.count_pdf_pages(meta)
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
@@ -1062,7 +1067,7 @@ def api_delete_custom_template(key: str) -> Response:
 
 @app.get("/api/generations")
 def api_list_generations() -> list[dict[str, Any]]:
-    return [asdict(m) for m in store.list_generations() if _mine(m)]
+    return [asdict(store.backfill_pdf_pages(m)) for m in store.list_generations() if _mine(m)]
 
 
 async def _read_upload_capped(file: UploadFile) -> bytes:

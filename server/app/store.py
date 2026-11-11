@@ -30,7 +30,7 @@ class GenerationMeta:
     created_at: str  # ISO8601
     updated_at: str
     page_count: int  # total source pages across ALL PDFs; 0 for text mode
-    frame_count: int  # finished slide count; 0 while incomplete
+    frame_count: int  # \begin{frame} blocks in the source; 0 while incomplete
     edit_count: int
     author: str = ""  # optional; missing in older meta.json
     institute: str = ""  # optional; missing in older meta.json
@@ -45,6 +45,9 @@ class GenerationMeta:
     # User images to place on the slides, in upload order:
     # {"file": "figures/fig-01.png", "name", "note", "width", "height"}
     figures: list[dict[str, Any]] = field(default_factory=list)
+    # Pages of the compiled PDF: frames plus what the template adds (title page,
+    # section pages, Q&A). 0 before the first compile, and in older meta.json.
+    pdf_pages: int = 0
 
 
 def _now_iso() -> str:
@@ -138,8 +141,10 @@ def load_meta(gen_id: str) -> GenerationMeta:
     return _meta_from_dict(data)
 
 
-def save_meta(meta: GenerationMeta) -> None:
-    meta.updated_at = _now_iso()
+def save_meta(meta: GenerationMeta, *, touch: bool = True) -> None:
+    """touch=False keeps updated_at, for bookkeeping that is not a change to the deck."""
+    if touch:
+        meta.updated_at = _now_iso()
     path = generation_dir(meta.id) / "meta.json"
     _write_meta_file(path, meta)
 
@@ -149,6 +154,26 @@ def _write_meta_file(path: Path, meta: GenerationMeta) -> None:
         json.dumps(asdict(meta), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def count_pdf_pages(meta: GenerationMeta) -> None:
+    """Set meta.pdf_pages from the compiled PDF (left alone if it cannot be read)."""
+    import fitz  # the store itself has no other need for MuPDF
+
+    try:
+        with fitz.open(generation_dir(meta.id) / "main.pdf") as doc:
+            meta.pdf_pages = doc.page_count
+    except Exception:  # missing or unreadable PDF; MuPDF has its own error types
+        pass
+
+
+def backfill_pdf_pages(meta: GenerationMeta) -> GenerationMeta:
+    """Older decks have no page count yet: count once and keep it."""
+    if meta.pdf_pages == 0 and meta.status == "succeeded":
+        count_pdf_pages(meta)
+        if meta.pdf_pages:
+            save_meta(meta, touch=False)
+    return meta
 
 
 def list_generations() -> list[GenerationMeta]:

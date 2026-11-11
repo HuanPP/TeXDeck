@@ -414,7 +414,7 @@ export default function Generation() {
             Template: {meta.template_name || meta.template_key}
             {meta.author?.trim() ? ` · Author: ${meta.author}` : ""}
             {meta.institute?.trim() ? ` · Institute: ${meta.institute}` : ""}
-            {meta.frame_count > 0 ? ` · ${meta.frame_count} pages` : ""}
+            {(meta.pdf_pages || meta.frame_count) > 0 ? ` · ${meta.pdf_pages || meta.frame_count} pages` : ""}
           </p>
           {meta.source_names.length > 0 && (
             <p className="truncate text-xs text-slate-400" title={meta.source_names.join(", ")}>
