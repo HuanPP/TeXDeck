@@ -44,7 +44,7 @@ REGISTRATION_CLIENT_ID = "dynamic_agent_client"
 AGENT_NAME = "TeXDeck"
 TOKEN_SHARING_SCOPE = "chatgpt.tokens.use.direct"
 SCOPE = f"openid profile email offline_access resource.invoke {TOKEN_SHARING_SCOPE}"
-USER_AGENT = "TeXDeck/0.5.0"
+USER_AGENT = "TeXDeck/0.6.0"
 LOGIN_TIMEOUT_SECONDS = 600
 # Error codes OpenAI returns when the plan itself refuses the call; retrying cannot help.
 NON_RETRYABLE_CODES = (
