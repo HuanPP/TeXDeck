@@ -12,9 +12,10 @@ Each account gets its own agy home, never the real one. Its stream-json input
 takes text only, so images go into the scratch folder and the prompt asks the
 agent to open them with its file viewer.
 
-Sign-in runs the CLI's own OAuth: `agy models` prints a Google link and waits
-about a minute for the code the user pastes back; the CLI keeps the token in
-its home.
+Sign-in runs the CLI's own OAuth: signed out, print mode prints a Google link
+and waits about a minute for the code the user pastes back, but only when its
+stdin looks like a terminal (a pipe gets "run agy to log in"), so it gets a
+pty. The CLI keeps the token in its home.
 """
 
 from __future__ import annotations
@@ -321,6 +322,7 @@ class _Login:
     proc: subprocess.Popen[bytes]
     user: str | None
     work: tempfile.TemporaryDirectory[str]
+    tty: int  # pty master: agy reads the pasted code from the other end
     url: str = ""
     output: list[str] = field(default_factory=list)
     error: str = ""
@@ -354,6 +356,7 @@ def _watch(login: _Login) -> None:
     code = login.proc.wait()
     login.url_seen.set()
     login.work.cleanup()
+    os.close(login.tty)
     ok = code == 0 and signed_in_as(login.user)
     with _login_lock:
         if _logins.get(login.user) is login:
@@ -364,7 +367,7 @@ def _watch(login: _Login) -> None:
             _last_error[login.user] = ""
         else:
             errors = [line for line in login.output if "rror" in line or "failed" in line]
-            login.error = errors[-1] if errors else f"agy sign-in exited with code {code}"
+            login.error = errors[0] if errors else f"agy sign-in exited with code {code}"
             _last_error[login.user] = login.error
     if ok and not login.cancelled:
         _models_cache.pop(login.user, None)
@@ -387,15 +390,21 @@ def start_login() -> str:
         return ""
     cancel_login()
     work = tempfile.TemporaryDirectory(prefix="texdeck-agy-")
+    master, slave = os.openpty()
     try:
+        # Any prompt: once signed in agy answers it and exits. `agy models`
+        # would not sign in; it only says to run agy interactively.
         proc = subprocess.Popen(
-            _jailed(Path(work.name), "models"),
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            _jailed(Path(work.name), "--print-timeout", "120s", "-p=Reply with OK"),
+            stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
     except OSError as exc:
         work.cleanup()
+        os.close(master)
         raise AgyError(f"Could not start agy: {exc}") from exc
-    login = _Login(proc, auth.current_user.get(), work)
+    finally:
+        os.close(slave)
+    login = _Login(proc, auth.current_user.get(), work, master)
     with _login_lock:
         _logins[login.user], _last_error[login.user] = login, ""
     threading.Thread(target=_watch, args=(login,), daemon=True).start()
@@ -414,13 +423,11 @@ def submit_code(code: str) -> None:
         login = _logins.get(auth.current_user.get())
     if login is None:
         raise AgyError("No agy sign-in is in progress (it gives up after a minute); start again")
-    assert login.proc.stdin is not None
     try:
-        login.proc.stdin.write((code.strip() + "\n").encode("utf-8"))
-        login.proc.stdin.close()
+        os.write(login.tty, (code.strip() + "\n").encode("utf-8"))
     except OSError:
         pass  # the CLI already exited; its result is reported below
-    if not login.done.wait(90):
+    if not login.done.wait(150):
         cancel_login()
         raise AgyError("Timed out waiting for agy to finish signing in")
     if login.error:
