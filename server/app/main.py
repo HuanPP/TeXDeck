@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, pdf, store, tasks
+from . import deck, figures, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -297,14 +297,16 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             source_text=source_text,
             language=meta.language,
         )
-        messages = deck.build_generation_messages(template, request, documents)
+        figure_blocks = figures.prompt_blocks(gdir, meta.figures) if meta.figures else None
+        figure_files = deck.figure_files(gdir)
+        messages = deck.build_generation_messages(template, request, documents, figure_blocks)
         progress("Generating slides with the model", 50)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, "generate", messages, response)
         progress("Validating model output", 70)
         try:
-            tex = deck.extract_tex(response, template)
+            tex = deck.extract_tex(response, template, figure_files)
         except DeckError as first_err:
             retry = messages + [
                 {"role": "assistant", "content": response},
@@ -319,19 +321,26 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             ]
             response = client.complete(retry)
             _dump_llm(gdir, "generate_retry", retry, response)
-            tex = deck.extract_tex(response, template)
+            tex = deck.extract_tex(response, template, figure_files)
         tex_path = gdir / "main.tex"
         tex_path.write_text(tex, encoding="utf-8")
 
         def compile_progress(_stage: str, percent: int) -> None:
             progress("Compiling", 75 + percent * 20 // 100)
 
-        deck.compile_tex(
+        compiled = deck.compile_tex(
             tex_path,
             client=client,
             progress=compile_progress,
             llm_dump_dir=gdir / "llm",
         )
+        if meta.figures:
+            progress("Checking image placement", 95)
+            figures.fix_layout(
+                gdir, template, meta.figures, client, compiled.log,
+                require_all=True, requirements=meta.instruction,
+                dump=lambda stem, m, r: _dump_llm(gdir, stem, m, r),
+            )
         final_tex = tex_path.read_text(encoding="utf-8")
         meta.frame_count = len(parse_frames(final_tex))
         if not meta.title:
@@ -344,6 +353,7 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
             # Failures keep them for debugging.
             shutil.rmtree(gdir / "pages", ignore_errors=True)
             shutil.rmtree(gdir / "thumbs", ignore_errors=True)
+            shutil.rmtree(gdir / figures.PREVIEW_DIR, ignore_errors=True)
         progress("Done", 100)
     except Exception as exc:
         _apply_usage(meta, usage)
@@ -363,12 +373,16 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         if frame is None:
             raise RuntimeError(f"Slide index not found: {index}")
         template = deck.get_template(meta.template_key)
-        messages = build_frame_edit_messages(frame, instruction, template.main_tex)
+        messages = build_frame_edit_messages(
+            frame, instruction, template.main_tex, figures.catalog(meta.figures) if meta.figures else ""
+        )
         progress("Editing one slide with the model", 30)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, f"edit_{index}", messages, response)
-        new_tex = replace_frame(original, frame, extract_frame(response))
+        new_frame = extract_frame(response)
+        deck.check_body(deck.strip_tex_comments(new_frame), deck.figure_files(gdir))
+        new_tex = replace_frame(original, frame, new_frame)
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex").write_text(new_tex, encoding="utf-8")
         (edit_dir / "edit.json").write_text(
@@ -472,13 +486,15 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
             {"role": "user", "content": original},
             {"role": "user", "content": "Revision request:\n" + instruction},
         ]
+        if meta.figures:
+            messages.insert(3, {"role": "user", "content": figures.catalog(meta.figures)})
         progress("Revising the whole deck with the model", 30)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, stem, messages, response)
         progress("Validating model output", 55)
         try:
-            tex = deck.extract_tex(response, template)
+            tex = deck.extract_tex(response, template, deck.figure_files(gdir))
         except DeckError as first_err:
             retry = messages + [
                 {"role": "assistant", "content": response},
@@ -493,7 +509,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
             ]
             response = client.complete(retry)
             _dump_llm(gdir, f"{stem}_retry", retry, response)
-            tex = deck.extract_tex(response, template)
+            tex = deck.extract_tex(response, template, deck.figure_files(gdir))
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
         (edit_dir / "refine.json").write_text(
@@ -511,7 +527,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         tex_path.write_text(tex, encoding="utf-8")
         progress("Compiling", 70)
         try:
-            deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
+            compiled = deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
         except Exception as compile_exc:
             tex_path.write_text(original, encoding="utf-8")
             try:
@@ -522,6 +538,13 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
                     f"restore of original also failed: {restore_exc}"
                 ) from compile_exc
             raise
+        if meta.figures:
+            # The request may drop an image on purpose; only overflow is checked.
+            figures.fix_layout(
+                gdir, template, meta.figures, client, compiled.log,
+                require_all=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
+                stem=f"{stem}_layout",
+            )
         meta.refine_count += 1
         meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
         _apply_usage(meta, usage)
@@ -895,6 +918,8 @@ async def api_create_generation(
     author: str = Form(""),
     institute: str = Form(""),
     files: list[UploadFile] = File(default=[]),
+    images: list[UploadFile] = File(default=[]),
+    image_notes: list[str] = Form(default=[]),
 ) -> JSONResponse:
     try:
         template = deck.get_template(template_key)
@@ -920,6 +945,14 @@ async def api_create_generation(
         contents, kind, names, text_body = [], "text", [], source_text
     else:
         raise HTTPException(400, detail="Upload at least one PDF or provide pasted text")
+    image_uploads = [f for f in images if f.filename]
+    if len(image_uploads) > figures.MAX_FIGURES:
+        raise HTTPException(400, detail=f"At most {figures.MAX_FIGURES} images per generation")
+    image_data = [
+        (f.filename or "image", await f.read(figures.MAX_FIGURE_BYTES + 1),
+         image_notes[i] if i < len(image_notes) else "")
+        for i, f in enumerate(image_uploads)
+    ]
     meta = store.new_generation(
         title=title.strip(),
         template_key=template.key,
@@ -939,6 +972,13 @@ async def api_create_generation(
     if kind == "text":
         # Persisted so the job (and any later regenerate) reads it from disk.
         (gdir / "source.txt").write_text(text_body, encoding="utf-8")
+    if image_data:
+        try:
+            meta.figures = figures.store(gdir, image_data)
+        except figures.FigureError as e:
+            store.delete_generation(meta.id)
+            raise HTTPException(400, detail=str(e)) from e
+        store.save_meta(meta)
     gen_id = meta.id
 
     def job(progress: ProgressCallback) -> None:
@@ -1168,10 +1208,13 @@ def api_regenerate(gen_id: str) -> JSONResponse:
         institute=old_meta.institute,
         language=old_meta.language,
         owner=auth.current_user.get() or "",
+        figures=old_meta.figures,
     )
     new_dir = store.generation_dir(meta.id)
     for source in sources:
         shutil.copy2(source, new_dir / source.name)
+    if old_meta.figures:
+        shutil.copytree(old_dir / figures.FIGURE_DIR, new_dir / figures.FIGURE_DIR)
     new_id = meta.id
 
     def job(progress: ProgressCallback) -> None:

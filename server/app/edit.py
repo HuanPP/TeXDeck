@@ -227,6 +227,7 @@ def build_frame_edit_messages(
     frame: Frame,
     instruction: str,
     template_main_tex: str,
+    figure_catalog: str = "",
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -246,7 +247,8 @@ def build_frame_edit_messages(
             "role": "user",
             "content": (
                 f"Full source of the current frame:\n{frame.tex}\n\n"
-                f"User edit request:\n{instruction}"
+                + (f"{figure_catalog}\n\n" if figure_catalog else "")
+                + f"User edit request:\n{instruction}"
             ),
         },
     ]

@@ -5,7 +5,7 @@ import re
 import secrets
 import shutil
 import zipfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,9 @@ class GenerationMeta:
     language: str = "source"  # slide language: "source" (match the material) | "en" | "zh"
     error_kind: str = ""  # "model" when `error` came from the model provider; read only with `error`
     owner: str = ""  # account that made it; "" without accounts (and before them: the admin's)
+    # User images to place on the slides, in upload order:
+    # {"file": "figures/fig-01.png", "name", "note", "width", "height"}
+    figures: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _now_iso() -> str:
@@ -71,6 +74,7 @@ def new_generation(
     institute: str = "",
     language: str = "source",
     owner: str = "",
+    figures: list[dict[str, Any]] | None = None,
 ) -> GenerationMeta:
     gen_id, directory = _claim_generation_dir()
     now = _now_iso()
@@ -93,6 +97,7 @@ def new_generation(
         institute=institute,
         language=language,
         owner=owner,
+        figures=list(figures or []),
     )
     _write_meta_file(directory / "meta.json", meta)
     return meta
@@ -205,7 +210,7 @@ def bundle_zip(gen_id: str) -> Path:
         raise KeyError(gen_id)
     zip_path = directory / "bundle.zip"
     tmp_path = directory / "bundle.zip.tmp"
-    dirs = ("src", "font")
+    dirs = ("src", "font", "figures")
     with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         main_tex = directory / "main.tex"
         if main_tex.is_file():
