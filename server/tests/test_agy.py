@@ -198,3 +198,32 @@ def test_signed_out_agy_falls_back(agy_home: Path, installed: None, monkeypatch:
     agy.sign_out()
     monkeypatch.setattr(llm.chatgpt, "load_credential", lambda: None)
     assert llm.active_provider() == "api"
+
+
+def test_sign_in_stops_agy_once_the_token_is_saved(
+    agy_home: Path, installed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the code, agy answers its prompt (a slow model call); the token is enough."""
+    import sys
+    import time
+
+    token = agy_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    script = (
+        "import sys, time, pathlib\n"
+        "print('Authentication required. Please visit the URL to log in:', flush=True)\n"
+        "print('  https://accounts.google.com/o/oauth2/auth?x=1', flush=True)\n"
+        "sys.stdin.readline()\n"
+        f"p = pathlib.Path({str(token)!r}); p.parent.mkdir(parents=True, exist_ok=True)\n"
+        "p.write_text('{\"token\": {\"access_token\": \"a\"}}')\n"
+        "time.sleep(60)\n"
+    )
+    monkeypatch.setattr(agy, "_jailed", lambda _work, *_args: [sys.executable, "-c", script])
+    monkeypatch.setattr(settings, "model_state_file", agy_home.parent / "state.json")
+    url = agy.start_login()
+    assert url.startswith("https://accounts.google.com/o/oauth2/")
+    started = time.monotonic()
+    agy.submit_code("4/real-looking-code")
+    assert time.monotonic() - started < 10
+    status = agy.status()
+    assert status["signed_in"] and not status["pending"] and status["login_error"] == ""
+    assert llm.active_provider() == "agy"

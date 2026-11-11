@@ -98,6 +98,15 @@ def signed_in() -> bool:
     return (home() / _TOKEN).is_file()
 
 
+def _token_written() -> bool:
+    """The token file is complete (agy writes JSON with a "token" field)."""
+    try:
+        data = json.loads((home() / _TOKEN).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and bool(data.get("token"))
+
+
 def sandbox_args(agy_home: Path, work: Path, command: str, bwrap: str) -> list[str]:
     """bwrap command line that shows agy only the system, its home and `work`."""
     args = [bwrap, "--ro-bind", "/usr", "/usr"]
@@ -327,6 +336,7 @@ class _Login:
     output: list[str] = field(default_factory=list)
     error: str = ""
     cancelled: bool = False
+    token_saved: bool = False
     url_seen: threading.Event = field(default_factory=threading.Event)
     done: threading.Event = field(default_factory=threading.Event)
 
@@ -357,7 +367,8 @@ def _watch(login: _Login) -> None:
     login.url_seen.set()
     login.work.cleanup()
     os.close(login.tty)
-    ok = code == 0 and signed_in_as(login.user)
+    # Stopped on purpose once the token was saved, or agy finished its prompt.
+    ok = signed_in_as(login.user) and (code == 0 or login.token_saved)
     with _login_lock:
         if _logins.get(login.user) is login:
             del _logins[login.user]
@@ -427,9 +438,17 @@ def submit_code(code: str) -> None:
         os.write(login.tty, (code.strip() + "\n").encode("utf-8"))
     except OSError:
         pass  # the CLI already exited; its result is reported below
-    if not login.done.wait(150):
-        cancel_login()
-        raise AgyError("Timed out waiting for agy to finish signing in")
+    # Signed in, agy goes on to answer its prompt, a model call that can take
+    # a minute; the saved token is all we need, so stop it there.
+    deadline = time.monotonic() + 150
+    while not login.done.wait(0.5):
+        if _token_written():
+            login.token_saved = True
+            login.proc.kill()
+        elif time.monotonic() > deadline:
+            cancel_login()
+            raise AgyError("Timed out waiting for agy to finish signing in")
+    login.done.wait()
     if login.error:
         raise AgyError(login.error)
 
