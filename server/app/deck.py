@@ -86,6 +86,32 @@ NOTES_RULE = (
     "needs no note."
 )
 
+PLACEMENT_RULE = (
+    "User images: the user supplied image files (listed and shown after the source "
+    "material) that must appear in the deck. Put each one on the slide whose content it "
+    "fits best, or where its user note says; use every image exactly once unless the "
+    "Requirements say otherwise. Include an image only as "
+    "\\includegraphics[width=<w>\\linewidth,height=<h>\\textheight,keepaspectratio]{<file>} "
+    "with both bounds and the file name exactly as listed. Choose the layout from the "
+    "image's shape: a wide image takes the full width with at most two short lines of "
+    "text above or below it; a square or tall image goes in a columns layout with the "
+    "image in a 0.4-0.5 wide column and the text beside it; a logo-like or decorative "
+    "image may be small. On a slide with a frame title keep the image at most "
+    "0.75\\textheight, less when text shares its column, so nothing runs off the slide. "
+    "Never crop, stretch, rotate or redraw a user image, and never reference any other "
+    "image file."
+)
+
+SOURCE_IMAGES_RULE = (
+    "Images inside the source material: charts, diagrams and tables may be redrawn with "
+    "tikz, pgfplots or booktabs when their data or structure is stated in the material. "
+    "Never redraw photographs, micrographs, scans, maps, renders or dense plots whose "
+    "content you cannot reproduce faithfully; state what they show in words instead."
+)
+
+# User images live here, relative to the deck's compile directory.
+FIGURE_DIR = "figures"
+
 _TITLE_RE = re.compile(r"\\title\s*(?:\[[^\]]*\])?\s*\{")
 
 
@@ -195,7 +221,9 @@ def build_generation_messages(
     template: Template,
     request: DeckRequest,
     documents: list[PdfDocument],
+    figure_blocks: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """figure_blocks: the user's images as figures.prompt_blocks renders them."""
     system = (
         "Output only one complete, compilable XeLaTeX Beamer document. "
         "No explanation, no markdown fences."
@@ -224,6 +252,11 @@ def build_generation_messages(
         title_parts.append(f"Requirements: {request.instruction}")
     title_parts.append(LANGUAGE_RULES.get(request.language, LANGUAGE_RULES["source"]))
     title_parts.append(NOTES_RULE)
+    title_parts.append(SOURCE_IMAGES_RULE)
+    if figure_blocks:
+        title_parts.append(PLACEMENT_RULE)
+    else:
+        title_parts.append("There are no image files; do not use \\includegraphics.")
     title_message = "\n".join(title_parts)
 
     if documents:
@@ -262,6 +295,11 @@ def build_generation_messages(
             raise DeckError("No source material available for generation")
         material_content = source
 
+    if figure_blocks:
+        if isinstance(material_content, str):
+            material_content = [text_block(material_content)]
+        material_content = material_content + figure_blocks
+
     # Five segments: title+request is repeated after the material (W11 experiment:
     # baseline 4-msg produced 10 frames; 5-msg produced 8 — closer to "under 8").
     return [
@@ -273,10 +311,13 @@ def build_generation_messages(
     ]
 
 
-def extract_tex(response: str, template: Template | None) -> str:
-    # template is required on the generation path; repair passes None
-    # (no template-field comparisons today).
-    _ = template
+def extract_tex(
+    response: str, template: Template | None, figures: list[str] | tuple[str, ...] = ()
+) -> str:
+    """figures: the image files this deck may reference (see figure_files).
+
+    template is required on the generation path; repair passes None.
+    """
     tex = _strip_markdown_fences(response)
 
     if r"\documentclass" not in tex:
@@ -292,12 +333,12 @@ def extract_tex(response: str, template: Template | None) -> str:
         raise DeckError("Incomplete model LaTeX: content after \\end{document}")
 
     theme_directive = _theme_directive(template)
-    if theme_directive is not None and theme_directive not in _strip_tex_comments(tex):
+    if theme_directive is not None and theme_directive not in strip_tex_comments(tex):
         raise DeckError(f"Incomplete model LaTeX: missing {theme_directive}")
 
     # Template header comments may keep [STYLE REF] text; only the de-commented
     # body is checked for leftovers.
-    body = _strip_tex_comments(tex)
+    body = strip_tex_comments(tex)
     if "[STYLE REF]" in body:
         raise DeckError("Incomplete model LaTeX: leftover [STYLE REF] sample page")
     if "AI GENERATION INSTRUCTIONS" in body:
@@ -305,21 +346,60 @@ def extract_tex(response: str, template: Template | None) -> str:
             "Incomplete model LaTeX: leftover AI GENERATION INSTRUCTIONS page"
         )
 
-    # Product hard rule: users supply no external images; \includegraphics always fails.
-    if r"\includegraphics" in body:
-        raise DeckError(
-            "Model output uses \\includegraphics, but this product provides no external image files"
-        )
+    check_body(body, figures)
+    return tex
 
-    # Local-file / shell escapes: a poisoned source document could steer the
-    # model into embedding local file contents (or running commands) via these.
-    for forbidden in (r"\input", r"\include{", r"\write18", r"\openin"):
+
+_GRAPHICS_RE = re.compile(r"\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}")
+
+
+def graphics_refs(tex: str) -> list[str]:
+    """File arguments of every \\includegraphics outside comments."""
+    return [ref.strip() for ref in _GRAPHICS_RE.findall(strip_tex_comments(tex))]
+
+
+def ref_matches(file: str, refs: list[str]) -> bool:
+    """graphicx finds figures/fig-01.png when written with or without the extension."""
+    stem = file.rsplit(".", 1)[0]
+    return any(ref in (file, stem) for ref in refs)
+
+
+def figure_files(work_dir: Path) -> list[str]:
+    """The user images a deck in work_dir may reference, as relative paths."""
+    folder = Path(work_dir) / FIGURE_DIR
+    if not folder.is_dir():
+        return []
+    return [f"{FIGURE_DIR}/{p.name}" for p in sorted(folder.iterdir()) if p.is_file()]
+
+
+def check_body(body: str, figures: list[str] | tuple[str, ...] = ()) -> None:
+    """Reject file access a model must not do; body is LaTeX without comments.
+
+    A poisoned source document could steer the model into embedding local file
+    contents (or running commands), or another deck's images, so images are
+    limited to this deck's own files and the rest of file input is refused.
+    """
+    for forbidden in (
+        r"\input", r"\include{", r"\write18", r"\openin",
+        r"\graphicspath", r"\pgfimage", r"\pgfdeclareimage",
+    ):
         if forbidden in body:
             raise DeckError(
                 f"Model output uses {forbidden}, which is not allowed in generated decks"
             )
-
-    return tex
+    refs = [ref.strip() for ref in _GRAPHICS_RE.findall(body)]
+    if body.count(r"\includegraphics") != len(refs):
+        raise DeckError("Model output uses \\includegraphics in a form that cannot be checked")
+    for ref in refs:
+        if not any(ref_matches(f, [ref]) for f in figures):
+            if not figures:
+                raise DeckError(
+                    "Model output uses \\includegraphics, but this deck has no image files"
+                )
+            raise DeckError(
+                f"Model output uses an image that does not exist: {ref} "
+                f"(available: {', '.join(figures)})"
+            )
 
 
 _THEME_DIRECTIVE_RE = re.compile(
@@ -331,11 +411,11 @@ def _theme_directive(template: Template | None) -> str | None:
     """The line that loads the template's theme; the model must keep it verbatim."""
     if template is None:
         return None
-    match = _THEME_DIRECTIVE_RE.search(_strip_tex_comments(template.main_tex))
+    match = _THEME_DIRECTIVE_RE.search(strip_tex_comments(template.main_tex))
     return match.group(0) if match else None
 
 
-def _strip_tex_comments(tex: str) -> str:
+def strip_tex_comments(tex: str) -> str:
     # Drop everything after an unescaped % on each line
     return "\n".join(re.sub(r"(?<!\\)%.*$", "", line) for line in tex.splitlines())
 
@@ -415,15 +495,22 @@ def _tex_context_around_error(tex: str, compile_log: str, radius: int = 10) -> s
     return "\n".join(chunks)
 
 
-def build_repair_messages(tex: str, compile_log: str) -> list[dict[str, Any]]:
+def build_repair_messages(
+    tex: str, compile_log: str, figures: list[str] | tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
     error_block = _extract_compile_error_block(compile_log)
     tex_context = _tex_context_around_error(tex, compile_log)
     preamble_note = (
         "The document preamble is fixed and must not be changed. Allowed packages: "
         "collegebeamer / tikz / pgfplots / amsmath / amssymb / pifont / "
         "booktabs / colortbl / multirow. "
-        "There are no external image files; do not use \\includegraphics; "
-        "do not add new \\usepackage lines."
+        + (
+            "The only image files are: " + ", ".join(figures) + "; "
+            "do not reference any other image file; "
+            if figures
+            else "There are no external image files; do not use \\includegraphics; "
+        )
+        + "do not add new \\usepackage lines."
     )
     return [
         {
@@ -446,7 +533,7 @@ def build_repair_messages(tex: str, compile_log: str) -> list[dict[str, Any]]:
     ]
 
 
-def _tex_effectively_equal(a: str, b: str) -> bool:
+def tex_effectively_equal(a: str, b: str) -> bool:
     """True if a and b match after stripping each line (ignore pure whitespace diffs)."""
     a_lines = [line.strip() for line in a.splitlines()]
     b_lines = [line.strip() for line in b.splitlines()]
@@ -631,17 +718,18 @@ def _repair_tex(
         "invalid" — extract_tex rejected the response; file left alone.
     """
     current = tex_path.read_text(encoding="utf-8")
-    messages = build_repair_messages(current, compile_log)
+    figures = figure_files(tex_path.parent)
+    messages = build_repair_messages(current, compile_log, figures)
     repaired = client.complete(messages)
     try:
         # Repair output must be structurally complete; on failure leave the file alone
-        cleaned = extract_tex(repaired, None)
+        cleaned = extract_tex(repaired, None, figures)
     except DeckError:
         if llm_dump_dir is not None:
             _dump_repair_llm(llm_dump_dir, repair_index, messages, repaired)
         return "invalid"
 
-    if _tex_effectively_equal(cleaned, current):
+    if tex_effectively_equal(cleaned, current):
         # Model echoed the input; not a real repair. Dump with _noop for debugging.
         if llm_dump_dir is not None:
             _dump_repair_llm(

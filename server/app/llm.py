@@ -45,9 +45,10 @@ def image_block(image_path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise LlmError(f"Image file not found: {path}")
     data = base64.b64encode(path.read_bytes()).decode("ascii")
+    mime = "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
     return {
         "type": "image_url",
-        "image_url": {"url": f"data:image/png;base64,{data}"},
+        "image_url": {"url": f"data:{mime};base64,{data}"},
     }
 
 
