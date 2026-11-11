@@ -594,7 +594,13 @@ export default function Generation() {
                 <pre className="whitespace-pre-wrap break-all font-mono text-xs text-slate-600">{frame.tex}</pre>
               </div>
             )}
-            {frame && (
+            {frame && frame.index === 0 && (
+              <p className="border-t border-[var(--color-border)] pt-4 text-xs leading-relaxed text-slate-500">
+                The title page is made from the deck's title, subtitle, author, institute and date. A
+                request here changes those.
+              </p>
+            )}
+            {frame && frame.index !== 0 && (
               <div className="border-t border-[var(--color-border)] pt-4">
                 <p className="text-xs text-slate-500">Speaker notes</p>
                 {frame.notes ? (

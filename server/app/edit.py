@@ -256,22 +256,32 @@ def build_frame_edit_messages(
     ]
 
 
-_FRAME_MARK_RE = re.compile(r"^%+\s*FRAME\s+(\d+)\s*$", re.MULTILINE)
+_FRAME_MARK_RE = re.compile(r"^%+\s*(?:FRAME\s+(\d+)|(TITLE))\s*$", re.MULTILINE)
 
 
 def build_frames_edit_messages(
     requests: list[tuple[Frame, str]],
     template_main_tex: str,
     context: str = "",
+    title: tuple[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """One call that revises several frames; each comes back after a `%% FRAME n` line.
 
     context: anything every change needs to know (the deck's image files...).
+    title: (the title commands, the change asked for the title page), if any.
     """
     parts = [
         f"%% FRAME {frame.index}\n{frame.tex}\n\nChange for frame {frame.index}:\n{instruction}"
         for frame, instruction in requests
     ]
+    title_rule = ""
+    if title is not None:
+        parts.insert(0, f"%% TITLE\n{title[0]}\n\nChange for the title page:\n{title[1]}")
+        title_rule = (
+            "The title page comes from the preamble's title commands, marked %% TITLE: answer it "
+            "with a line `%% TITLE` followed by the revised \\title, \\subtitle, \\author, "
+            "\\institute and \\date commands only (keep any [short] arguments). "
+        )
     content = "\n\n".join(parts)
     if context:
         content = f"{context}\n\n{content}"
@@ -283,7 +293,7 @@ def build_frames_edit_messages(
                 "below, output the complete revised frame: first a line `%% FRAME <number>`, "
                 "then its whole \\begin{frame}...\\end{frame} block. Output exactly these "
                 "frames, in the given order, and nothing else: no explanation, no markdown "
-                "fences, nothing outside the frames. " + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
+                "fences, nothing outside the frames. " + title_rule + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
             ),
         },
         {"role": "user", "content": template_main_tex},
@@ -292,15 +302,19 @@ def build_frames_edit_messages(
 
 
 def extract_frames(response: str, indices: list[int]) -> dict[int, str]:
-    """The `%% FRAME n` blocks of a multi-frame reply; every requested frame must be there."""
+    """The `%% FRAME n` blocks of a multi-frame reply; every requested frame must be there.
+
+    TITLE_INDEX in `indices` asks for the `%% TITLE` block too (its text, unchecked).
+    """
     text = _strip_markdown_fences(response)
     marks = list(_FRAME_MARK_RE.finditer(text))
     found: dict[int, str] = {}
     for k, mark in enumerate(marks):
-        index = int(mark.group(1))
+        index = TITLE_INDEX if mark.group(2) else int(mark.group(1))
         end = marks[k + 1].start() if k + 1 < len(marks) else len(text)
         if index in indices and index not in found:
-            found[index] = extract_frame(text[mark.end() : end])
+            chunk = text[mark.end() : end]
+            found[index] = chunk.strip("\n") if index == TITLE_INDEX else extract_frame(chunk)
     missing = [i for i in indices if i not in found]
     if missing:
         raise EditError(f"Model did not return slide(s) {', '.join(map(str, missing))}")
@@ -308,9 +322,18 @@ def extract_frames(response: str, indices: list[int]) -> dict[int, str]:
 
 
 def replace_frames(tex: str, frames: list[Frame], new: dict[int, str]) -> str:
-    """Swap several frames; bottom-up, so earlier line numbers stay valid."""
+    """Swap several frames, and the title commands for TITLE_INDEX.
+
+    Bottom-up, so earlier line numbers stay valid; the title commands sit in
+    the preamble above every frame, so they go last.
+    """
     for frame in sorted((f for f in frames if f.index in new), key=lambda f: f.start_line, reverse=True):
         tex = replace_frame(tex, frame, new[frame.index])
+    if TITLE_INDEX in new:
+        block = title_block(tex)
+        if block is None:
+            raise EditError("This deck has no title commands to change")
+        tex = replace_title_block(tex, block, new[TITLE_INDEX])
     return tex
 
 
@@ -768,3 +791,72 @@ def apply_text_changes(tex: str, changes: list[TextChange]) -> str:
                 block = replace_text_span(block, change.start, change.end, change.text)
         tex = replace_line(tex, line, group[0].source, block)
     return tex
+
+
+# --- The title page --------------------------------------------------------
+#
+# Most templates typeset the title page with \maketitle outside any frame, so
+# no frame stands behind it; SimplePlus puts \titlepage in a frame of its own.
+# Either way what the page shows comes from the title commands in the
+# preamble, so a request for that page edits those commands. It travels in
+# multi-frame edits as index 0, marked `%% TITLE`.
+
+TITLE_INDEX = 0
+_TITLE_COMMANDS = ("title", "subtitle", "author", "institute", "date")
+_TITLE_START_RE = re.compile(r"^\s*\\(?:title|subtitle|author|institute|date)(?![A-Za-z@])")
+_TITLE_PAGE_RE = re.compile(r"\\(?:titlepage|maketitle)(?![A-Za-z@])")
+
+
+@dataclass(slots=True)
+class TitleBlock:
+    spans: list[tuple[int, int]]  # 1-based inclusive line ranges, top to bottom
+    text: str  # the commands, one after another
+
+
+def _brace_balance(line: str) -> int:
+    code = re.sub(r"(?<!\\)%.*$", "", line)
+    code = re.sub(r"\\[{}]", "", code)
+    return code.count("{") - code.count("}")
+
+
+def title_block(tex: str) -> TitleBlock | None:
+    """The \\title ... \\date commands before \\begin{document}; None if there are none."""
+    lines = tex.split("\n")
+    end = next((i for i, line in enumerate(lines) if r"\begin{document}" in line), len(lines))
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < end:
+        if _TITLE_START_RE.match(lines[i]):
+            depth, j = _brace_balance(lines[i]), i
+            while depth > 0 and j + 1 < end:
+                j += 1
+                depth += _brace_balance(lines[j])
+            spans.append((i + 1, j + 1))
+            i = j + 1
+        else:
+            i += 1
+    if not spans:
+        return None
+    return TitleBlock(spans, "\n".join("\n".join(lines[a - 1 : b]) for a, b in spans))
+
+
+def is_title_frame(frame: Frame) -> bool:
+    return bool(_TITLE_PAGE_RE.search(frame.tex))
+
+
+def replace_title_block(tex: str, block: TitleBlock, new_text: str) -> str:
+    """Swap the title commands for new ones; refuses anything else in their place."""
+    new_lines = new_text.strip("\n").split("\n")
+    found = title_block("\n".join(new_lines) + "\n\\begin{document}")
+    covered = {n for a, b in (found.spans if found else []) for n in range(a, b + 1)}
+    for n, line in enumerate(new_lines, start=1):
+        if n not in covered and re.sub(r"(?<!\\)%.*$", "", line).strip():
+            raise EditError("The title page change may only contain \\title, \\subtitle, \\author, \\institute and \\date")
+    if not found:
+        raise EditError("The title page change has no title commands")
+    lines = tex.split("\n")
+    first = block.spans[0][0]
+    for a, b in reversed(block.spans):
+        del lines[a - 1 : b]
+    lines[first - 1 : first - 1] = new_lines
+    return "\n".join(lines)

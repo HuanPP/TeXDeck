@@ -19,6 +19,7 @@ from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
     KEEP_NOTES_RULE,
+    TITLE_INDEX,
     EditError,
     TextChange,
     apply_text_changes,
@@ -27,6 +28,7 @@ from .edit import (
     extract_frame,
     extract_frames,
     frame_notes,
+    is_title_frame,
     locate_line,
     parse_frames,
     replace_frame,
@@ -35,6 +37,7 @@ from .edit import (
     replace_text_span,
     resolve_frame_pages,
     text_span,
+    title_block,
 )
 from . import agy, auth, chatgpt, claude_code, custom_templates
 from .custom_templates import CustomTemplateError, TemplateNotFound
@@ -512,12 +515,17 @@ def _run_batch(
         if pages:
             frames = parse_frames(tex)
             by_index = {f.index: f for f in frames}
-            requests = [(by_index[i], instruction) for i, instruction in pages]
+            requests = [(by_index[i], instruction) for i, instruction in pages if i != TITLE_INDEX]
+            title_request = next((s_ for i, s_ in pages if i == TITLE_INDEX), None)
+            block = title_block(tex) if title_request is not None else None
+            if title_request is not None and block is None:
+                raise EditError("This deck has no title commands to change")
+            title = (block.text, title_request) if block is not None and title_request else None
             context = "\n\n".join(
                 part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context())
                 if part
             )
-            messages = build_frames_edit_messages(requests, template.main_tex, context)
+            messages = build_frames_edit_messages(requests, template.main_tex, context, title)
             label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
             progress(f"Editing {label} with the model", 20)
             client = create_client(on_usage=usage.add)
@@ -529,6 +537,9 @@ def _run_batch(
             for frame_tex in new.values():
                 deck.check_body(deck.strip_tex_comments(frame_tex), files)
             tex = replace_frames(tex, frames, new)
+            if title is not None:
+                # The title commands sit in the preamble, which the theme check covers.
+                deck.extract_tex(tex, template, files)
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
         (edit_dir / "batch.json").write_text(
@@ -1260,10 +1271,22 @@ def api_list_frames(gen_id: str) -> list[dict[str, Any]]:
         frames = resolve_frame_pages(parse_frames(tex_path.read_text(encoding="utf-8")), tex_path)
     except EditError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return [
+    out = [
         {"index": f.index, "title": f.title, "page": f.page, "tex": f.tex, "notes": frame_notes(f.tex)}
         for f in frames
     ]
+    # The title page shows the preamble's title commands: through \maketitle
+    # outside any frame (most templates, then on page 1), or a \titlepage
+    # frame. A request for that page edits those commands.
+    block = title_block(tex_path.read_text(encoding="utf-8"))
+    if block is not None:
+        holder = next((f for f in frames if is_title_frame(f)), None)
+        page = holder.page if holder else (0 if any(f.page == 1 for f in frames) else 1)
+        if page:
+            out = [e for e in out if holder is None or e["index"] != holder.index]
+            out.insert(0, {"index": TITLE_INDEX, "title": "Title page", "page": page,
+                           "tex": block.text, "notes": ""})
+    return out
 
 
 @app.post("/api/generations/{gen_id}/frames/{index}/edit")
@@ -1352,6 +1375,8 @@ def api_batch_edit(gen_id: str, body: BatchBody) -> Response:
         if texts:
             apply_text_changes(tex, texts)
         known = {f.index for f in parse_frames(tex)}
+        if title_block(tex) is not None:
+            known.add(TITLE_INDEX)
     except EditError as e:
         raise HTTPException(409, detail=str(e)) from e
     unknown = sorted({i for i, _ in pages} - known)
