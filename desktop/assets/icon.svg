@@ -1,9 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- TeXDeck: a deck of slides; the front one has a title bar and a slab-serif T. -->
   <rect x="64" y="64" width="896" height="896" rx="200" fill="#334155"/>
-  <rect x="172" y="300" width="680" height="424" rx="28" fill="#f8fafc"/>
-  <rect x="172" y="300" width="680" height="72" rx="28" fill="#7d93b3"/>
-  <rect x="172" y="344" width="680" height="28" fill="#7d93b3"/>
-  <text x="512" y="610" text-anchor="middle" font-family="'DejaVu Serif', 'Liberation Serif', Georgia, serif"
-        font-size="200" fill="#334155" letter-spacing="4">TeX</text>
-  <rect x="300" y="650" width="424" height="14" rx="7" fill="#cbd5e1"/>
+  <rect x="300" y="236" width="560" height="380" rx="36" fill="#64799a"/>
+  <rect x="164" y="360" width="600" height="420" rx="36" fill="#f8fafc"/>
+  <rect x="164" y="360" width="600" height="88" rx="36" fill="#7d93b3"/>
+  <rect x="164" y="410" width="600" height="38" fill="#7d93b3"/>
+  <g fill="#334155">
+    <rect x="318" y="490" width="292" height="66"/>
+    <rect x="318" y="490" width="36" height="106"/>
+    <rect x="574" y="490" width="36" height="106"/>
+    <rect x="430" y="490" width="68" height="228"/>
+    <rect x="384" y="690" width="160" height="30"/>
+  </g>
 </svg>

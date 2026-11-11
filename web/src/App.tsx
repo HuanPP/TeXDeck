@@ -43,7 +43,8 @@ export default function App() {
     <div className="min-h-screen">
       <header className="border-b border-[var(--color-border)] bg-[var(--color-surface-container)]">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <Link to="/" className="text-xl tracking-wide text-[var(--color-heading)] no-underline">
+          <Link to="/" className="flex items-center gap-2 text-xl tracking-wide text-[var(--color-heading)] no-underline">
+            <img src="/favicon.svg" alt="" className="h-7 w-7" />
             TeXDeck
           </Link>
           <div className="flex items-center gap-4">
