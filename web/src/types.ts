@@ -25,6 +25,15 @@ export type GenerationMeta = {
   llm_calls?: number;
   language?: SlideLanguage;
   error_kind?: string; // "model" when error came from the model provider
+  figures?: FigureItem[]; // user images placed on the slides
+};
+
+export type FigureItem = {
+  file: string; // "figures/fig-01.png"
+  name: string;
+  note: string;
+  width: number;
+  height: number;
 };
 
 export type SlideLanguage = "source" | "en" | "zh";

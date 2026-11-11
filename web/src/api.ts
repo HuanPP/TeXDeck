@@ -69,6 +69,7 @@ export function createGeneration(input: {
   institute?: string;
   files?: File[];
   source_text?: string;
+  images?: { file: File; note: string }[];
 }): Promise<{ id: string }> {
   const form = new FormData();
   form.append("title", input.title);
@@ -82,6 +83,11 @@ export function createGeneration(input: {
     for (const f of input.files) form.append("files", f);
   } else if (input.source_text !== undefined) {
     form.append("source_text", input.source_text);
+  }
+  // One note per image, in the same order (empty when the user wrote none)
+  for (const img of input.images ?? []) {
+    form.append("images", img.file);
+    form.append("image_notes", img.note);
   }
   return requestJson("/api/generations", { method: "POST", body: form });
 }

@@ -43,6 +43,30 @@ export async function prepareSource(file: File): Promise<Blob> {
   return file.type === "image/jpeg" ? toBlob(c, "image/jpeg", 0.92) : toBlob(c, "image/png");
 }
 
+// ---- images placed on the slides ----
+
+const MAX_FIGURE_SIDE = 2400;
+
+// Any image this browser can decode (WebP, GIF, HEIC on Safari...), upright,
+// at most MAX_FIGURE_SIDE on a side, as the PNG or JPEG the server accepts.
+// Photos stay JPEG; everything else becomes PNG so screenshots stay sharp.
+export async function prepareFigure(file: File): Promise<File> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`${file.name}: this browser cannot read the image; convert it to PNG or JPEG`);
+  }
+  const scale = Math.min(1, MAX_FIGURE_SIDE / Math.max(bitmap.width, bitmap.height));
+  const [c, ctx] = canvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+  ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+  bitmap.close();
+  const photo = /^image\/(jpeg|heic|heif)$/.test(file.type) || /\.(jpe?g|heic|heif)$/i.test(file.name);
+  const blob = photo ? await toBlob(c, "image/jpeg", 0.92) : await toBlob(c, "image/png");
+  const base = file.name.replace(/\.[^.]+$/, "") || "image";
+  return new File([blob], `${base}.${photo ? "jpg" : "png"}`, { type: blob.type });
+}
+
 // ---- logos ----
 
 // "outside" clears the border colour reached from the border (a white letter

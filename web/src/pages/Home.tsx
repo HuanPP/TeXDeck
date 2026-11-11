@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronRight, FileUp, Palette, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ChevronRight, FileUp, ImagePlus, Palette, Pencil, Plus, RotateCw, Trash2, X } from "lucide-react";
 import {
   createGeneration,
   deleteGeneration,
@@ -11,9 +11,14 @@ import {
 } from "../api";
 import Segmented from "../components/Segmented";
 import StatusBadge from "../components/StatusBadge";
+import { prepareFigure } from "../imageTools";
 import { modelReady, useModel } from "../model";
 import { displayTitle } from "../title";
 import type { GenerationMeta, SlideLanguage, TemplateItem } from "../types";
+
+const MAX_IMAGES = 12; // the server's figures.MAX_FIGURES
+
+type PickedImage = { id: number; file: File; url: string; note: string };
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const fmt = (iso: string) => {
@@ -46,6 +51,12 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [sourceText, setSourceText] = useState("");
+  const [images, setImages] = useState<PickedImage[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageDragOver, setImageDragOver] = useState(false);
+  const imageIdRef = useRef(0);
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
   // Preview thumbnails that returned non-200: fall back to a name tile, no retry.
   const [previewFailed, setPreviewFailed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -93,6 +104,33 @@ export default function Home() {
   }, [anyRunning]);
 
   useEffect(() => () => window.clearTimeout(confirmTimerRef.current), []);
+  useEffect(() => () => imagesRef.current.forEach((img) => URL.revokeObjectURL(img.url)), []);
+
+  async function addImages(list: FileList | File[] | null) {
+    if (!list) return;
+    setImageError(null);
+    const picked = Array.from(list).filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
+    const room = MAX_IMAGES - imagesRef.current.length;
+    if (picked.length > room) setImageError(`At most ${MAX_IMAGES} images`);
+    const added: PickedImage[] = [];
+    for (const f of picked.slice(0, Math.max(0, room))) {
+      try {
+        const file = await prepareFigure(f);
+        added.push({ id: ++imageIdRef.current, file, url: URL.createObjectURL(file), note: "" });
+      } catch (e) {
+        setImageError(errMsg(e));
+      }
+    }
+    if (added.length) setImages((prev) => [...prev, ...added]);
+  }
+  const removeImage = (id: number) =>
+    setImages((prev) => {
+      const gone = prev.find((img) => img.id === id);
+      if (gone) URL.revokeObjectURL(gone.url);
+      return prev.filter((img) => img.id !== id);
+    });
+  const setImageNote = (id: number, note: string) =>
+    setImages((prev) => prev.map((img) => (img.id === id ? { ...img, note } : img)));
 
   const addFiles = (list: FileList | File[] | null) => {
     if (!list) return;
@@ -130,6 +168,7 @@ export default function Home() {
         institute: institute.trim(),
         files: sourceTab === "pdf" ? files : undefined,
         source_text: sourceTab === "text" ? sourceText : undefined,
+        images: images.map((img) => ({ file: img.file, note: img.note.trim() })),
       });
       navigate(`/g/${result.id}`);
     } catch (e) {
@@ -252,6 +291,61 @@ export default function Home() {
                 onChange={(e) => setSourceText(e.target.value)}
                 placeholder="Paste research report text here…" />
             )}
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <span className="text-sm text-slate-600">Images to include (optional)</span>
+              <span className="text-xs text-slate-400">The model picks the slide, size and position</span>
+            </div>
+            {images.length > 0 && (
+              <ul className="mb-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {images.map((img) => (
+                  <li key={img.id} className="relative border border-[var(--color-border)] bg-white">
+                    <div className="flex aspect-video items-center justify-center bg-slate-100">
+                      <img src={img.url} alt={img.file.name} className="max-h-full max-w-full object-contain" />
+                    </div>
+                    <button type="button" title="Remove" aria-label={`Remove ${img.file.name}`}
+                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center bg-white/90 text-slate-600 hover:text-red-600"
+                      onClick={() => removeImage(img.id)}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <input className="w-full border-0 border-t border-[var(--color-border)] px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--color-primary)]"
+                      value={img.note} maxLength={300} aria-label={`Note for ${img.file.name}`}
+                      placeholder="Where it goes (optional)"
+                      onChange={(e) => setImageNote(img.id, e.target.value)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {images.length < MAX_IMAGES && (
+              <label
+                className={`flex cursor-pointer items-center justify-center gap-2 border border-dashed px-4 py-3 text-sm text-slate-600 focus-within:ring-2 focus-within:ring-[var(--color-primary)] ${
+                  imageDragOver
+                    ? "border-[var(--color-primary)] bg-sky-50"
+                    : "border-[var(--color-border)] bg-slate-50"
+                }`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setImageDragOver(true);
+                }}
+                onDragLeave={() => setImageDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setImageDragOver(false);
+                  void addImages(e.dataTransfer.files);
+                }}
+              >
+                <ImagePlus className="h-4 w-4" />
+                {images.length ? "Add more images" : "Add photos, screenshots or logos to put on the slides"}
+                <input type="file" multiple accept="image/*,.heic,.heif" className="sr-only"
+                  onChange={(e) => {
+                    void addImages(e.target.files);
+                    e.target.value = "";
+                  }} />
+              </label>
+            )}
+            {imageError && <p role="alert" className="mt-2 text-sm text-red-600">{imageError}</p>}
           </div>
 
           <div>
