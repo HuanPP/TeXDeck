@@ -20,12 +20,17 @@ from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
     KEEP_NOTES_RULE,
     EditError,
+    TextChange,
+    apply_text_changes,
     build_frame_edit_messages,
+    build_frames_edit_messages,
     extract_frame,
+    extract_frames,
     frame_notes,
     locate_line,
     parse_frames,
     replace_frame,
+    replace_frames,
     replace_line,
     replace_text_span,
     resolve_frame_pages,
@@ -75,6 +80,25 @@ class LineEditBody(BaseModel):
 
 class RefineBody(BaseModel):
     instruction: str
+
+
+class TextChangeBody(BaseModel):
+    line: int
+    source: str  # the source block as located; refused if it changed since
+    start: int
+    end: int
+    text: str
+    raw: bool = False
+
+
+class PageChangeBody(BaseModel):
+    index: int  # frame index, as in /frames
+    instruction: str
+
+
+class BatchBody(BaseModel):
+    texts: list[TextChangeBody] = []
+    pages: list[PageChangeBody] = []
 
 
 class CallbackUrlBody(BaseModel):
@@ -458,6 +482,90 @@ def _run_line_edit(gen_id: str, line: int, old: str, new: str, progress: Progres
         store.save_meta(meta)
         progress("Done", 100)
     except Exception as exc:
+        _edit_fail(meta, exc)
+        raise
+
+
+def _run_batch(
+    gen_id: str, texts: list[TextChange], pages: list[tuple[int, str]], progress: ProgressCallback
+) -> None:
+    """Everything the user queued on the page: text fixes, then slide requests, one compile."""
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    tex_path = gdir / "main.tex"
+    usage = UsageTally()
+    try:
+        progress("Applying your changes", 5)
+        original = tex_path.read_text(encoding="utf-8")
+        tex = apply_text_changes(original, texts) if texts else original
+        client = None
+        template = deck.get_template(meta.template_key)
+        if pages:
+            frames = parse_frames(tex)
+            by_index = {f.index: f for f in frames}
+            requests = [(by_index[i], instruction) for i, instruction in pages]
+            context = figures.catalog(meta.figures) if meta.figures else ""
+            messages = build_frames_edit_messages(requests, template.main_tex, context)
+            label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
+            progress(f"Editing {label} with the model", 20)
+            client = create_client(on_usage=usage.add)
+            response = client.complete(messages)
+            _dump_llm(gdir, f"batch_{meta.edit_count + 1}", messages, response)
+            new = extract_frames(response, [i for i, _ in pages])
+            files = deck.figure_files(gdir)
+            for frame_tex in new.values():
+                deck.check_body(deck.strip_tex_comments(frame_tex), files)
+            tex = replace_frames(tex, frames, new)
+        edit_dir = store.next_edit_dir(gen_id)
+        (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
+        (edit_dir / "batch.json").write_text(
+            json.dumps(
+                {
+                    "kind": "batch",
+                    "texts": [asdict(t) for t in texts],
+                    "pages": [{"index": i, "instruction": s} for i, s in pages],
+                    "time": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        tex_path.write_text(tex, encoding="utf-8")
+        progress("Compiling", 60)
+        try:
+            compiled = deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
+        except Exception as compile_exc:
+            tex_path.write_text(original, encoding="utf-8")
+            try:
+                deck.compile_tex(tex_path, client=None)
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    f"Compile failed after your changes: {compile_exc}; "
+                    f"restore of the previous version also failed: {restore_exc}"
+                ) from compile_exc
+            if not pages:
+                raise RuntimeError(
+                    "LaTeX could not compile the changed text (check braces and special "
+                    "characters such as % & _ #); the deck was left as it was"
+                ) from compile_exc
+            raise
+        if client is not None:
+            progress("Checking the layout", 90)
+            layout.check_and_fix(
+                gdir, template, meta.figures, client, compiled.log,
+                require_all_figures=False, dump=lambda s_, m, r: _dump_llm(gdir, s_, m, r),
+                stem=f"batch_{meta.edit_count + 1}_layout",
+            )
+        meta.edit_count += 1
+        meta.frame_count = len(parse_frames(tex_path.read_text(encoding="utf-8")))
+        _apply_usage(meta, usage)
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        progress("Done", 100)
+    except Exception as exc:
+        _apply_usage(meta, usage)
         _edit_fail(meta, exc)
         raise
 
@@ -1188,6 +1296,40 @@ def api_edit_source_line(gen_id: str, body: LineEditBody) -> Response:
 
     def job(progress: ProgressCallback) -> None:
         _run_line_edit(gen_id, body.line, body.old, new, progress)
+
+    try:
+        tasks.start(gen_id, job)
+    except tasks.TaskBusy as e:
+        raise HTTPException(409, detail=str(e)) from e
+    return Response(status_code=202)
+
+
+@app.post("/api/generations/{gen_id}/batch")
+def api_batch_edit(gen_id: str, body: BatchBody) -> Response:
+    """Apply the changes queued on the page in one job, compiling once."""
+    _load(gen_id)
+    tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
+    pages = [(p.index, p.instruction.strip()) for p in body.pages if p.instruction.strip()]
+    texts = [TextChange(**t.model_dump()) for t in body.texts]
+    if not texts and not pages:
+        raise HTTPException(400, detail="Nothing to apply")
+    tex = tex_path.read_text(encoding="utf-8")
+    try:
+        if texts:
+            apply_text_changes(tex, texts)
+        known = {f.index for f in parse_frames(tex)}
+    except EditError as e:
+        raise HTTPException(409, detail=str(e)) from e
+    unknown = sorted({i for i, _ in pages} - known)
+    if unknown:
+        raise HTTPException(400, detail=f"Slide index not found: {unknown[0]}")
+    if len({i for i, _ in pages}) != len(pages):
+        raise HTTPException(400, detail="One request per slide; merge them")
+    if pages:
+        _require_model()
+
+    def job(progress: ProgressCallback) -> None:
+        _run_batch(gen_id, texts, pages, progress)
 
     try:
         tasks.start(gen_id, job)

@@ -717,3 +717,54 @@ def replace_text_span(line: str, start: int, end: int, new_text: str) -> str:
     for s, e, rep in sorted(edits, key=lambda x: (x[0], x[1]), reverse=True):
         line = line[:s] + rep + line[e:]
     return line
+
+
+@dataclass(slots=True)
+class TextChange:
+    """One fix typed on the preview: source[start:end] of the block at `line` becomes `text`.
+
+    raw: `text` is LaTeX for that run (the sentence had math or commands);
+    otherwise it is plain slide text, escaped and diffed in by replace_text_span.
+    """
+
+    line: int
+    source: str
+    start: int
+    end: int
+    text: str
+    raw: bool = False
+
+
+def apply_text_changes(tex: str, changes: list[TextChange]) -> str:
+    """Apply many preview fixes at once; refuses if a source block changed meanwhile.
+
+    Changes to one block (same line and source) are applied right to left so
+    the earlier offsets stay valid; blocks are replaced bottom-up for the same
+    reason, as a fix may add a line.
+    """
+    blocks: dict[int, list[TextChange]] = {}
+    for change in changes:
+        blocks.setdefault(change.line, []).append(change)
+    spans: list[tuple[int, int]] = []
+    for line, group in blocks.items():
+        if len({c.source for c in group}) > 1:
+            raise EditError("Two changes disagree about one source line; remove one and try again")
+        spans.append((line, line + group[0].source.count("\n")))
+    spans.sort()
+    for (_, a_end), (b_start, _) in zip(spans, spans[1:]):
+        if b_start <= a_end:
+            raise EditError("Two changes touch the same source lines; remove one and try again")
+    for line in sorted(blocks, reverse=True):
+        group = sorted(blocks[line], key=lambda c: c.start, reverse=True)
+        block = group[0].source
+        for prev, change in zip([None, *group], group):
+            if prev is not None and change.end > prev.start:
+                raise EditError("Two changes overlap in one sentence; remove one and try again")
+            if not 0 <= change.start <= change.end <= len(block):
+                raise EditError("The source changed since you clicked; click the text again")
+            if change.raw:
+                block = block[: change.start] + change.text + block[change.end :]
+            else:
+                block = replace_text_span(block, change.start, change.end, change.text)
+        tex = replace_line(tex, line, group[0].source, block)
+    return tex
