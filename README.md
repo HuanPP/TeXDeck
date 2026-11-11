@@ -12,9 +12,9 @@ Drop in a PDF, get back a Beamer deck: the compiled PDF, the `.tex` source, and 
   <img src="docs/hero.png" alt="A source PDF page on the left, the generated Beamer slide on the right" width="100%">
 </p>
 
-A vision model reads your pages as images and writes a complete `main.tex` against the template you pick. It takes about a minute. You can then rewrite one slide, or the whole deck, with a single instruction. The source on the left is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), so you can try it yourself. Slides follow the language of your material unless you pick English or Chinese. Add your own photos, screenshots or logos to the form, with an optional note on where each goes, and the model picks the slide, size and layout for them.
+A vision model reads your pages as images and writes a complete `main.tex` against the template you pick. It takes about a minute. You can then fix wording by clicking it on the slide, ask for changes to any slides, and apply them all with one compile, or rewrite the whole deck with a single instruction. After compiling, slides whose text collides or that run off the page are found and sent back to the model to fix. The model also keeps a short memory of your habits and of the mistakes you had to fix, follows it in every new deck, and lets you edit it from the Memory button. The source on the left is [`docs/demo/gold-price-2024.pdf`](docs/demo/gold-price-2024.pdf), so you can try it yourself. Slides follow the language of your material unless you pick English or Chinese. Add your own photos, screenshots or logos to the form, with an optional note on where each goes, and the model picks the slide, size and layout for them.
 
-**No API key needed:** it runs on the ChatGPT or Claude subscription you already pay for. An API key works too.
+**No API key needed:** it runs on the ChatGPT, Claude or Antigravity subscription you already pay for. An API key works too.
 
 ## Install
 
