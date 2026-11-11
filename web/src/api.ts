@@ -137,6 +137,16 @@ export const applyChanges = (id: string, texts: QueuedText[], pages: QueuedPage[
     body: JSON.stringify({ texts, pages }),
   });
 
+// What the model remembers about the user (habits, mistakes to avoid).
+export type Memory = { habits: string[]; mistakes: string[] };
+export const getMemory = () => requestJson<Memory>("/api/memory");
+export const saveMemory = (memory: Memory) =>
+  requestJson<Memory>("/api/memory", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(memory),
+  });
+
 export const regenerateGeneration = (id: string) =>
   requestJson<{ id: string }>(`/api/generations/${id}/regenerate`, { method: "POST" });
 

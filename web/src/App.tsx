@@ -4,6 +4,7 @@ import Generation from "./pages/Generation";
 import TemplateEditor from "./pages/TemplateEditor";
 import ModelMenu from "./components/ModelMenu";
 import InvitesMenu from "./components/InvitesMenu";
+import MemoryMenu from "./components/MemoryMenu";
 import { AuthGate, useAuth } from "./auth";
 import { ModelProvider } from "./model";
 
@@ -47,6 +48,7 @@ export default function App() {
           </Link>
           <div className="flex items-center gap-4">
             <ModelMenu />
+            <MemoryMenu />
             <Account />
           </div>
         </div>
