@@ -126,6 +126,17 @@ export function editSourceText(id: string, hit: LocatedText, value: string): Pro
   });
 }
 
+// Changes queued on the page, applied in one job that compiles once.
+export type QueuedText = { line: number; source: string; start: number; end: number; text: string; raw: boolean };
+export type QueuedPage = { index: number; instruction: string };
+
+export const applyChanges = (id: string, texts: QueuedText[], pages: QueuedPage[]) =>
+  requestJson<void>(`/api/generations/${id}/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, pages }),
+  });
+
 export const regenerateGeneration = (id: string) =>
   requestJson<{ id: string }>(`/api/generations/${id}/regenerate`, { method: "POST" });
 

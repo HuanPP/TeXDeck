@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Download, FileText, Package, Presentation, RotateCw } from "lucide-react";
 import {
+  applyChanges,
   bundleUrl,
-  editFrame,
-  editSourceText,
   getFrames,
   getGeneration,
   locateText,
@@ -14,8 +13,10 @@ import {
   refineGeneration,
   regenerateGeneration,
   texUrl,
+  type QueuedPage,
+  type QueuedText,
 } from "../api";
-import PdfViewer, { type TextClick } from "../components/PdfViewer";
+import PdfViewer, { type PageBox, type PageMark, type TextClick } from "../components/PdfViewer";
 import QuickEdit, { type QuickEditState } from "../components/QuickEdit";
 import Segmented from "../components/Segmented";
 import StatusBadge from "../components/StatusBadge";
@@ -25,6 +26,38 @@ import { useTaskWs } from "../hooks/useTaskWs";
 import type { FrameItem, TaskEvent, GenerationMeta } from "../types";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// Changes wait in the browser (per deck, across reloads) until applied together.
+type PendingText = QueuedText & { page: number; box: PageBox; shown: string };
+type PendingPage = QueuedPage & { page: number; title: string };
+type Pending = { texts: PendingText[]; pages: PendingPage[] };
+const NOTHING: Pending = { texts: [], pages: [] };
+const pendingKey = (id: string) => `texdeck.pending.${id}`;
+
+// Just the changed part of a text fix, with a few characters around it.
+function changedPart(before: string, after: string) {
+  let head = 0;
+  while (head < before.length && head < after.length && before[head] === after[head]) head++;
+  let tail = 0;
+  while (tail < before.length - head && tail < after.length - head
+    && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  const CONTEXT = 8;
+  return {
+    lead: (head > CONTEXT ? "…" : "") + before.slice(Math.max(0, head - CONTEXT), head),
+    removed: before.slice(head, before.length - tail),
+    added: after.slice(head, after.length - tail),
+    trail: before.slice(before.length - tail, before.length - tail + CONTEXT) + (tail > CONTEXT ? "…" : ""),
+  };
+}
+
+function loadPending(id: string): Pending {
+  try {
+    const data = JSON.parse(localStorage.getItem(pendingKey(id)) ?? "null");
+    return data && Array.isArray(data.texts) && Array.isArray(data.pages) ? data : NOTHING;
+  } catch {
+    return NOTHING;
+  }
+}
 const fmtTokens = (n?: number) => {
   const v = n ?? 0;
   return v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
@@ -54,6 +87,18 @@ export default function Generation() {
   const [logLoading, setLogLoading] = useState(false);
   const sawRunningRef = useRef(false);
   const { setPanelOpen } = useModel();
+  const [pending, setPendingState] = useState<Pending>(() => loadPending(id));
+  const applyingRef = useRef(false);
+  const setPending = useCallback((next: Pending | ((p: Pending) => Pending)) => {
+    setPendingState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      if (value.texts.length || value.pages.length) localStorage.setItem(pendingKey(id), JSON.stringify(value));
+      else localStorage.removeItem(pendingKey(id));
+      return value;
+    });
+  }, [id]);
+  useEffect(() => setPendingState(loadPending(id)), [id]);
+  const pendingCount = pending.texts.length + pending.pages.length;
 
   const loadMeta = useCallback(async () => {
     if (!id) return;
@@ -96,11 +141,16 @@ export default function Generation() {
     const { page: clickedPage, rect } = click;
     if (!id || busy) return;
     const seq = ++quickSeq.current;
-    setQuick({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY, status: "locating", value: "" });
+    setQuick({
+      x: rect.left + window.scrollX, y: rect.bottom + window.scrollY, status: "locating", value: "",
+      page: clickedPage, box: click.box,
+    });
     locateText(id, clickedPage, click).then(
       (hit) => {
         if (seq !== quickSeq.current) return;
-        setQuick((q) => q && { ...q, status: "ready", hit, value: hit.text });
+        const queued = pending.texts.find((t) =>
+          t.line === hit.line && t.source === hit.source && t.start === hit.start && t.end === hit.end);
+        setQuick((q) => q && { ...q, status: "ready", hit, value: queued ? queued.text : hit.text, queued: Boolean(queued) });
       },
       (err) => {
         if (seq !== quickSeq.current) return;
@@ -109,20 +159,51 @@ export default function Generation() {
     );
   }
 
-  async function saveQuick() {
-    if (!id || !quick?.hit) return;
-    setQuick({ ...quick, status: "saving", error: undefined });
+  // Queue the fix; a new one on the same run of text replaces the old.
+  function saveQuick() {
+    const hit = quick?.hit;
+    if (!quick || !hit || quick.page === undefined || !quick.box) return;
+    const entry: PendingText = {
+      line: hit.line, source: hit.source, start: hit.start, end: hit.end, text: quick.value, raw: hit.raw,
+      page: quick.page, box: quick.box, shown: hit.text,
+    };
+    setPending((p) => ({
+      ...p,
+      texts: [
+        ...p.texts.filter((t) => !(t.line === hit.line && t.start < hit.end && hit.start < t.end)),
+        ...(quick.value === hit.text ? [] : [entry]),
+      ],
+    }));
+    setQuick(null);
+  }
+
+  async function applyAll() {
+    if (!id || !pendingCount) return;
+    setEditError(null);
+    setEditing(true);
+    applyingRef.current = true;
+    setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting your changes…", error: "" });
     try {
-      await editSourceText(id, quick.hit, quick.value);
-      setQuick(null);
-      setEditError(null);
-      setEditing(true);
-      setProgress({ gen_id: id, status: "running", percent: 0, stage: "Saving your change…", error: "" });
+      await applyChanges(
+        id,
+        pending.texts.map(({ line, source, start, end, text, raw }) => ({ line, source, start, end, text, raw })),
+        pending.pages.map(({ index, instruction }) => ({ index, instruction })),
+      );
       setWatch(true);
     } catch (err) {
-      setQuick((q) => q && { ...q, status: "ready", error: errMsg(err) });
+      applyingRef.current = false;
+      setEditing(false);
+      setProgress(null);
+      setEditError(errMsg(err));
     }
   }
+
+  // Applied: the queue is done with. Failed: it stays, to retry or trim.
+  const finishApply = useCallback((ok: boolean) => {
+    if (!applyingRef.current) return;
+    applyingRef.current = false;
+    if (ok) setPending(NOTHING);
+  }, [setPending]);
 
   const onWsReconnect = useCallback(() => {
     // The server re-sends the task state itself on reconnect; refetch meta in
@@ -151,6 +232,7 @@ export default function Generation() {
           setPdfBust(Date.now());
           setEditText("");
         }
+        finishApply(event.status === "succeeded" && !(fresh?.error || "").trim());
         if (wasActive || changed) {
           setLogText(null);
           setLogOpen(false);
@@ -186,6 +268,9 @@ export default function Generation() {
             await loadFrames();
             setPdfBust(Date.now());
             setEditText("");
+            finishApply(true);
+          } else {
+            finishApply(false);
           }
           setLogText(null);
           setLogOpen(false);
@@ -206,28 +291,28 @@ export default function Generation() {
   // `page` maps the viewer page to a frame; `index` is the key for the edit API.
   const frame = frames.find((f) => f.page === page);
 
-  async function handleEdit(e: FormEvent) {
+  // Queue a request for this slide; a second one for it is added to the first.
+  function handleEdit(e: FormEvent) {
     e.preventDefault();
     if (!id || !editText.trim()) return setEditError("Please describe the change");
     if (!frame) return setEditError("This page has no editable slide");
     setEditError(null);
-    setEditing(true);
-    setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting edit…", error: "" });
-    try {
-      await editFrame(id, frame.index, editText.trim());
-      // The task state is registered before the 202 returns, so (re)attaching
-      // the WS now cannot pick up a stale snapshot of the previous task.
-      setWatch(true);
-    } catch (err) {
-      setEditing(false);
-      setProgress(null);
-      setEditError(errMsg(err));
-    }
+    const text = editText.trim();
+    setPending((p) => {
+      const old = p.pages.find((r) => r.index === frame.index);
+      const entry: PendingPage = {
+        index: frame.index, page, title: frame.title,
+        instruction: old ? `${old.instruction}\n${text}` : text,
+      };
+      return { ...p, pages: [...p.pages.filter((r) => r.index !== frame.index), entry] };
+    });
+    setEditText("");
   }
 
   async function handleRefine(e: FormEvent) {
     e.preventDefault();
     if (!id || !editText.trim()) return setEditError("Please describe the change");
+    if (pendingCount) return setEditError("Apply or discard the queued changes first");
     setEditError(null);
     setEditing(true);
     setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting refine…", error: "" });
@@ -429,11 +514,67 @@ export default function Generation() {
         </section>
       )}
 
+      {succeeded && pendingCount > 0 && (
+        <section className="space-y-3 border border-amber-300 bg-amber-50 p-4" aria-label="Queued changes">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-amber-900">
+              {pendingCount} {pendingCount === 1 ? "change" : "changes"} waiting. Nothing is compiled until you
+              apply them; marked text on the slides shows where.
+            </p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary text-sm" disabled={busy}
+                onClick={() => setPending(NOTHING)}>
+                Discard all
+              </button>
+              <button type="button" className="btn-primary text-sm" disabled={busy} onClick={() => void applyAll()}>
+                {busy ? "Working…" : `Apply ${pendingCount === 1 ? "it" : `all ${pendingCount}`}`}
+              </button>
+            </div>
+          </div>
+          <ul className="space-y-1 text-sm">
+            {[...pending.texts].sort((a, b) => a.page - b.page).map((t) => (
+              <li key={`t${t.line}:${t.start}`} className="flex items-start gap-2">
+                <span className="shrink-0 font-mono text-xs text-amber-800">p.{t.page}</span>
+                <span className="min-w-0 flex-1 break-words text-slate-700">
+                  {(() => {
+                    const d = changedPart(t.shown, t.text);
+                    return (
+                      <>
+                        {d.lead}
+                        {d.removed && <del className="bg-red-100 text-red-700">{d.removed}</del>}
+                        {d.added && <ins className="bg-emerald-100 text-emerald-800 no-underline">{d.added}</ins>}
+                        {d.trail}
+                      </>
+                    );
+                  })()}
+                </span>
+                <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
+                  aria-label="Remove this change"
+                  onClick={() => setPending((p) => ({ ...p, texts: p.texts.filter((x) => x !== t) }))}>×</button>
+              </li>
+            ))}
+            {[...pending.pages].sort((a, b) => a.page - b.page).map((r) => (
+              <li key={`p${r.index}`} className="flex items-start gap-2">
+                <span className="shrink-0 font-mono text-xs text-amber-800">p.{r.page}</span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-slate-700">
+                  {r.title ? `${r.title}: ` : ""}{r.instruction}
+                </span>
+                <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
+                  aria-label="Remove this request"
+                  onClick={() => setPending((p) => ({ ...p, pages: p.pages.filter((x) => x !== r) }))}>×</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {succeeded && (
         <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[1fr_320px]">
           <section className="app-surface flex min-h-[60vh] min-w-0 flex-col p-3">
             <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage}
-              onTextClick={busy ? undefined : handleTextClick} />
+              onTextClick={busy ? undefined : handleTextClick}
+              marks={pending.texts.map((t): PageMark => ({ page: t.page, box: t.box, label: `${t.shown} → ${t.text}` }))}
+              markedPages={new Set([...pending.texts.map((t) => t.page), ...pending.pages.map((r) => r.page)])} />
           </section>
           <aside className="app-surface flex flex-col gap-4 p-4">
             <div>
@@ -479,7 +620,8 @@ export default function Generation() {
               </div>
               {scope === "page" && (
                 <p className="text-xs text-slate-500">
-                  To fix wording, click the text on the slide and edit it directly.
+                  To fix wording, click the text on the slide. Requests and fixes on any page wait in
+                  one list and are applied together, with one compile.
                 </p>
               )}
               {scope === "page" && frames.length > 0 && !frame && (
@@ -499,7 +641,7 @@ export default function Generation() {
                 <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{editError}</div>
               )}
               <button type="submit" className="btn-primary w-full" disabled={busy || (scope === "page" && !frame)}>
-                {busy ? "Working…" : scope === "page" ? "Apply to this page" : "Apply to every slide"}
+                {busy ? "Working…" : scope === "page" ? "Add to changes" : "Apply to every slide"}
               </button>
               {scope === "deck" && (
                 <p className="text-xs text-slate-500">If the result does not compile, the deck is left as it was.</p>
@@ -510,7 +652,7 @@ export default function Generation() {
       )}
 
       {quick && (
-        <QuickEdit state={quick} onClose={closeQuick} onSave={() => void saveQuick()}
+        <QuickEdit state={quick} onClose={closeQuick} onSave={saveQuick}
           onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })} />
       )}
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { LocatedText } from "../api";
+import type { PageBox } from "./PdfViewer";
 
 export type QuickEditState = {
   // Page coordinates (scroll included) just below the clicked line.
@@ -10,6 +11,10 @@ export type QuickEditState = {
   hit?: LocatedText;
   value: string;
   error?: string;
+  // Where the clicked line sits, to mark it while the change waits.
+  page?: number;
+  box?: PageBox;
+  queued?: boolean; // this run already has a queued change, shown in `value`
 };
 
 type Props = {
@@ -23,7 +28,7 @@ const WIDTH = 460;
 
 // Small editor anchored under text clicked on the preview. It shows the words
 // as on the slide (LaTeX only when the sentence has math or other commands);
-// saving recompiles without the model.
+// saving queues the change, applied with the others in one compile.
 export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -56,7 +61,7 @@ export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
 
   const left = Math.max(8, Math.min(state.x, window.scrollX + window.innerWidth - WIDTH - 16));
   const hit = state.hit;
-  const changed = hit !== undefined && state.value !== hit.text;
+  const changed = hit !== undefined && (state.value !== hit.text || Boolean(state.queued));
 
   return createPortal(
     <div ref={boxRef} role="dialog" aria-label="Edit text"
@@ -86,14 +91,14 @@ export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
       )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <p className="text-xs text-slate-500">
-          {hit ? "Enter saves and recompiles; no model call." : ""}
+          {hit ? "Enter adds it to your changes; nothing recompiles until you apply them." : ""}
         </p>
         <div className="flex shrink-0 gap-2">
           <button type="button" className="btn-secondary px-3 py-1 text-sm" onClick={onClose}>Cancel</button>
           {hit && (
             <button type="button" className="btn-primary px-3 py-1 text-sm"
               disabled={!changed || state.status === "saving"} onClick={onSave}>
-              {state.status === "saving" ? "Saving…" : "Save"}
+              {state.queued ? "Update change" : "Add change"}
             </button>
           )}
         </div>

@@ -16,13 +16,29 @@ const MAX_FIT_WIDTH = 1100;
 const MAX_PAGE_WIDTH = 2000;
 const THUMB_WIDTH = 104;
 
-export type TextClick = { text: string; before: string; after: string; page: number; rect: DOMRect };
+// A box on the page as fractions of its width and height (zoom-proof).
+export type PageBox = { x: number; y: number; w: number; h: number };
+
+export type TextClick = {
+  text: string;
+  before: string;
+  after: string;
+  page: number;
+  rect: DOMRect;
+  box: PageBox;
+};
+
+// A queued change drawn over the page, until it is applied.
+export type PageMark = { page: number; box: PageBox; label: string };
 
 type Props = {
   file: string | null;
   onPageChange?: (page: number) => void;
   // Called when the user clicks (not drag-selects) text on the page.
   onTextClick?: (click: TextClick) => void;
+  marks?: PageMark[];
+  // Pages with queued changes get a dot on their thumbnail.
+  markedPages?: Set<number>;
 };
 
 type Piece = { s: HTMLElement; r: DOMRect };
@@ -83,7 +99,7 @@ function lineAround(span: HTMLElement): { text: string; before: string; after: s
   return { ...line, before: neighbour(all, line.rect, h, -1), after: neighbour(all, line.rect, h, 1) };
 }
 
-export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
+export default function PdfViewer({ file, onPageChange, onTextClick, marks = [], markedPages }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -206,17 +222,33 @@ export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
         loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
           {numPages > 0 && (
-            <div className={`mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick ? " deck-editable" : ""}`}
+            <div className={`relative mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick ? " deck-editable" : ""}`}
               onClick={(e) => {
                 if (!onTextClick) return;
                 const selection = window.getSelection();
                 if (selection && !selection.isCollapsed) return; // selecting to copy, not editing
                 const span = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span");
                 if (!span || !(span.textContent ?? "").trim()) return;
-                onTextClick({ ...lineAround(span), page: Math.min(pageNumber, numPages) });
+                const line = lineAround(span);
+                const page = e.currentTarget.getBoundingClientRect();
+                const box = {
+                  x: (line.rect.left - page.left) / page.width,
+                  y: (line.rect.top - page.top) / page.height,
+                  w: line.rect.width / page.width,
+                  h: line.rect.height / page.height,
+                };
+                onTextClick({ ...line, box, page: Math.min(pageNumber, numPages) });
               }}>
               <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
                 renderTextLayer renderAnnotationLayer />
+              {marks.filter((m) => m.page === Math.min(pageNumber, numPages)).map((m, i) => (
+                <div key={i} title={m.label} aria-hidden="true"
+                  className="pointer-events-none absolute z-10 rounded-sm bg-amber-300/40 outline outline-2 outline-amber-500"
+                  style={{
+                    left: `${m.box.x * 100}%`, top: `${m.box.y * 100}%`,
+                    width: `${m.box.w * 100}%`, height: `${m.box.h * 100}%`,
+                  }} />
+              ))}
             </div>
           )}
         </div>
@@ -232,7 +264,12 @@ export default function PdfViewer({ file, onPageChange, onTextClick }: Props) {
                   : "border-transparent opacity-80 hover:border-slate-300 hover:opacity-100"}`}>
                 <Page pageNumber={n} width={THUMB_WIDTH} renderTextLayer={false} renderAnnotationLayer={false}
                   loading={<div className="bg-slate-100" style={{ width: THUMB_WIDTH, height: THUMB_WIDTH * 9 / 16 }} />} />
-                <span className="block pt-0.5 text-center font-mono text-[10px] text-slate-500">{n}</span>
+                <span className="flex items-center justify-center gap-1 pt-0.5 font-mono text-[10px] text-slate-500">
+                  {markedPages?.has(n) && (
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="has changes" />
+                  )}
+                  {n}
+                </span>
               </button>
             ))}
           </div>
