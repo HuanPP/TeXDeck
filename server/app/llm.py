@@ -11,7 +11,7 @@ from typing import Any
 
 import openai
 
-from . import auth, chatgpt, claude_code
+from . import agy, auth, chatgpt, claude_code
 from .config import settings
 
 ProgressCallback = Callable[[str, int], None]  # (stage description, percent 0-100)
@@ -168,6 +168,31 @@ class ClaudeCodeClient:
         return content
 
 
+class AgyClient:
+    """Same complete() contract as LlmClient, backed by the agy CLI in a sandbox.
+
+    temperature is accepted and ignored: agy does not expose it.
+    """
+
+    def __init__(self, on_usage: UsageCallback | None = None) -> None:
+        self._on_usage = on_usage
+        self.model = agy_model()
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        on_usage: UsageCallback | None = None,
+    ) -> str:
+        del temperature
+        callback = on_usage if on_usage is not None else self._on_usage
+        try:
+            return agy.complete(messages, callback, "" if self.model == "default" else self.model)
+        except agy.AgyError as exc:
+            raise LlmError(str(exc)) from exc
+
+
 # --------------------------------------------------------------------------
 # Which model to use. The page picks one of three providers; the choice and
 # any API key entered on the page live in settings.model_state_file, or with
@@ -176,7 +201,7 @@ class ClaudeCodeClient:
 # and TEXDECK_LLM_PROVIDER other than "auto" pins the provider.
 # --------------------------------------------------------------------------
 
-PROVIDERS = ("chatgpt", "claude-code", "api")
+PROVIDERS = ("chatgpt", "claude-code", "agy", "api")
 _state_lock = threading.Lock()
 
 
@@ -260,10 +285,14 @@ def claude_model() -> str:
     return _chosen_model("claude-code") or settings.claude_code_model or "default"
 
 
+def agy_model() -> str:
+    return _chosen_model("agy") or settings.agy_model or "default"
+
+
 def set_model(provider: str, model: str) -> None:
     """Remember which model a provider uses (the API key's model lives with the key)."""
     model = model.strip()
-    if provider not in ("chatgpt", "claude-code"):
+    if provider not in ("chatgpt", "claude-code", "agy"):
         raise LlmError(f"Cannot pick a model for {provider} here")
     if not model or len(model) > 100 or any(ch.isspace() for ch in model):
         raise LlmError("Invalid model name")
@@ -292,6 +321,8 @@ def _usable(provider: str) -> bool:
         return chatgpt.load_credential() is not None
     if provider == "api":
         return bool(api_config().api_key)
+    if provider == "agy":
+        return not agy.availability() and agy.signed_in()
     return provider == "claude-code"  # checked when used; a logged-out CLI reports itself
 
 
@@ -309,14 +340,20 @@ def select_provider(provider: str) -> None:
             raise LlmError("Claude Code is not installed on this computer")
         if not claude_code.auth_status(refresh=True)["logged_in"]:
             raise LlmError("Claude Code is not signed in; connect it first")
+    if provider == "agy":
+        reason = agy.availability()
+        if reason:
+            raise LlmError(reason)
+        if not agy.signed_in():
+            raise LlmError("agy is not signed in; connect it first")
     _set_choice(provider)
 
 
 def active_provider() -> str:
-    """Return "chatgpt", "claude-code" or "api".
+    """Return "chatgpt", "claude-code", "agy" or "api".
 
     The page's choice wins while it is usable; otherwise a ChatGPT sign-in,
-    otherwise the API key. Claude Code is only ever used once chosen.
+    otherwise the API key. Claude Code and agy are only ever used once chosen.
     """
     if provider_locked():
         return settings.llm_provider
@@ -332,6 +369,8 @@ def active_model() -> str:
         return chatgpt_model()
     if provider == "claude-code":
         return claude_model()
+    if provider == "agy":
+        return agy_model()
     return api_config().model
 
 
@@ -347,6 +386,7 @@ def model_status() -> dict[str, Any]:
         "locked": provider_locked(),
         "chatgpt": {**chatgpt.status(), "model": chatgpt_model()},
         "claude": {**claude_code.status(), "model": claude_model(), "models": claude_code.MODELS},
+        "agy": {**agy.status(), "model": agy_model()},
         "api": {
             "configured": bool(api.api_key),
             "base_url": api.base_url,
@@ -364,6 +404,7 @@ def _signed_in(provider: str) -> Callable[[], None]:
 
 chatgpt.on_signed_in = _signed_in("chatgpt")
 claude_code.on_signed_in = _signed_in("claude-code")
+agy.on_signed_in = _signed_in("agy")
 
 
 def ensure_model_ready() -> None:
@@ -377,14 +418,22 @@ def ensure_model_ready() -> None:
             raise LlmError("Claude Code is not installed on this computer; pick another model at the top")
         if not claude_code.auth_status()["logged_in"]:
             raise LlmError("Claude Code is not signed in; connect it again from the model button at the top")
+    elif provider == "agy":
+        reason = agy.availability()
+        if reason:
+            raise LlmError(f"{reason}; pick another model at the top")
+        if not agy.signed_in():
+            raise LlmError("agy is not signed in; connect it again from the model button at the top")
     elif not api_config().api_key:
         raise LlmError("No model connected: click the model button at the top and connect one")
 
 
 def create_client(
     on_usage: UsageCallback | None = None,
-) -> LlmClient | ChatGptClient | ClaudeCodeClient:
+) -> LlmClient | ChatGptClient | ClaudeCodeClient | AgyClient:
     provider = active_provider()
+    if provider == "agy":
+        return AgyClient(on_usage=on_usage)
     if provider == "claude-code":
         if claude_code.find_command() is None:
             raise LlmError(

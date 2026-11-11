@@ -31,7 +31,7 @@ from .edit import (
     resolve_frame_pages,
     text_span,
 )
-from . import auth, chatgpt, claude_code, custom_templates
+from . import agy, auth, chatgpt, claude_code, custom_templates
 from .custom_templates import CustomTemplateError, TemplateNotFound
 from .llm import (
     LlmError,
@@ -684,6 +684,11 @@ def api_chatgpt_models() -> dict[str, list[dict[str, str]]]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/model/agy/models")
+def api_agy_models() -> dict[str, list[dict[str, str]]]:
+    return {"models": agy.list_models()}
+
+
 @app.put("/api/model/api")
 def api_save_api_key(body: ApiKeyBody) -> dict[str, Any]:
     try:
@@ -742,6 +747,37 @@ def api_claude_code(body: ClaudeCodeBody) -> dict[str, Any]:
 @app.delete("/api/auth/claude/login")
 def api_claude_cancel() -> dict[str, Any]:
     claude_code.cancel_login()
+    return model_status()
+
+
+@app.post("/api/auth/agy/login")
+def api_agy_login() -> dict[str, Any]:
+    """Connect agy; "url" is empty when this account's agy was already signed in."""
+    try:
+        url = agy.start_login()
+    except agy.AgyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": url, **model_status()}
+
+
+@app.post("/api/auth/agy/code")
+def api_agy_code(body: ClaudeCodeBody) -> dict[str, Any]:
+    try:
+        agy.submit_code(body.code)
+    except agy.AgyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return model_status()
+
+
+@app.delete("/api/auth/agy/login")
+def api_agy_cancel() -> dict[str, Any]:
+    agy.cancel_login()
+    return model_status()
+
+
+@app.delete("/api/auth/agy")
+def api_agy_logout() -> dict[str, Any]:
+    agy.sign_out()
     return model_status()
 
 

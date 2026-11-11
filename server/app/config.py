@@ -19,13 +19,21 @@ class Settings(BaseSettings):
 
     # "auto" lets the page choose (ChatGPT, Claude Code or an API key) and
     # remembers it in model_state_file; api / chatgpt / claude-code pin one.
-    llm_provider: Literal["auto", "api", "chatgpt", "claude-code"] = "auto"
+    llm_provider: Literal["auto", "api", "chatgpt", "claude-code", "agy"] = "auto"
     chatgpt_model: str = "gpt-6.1-sol"
     chatgpt_reasoning_effort: str = ""  # "" leaves the model default; low/medium/high
     chatgpt_auth_file: Path = REPO_ROOT / "server" / ".chatgpt-auth.json"
     claude_code_command: str = "claude"
     claude_code_model: str = "sonnet"  # alias or full name; "" leaves the CLI default
     claude_code_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
+    # Antigravity CLI (app.agy). It only runs inside bubblewrap, so only on Linux.
+    agy_command: str = "agy"
+    agy_model: str = ""  # an id from `agy models`; "" leaves the CLI default
+    agy_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
+    bwrap_command: str = "bwrap"
+    # agy's own home without accounts (with accounts: accounts/<name>/agy). Never
+    # the real home: its settings may let the agent run commands unasked.
+    agy_home: Path = REPO_ROOT / "server" / ".agy-home"
     # The page's model choice and any API key entered there (written 0600).
     model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
     # Sign-in accounts (python -m app.auth add <name>); sign-in is off while empty
