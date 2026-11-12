@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,11 +18,14 @@ from . import deck, figures, layout, memory, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
+    DECK_INDEX,
     KEEP_NOTES_RULE,
     TITLE_INDEX,
     EditError,
     TextChange,
+    apply_deck_reply,
     apply_text_changes,
+    build_deck_edit_messages,
     build_frame_edit_messages,
     build_frames_edit_messages,
     extract_frame,
@@ -97,11 +100,18 @@ class TextChangeBody(BaseModel):
 class PageChangeBody(BaseModel):
     index: int  # frame index, as in /frames
     instruction: str
+    figures: list[str] = []  # files from POST /figures attached to this change
+
+
+class DeckChangeBody(BaseModel):
+    instruction: str
+    figures: list[str] = []
 
 
 class BatchBody(BaseModel):
     texts: list[TextChangeBody] = []
     pages: list[PageChangeBody] = []
+    deck: DeckChangeBody | None = None  # a whole-deck request, sent with the slide requests
 
 
 class CallbackUrlBody(BaseModel):
@@ -497,10 +507,66 @@ def _run_line_edit(gen_id: str, line: int, old: str, new: str, progress: Progres
         raise
 
 
+def _edit_context(meta: GenerationMeta) -> str:
+    return "\n\n".join(
+        part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context()) if part
+    )
+
+
+def _attachment_blocks(
+    gdir: Path, meta: GenerationMeta, attached: dict[int, list[str]]
+) -> dict[int, list[dict[str, Any]]]:
+    """Request key -> the blocks showing the images the user attached to that request."""
+    by_file = {f["file"]: f for f in meta.figures}
+    out: dict[int, list[dict[str, Any]]] = {}
+    for key, files in attached.items():
+        if files:
+            missing = [f for f in files if f not in by_file]
+            if missing:
+                raise EditError(f"Attached image not found: {missing[0]}")
+            out[key] = figures.request_blocks(gdir, [by_file[f] for f in files])
+    return out
+
+
+def _ask_with_retry(
+    client: Any, gdir: Path, stem: str, messages: list[dict[str, Any]], apply: Callable[[str], str]
+) -> tuple[str, dict[str, list[str]]]:
+    """One model call whose reply apply() turns into the new deck; one retry when the
+    reply cannot be used. Returns (new tex, learned memory)."""
+    response = client.complete(messages)
+    _dump_llm(gdir, stem, messages, response)
+    response, learned = memory.split_reply(response)
+    try:
+        return apply(response), learned
+    except (EditError, DeckError) as first_err:
+        retry = messages + [
+            {"role": "assistant", "content": response},
+            {
+                "role": "user",
+                "content": (
+                    f"That reply could not be used: {first_err}\n"
+                    "Answer again in the required format. No explanation, no markdown fences."
+                ),
+            },
+        ]
+        response = client.complete(retry)
+        _dump_llm(gdir, f"{stem}_retry", retry, response)
+        response, learned = memory.split_reply(response)
+        return apply(response), learned
+
+
 def _run_batch(
-    gen_id: str, texts: list[TextChange], pages: list[tuple[int, str]], progress: ProgressCallback
+    gen_id: str,
+    texts: list[TextChange],
+    pages: list[tuple[int, str]],
+    progress: ProgressCallback,
+    deck_instruction: str = "",
+    attached: dict[int, list[str]] | None = None,
 ) -> None:
-    """Everything the user queued on the page: text fixes, then slide requests, one compile."""
+    """Everything the user queued on the page: text fixes, then the slide requests and
+    any whole-deck request in one model call, then one compile.
+
+    attached: request key (frame index, TITLE_INDEX, DECK_INDEX) -> image files."""
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
     tex_path = gdir / "main.tex"
@@ -512,34 +578,47 @@ def _run_batch(
         client = None
         learned: dict[str, list[str]] = {}
         template = deck.get_template(meta.template_key)
-        if pages:
-            frames = parse_frames(tex)
-            by_index = {f.index: f for f in frames}
-            requests = [(by_index[i], instruction) for i, instruction in pages if i != TITLE_INDEX]
-            title_request = next((s_ for i, s_ in pages if i == TITLE_INDEX), None)
-            block = title_block(tex) if title_request is not None else None
-            if title_request is not None and block is None:
-                raise EditError("This deck has no title commands to change")
-            title = (block.text, title_request) if block is not None and title_request else None
-            context = "\n\n".join(
-                part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context())
-                if part
-            )
-            messages = build_frames_edit_messages(requests, template.main_tex, context, title)
-            label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
-            progress(f"Editing {label} with the model", 20)
-            client = create_client(on_usage=usage.add)
-            response = client.complete(messages)
-            _dump_llm(gdir, f"batch_{meta.edit_count + 1}", messages, response)
-            response, learned = memory.split_reply(response)
-            new = extract_frames(response, [i for i, _ in pages])
+        if pages or deck_instruction:
             files = deck.figure_files(gdir)
-            for frame_tex in new.values():
-                deck.check_body(deck.strip_tex_comments(frame_tex), files)
-            tex = replace_frames(tex, frames, new)
-            if title is not None:
-                # The title commands sit in the preamble, which the theme check covers.
-                deck.extract_tex(tex, template, files)
+            context = _edit_context(meta)
+            attachments = _attachment_blocks(gdir, meta, attached or {})
+            stem = f"batch_{meta.edit_count + 1}"
+            client = create_client(on_usage=usage.add)
+            if deck_instruction:
+                messages = build_deck_edit_messages(
+                    tex, template.main_tex, deck_instruction, pages, context, attachments
+                )
+                progress("Revising the deck with the model", 20)
+                base = tex
+                tex, learned = _ask_with_retry(
+                    client, gdir, stem, messages,
+                    lambda r: deck.extract_tex(apply_deck_reply(base, r, [i for i, _ in pages]), template, files),
+                )
+            else:
+                frames = parse_frames(tex)
+                by_index = {f.index: f for f in frames}
+                requests = [(by_index[i], instruction) for i, instruction in pages if i != TITLE_INDEX]
+                title_request = next((s_ for i, s_ in pages if i == TITLE_INDEX), None)
+                block = title_block(tex) if title_request is not None else None
+                if title_request is not None and block is None:
+                    raise EditError("This deck has no title commands to change")
+                title = (block.text, title_request) if block is not None and title_request else None
+                messages = build_frames_edit_messages(requests, template.main_tex, context, title, attachments)
+                label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
+                progress(f"Editing {label} with the model", 20)
+                base = tex
+
+                def apply(response: str) -> str:
+                    new = extract_frames(response, [i for i, _ in pages])
+                    for frame_tex in new.values():
+                        deck.check_body(deck.strip_tex_comments(frame_tex), files)
+                    out = replace_frames(base, frames, new)
+                    if title is not None:
+                        # The title commands sit in the preamble, which the theme check covers.
+                        deck.extract_tex(out, template, files)
+                    return out
+
+                tex, learned = _ask_with_retry(client, gdir, stem, messages, apply)
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
         (edit_dir / "batch.json").write_text(
@@ -548,6 +627,8 @@ def _run_batch(
                     "kind": "batch",
                     "texts": [asdict(t) for t in texts],
                     "pages": [{"index": i, "instruction": s} for i, s in pages],
+                    "deck": deck_instruction,
+                    "figures": {str(k): v for k, v in (attached or {}).items() if v},
                     "time": datetime.now(timezone.utc).isoformat(),
                 },
                 ensure_ascii=False,
@@ -606,45 +687,14 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         original = tex_path.read_text(encoding="utf-8")
         template = deck.get_template(meta.template_key)
         stem = f"refine_{meta.refine_count + 1}"
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are revising a complete XeLaTeX Beamer deck. "
-                    "Output only the full revised, compilable document. "
-                    "No explanation, no markdown fences. " + KEEP_NOTES_RULE + " " + deck.DIAGRAM_RULE
-                ),
-            },
-            {"role": "user", "content": template.main_tex},
-            {"role": "user", "content": original},
-            {"role": "user", "content": "Revision request:\n" + instruction + "\n\n" + memory.edit_context()},
-        ]
-        if meta.figures:
-            messages.insert(3, {"role": "user", "content": figures.catalog(meta.figures)})
+        messages = build_deck_edit_messages(original, template.main_tex, instruction, (), _edit_context(meta))
         progress("Revising the whole deck with the model", 30)
         client = create_client(on_usage=usage.add)
-        response = client.complete(messages)
-        _dump_llm(gdir, stem, messages, response)
-        response, learned = memory.split_reply(response)
-        progress("Validating model output", 55)
-        try:
-            tex = deck.extract_tex(response, template, deck.figure_files(gdir))
-        except DeckError as first_err:
-            retry = messages + [
-                {"role": "assistant", "content": response},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Previous output was invalid: {first_err}\n"
-                        "Re-output a complete, compilable XeLaTeX Beamer document. "
-                        "No explanation, no markdown fences."
-                    ),
-                },
-            ]
-            response = client.complete(retry)
-            _dump_llm(gdir, f"{stem}_retry", retry, response)
-            response, learned = memory.split_reply(response)
-            tex = deck.extract_tex(response, template, deck.figure_files(gdir))
+        files = deck.figure_files(gdir)
+        tex, learned = _ask_with_retry(
+            client, gdir, stem, messages,
+            lambda r: deck.extract_tex(apply_deck_reply(original, r), template, files),
+        )
         edit_dir = store.next_edit_dir(gen_id)
         (edit_dir / "main.tex.bak").write_text(original, encoding="utf-8")
         (edit_dir / "refine.json").write_text(
@@ -1368,8 +1418,16 @@ def api_batch_edit(gen_id: str, body: BatchBody) -> Response:
     tex_path = _file(gen_id, "main.tex", "TeX not generated yet")
     pages = [(p.index, p.instruction.strip()) for p in body.pages if p.instruction.strip()]
     texts = [TextChange(**t.model_dump()) for t in body.texts]
-    if not texts and not pages:
+    deck_instruction = body.deck.instruction.strip() if body.deck else ""
+    attached = {p.index: p.figures for p in body.pages if p.instruction.strip() and p.figures}
+    if deck_instruction and body.deck and body.deck.figures:
+        attached[DECK_INDEX] = body.deck.figures
+    if not texts and not pages and not deck_instruction:
         raise HTTPException(400, detail="Nothing to apply")
+    known_files = {f["file"] for f in _load(gen_id).figures}
+    stray = next((f for files in attached.values() for f in files if f not in known_files), None)
+    if stray:
+        raise HTTPException(400, detail=f"Attached image not found: {stray}")
     tex = tex_path.read_text(encoding="utf-8")
     try:
         if texts:
@@ -1384,17 +1442,52 @@ def api_batch_edit(gen_id: str, body: BatchBody) -> Response:
         raise HTTPException(400, detail=f"Slide index not found: {unknown[0]}")
     if len({i for i, _ in pages}) != len(pages):
         raise HTTPException(400, detail="One request per slide; merge them")
-    if pages:
+    if pages or deck_instruction:
         _require_model()
 
     def job(progress: ProgressCallback) -> None:
-        _run_batch(gen_id, texts, pages, progress)
+        _run_batch(gen_id, texts, pages, progress, deck_instruction, attached)
 
     try:
         tasks.start(gen_id, job)
     except tasks.TaskBusy as e:
         raise HTTPException(409, detail=str(e)) from e
     return Response(status_code=202)
+
+
+@app.post("/api/generations/{gen_id}/figures")
+async def api_add_figures(
+    gen_id: str,
+    images: list[UploadFile] = File(...),
+    notes: list[str] = Form(default=[]),
+) -> dict[str, Any]:
+    """Images for queued edits; they join the deck's image files right away."""
+    meta = _load(gen_id)
+    if tasks.is_running(gen_id):
+        raise HTTPException(409, detail="Wait for the running job to finish")
+    data = [
+        (f.filename or "image", await f.read(figures.MAX_FIGURE_BYTES + 1), notes[i] if i < len(notes) else "")
+        for i, f in enumerate(images)
+        if f.filename
+    ]
+    if not data:
+        raise HTTPException(400, detail="No image")
+    try:
+        added = figures.add(store.generation_dir(gen_id), meta.figures, data)
+    except figures.FigureError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    meta.figures = meta.figures + added
+    store.save_meta(meta)
+    return {"figures": added}
+
+
+@app.get("/api/generations/{gen_id}/figures/{name}")
+def api_figure(gen_id: str, name: str) -> FileResponse:
+    meta = _load(gen_id)
+    record = next((f for f in meta.figures if Path(f["file"]).name == name), None)
+    if record is None:
+        raise HTTPException(404, detail="Image not found")
+    return FileResponse(store.generation_dir(gen_id) / record["file"])
 
 
 @app.post("/api/generations/{gen_id}/refine")

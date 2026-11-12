@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .deck import DIAGRAM_RULE
+from .llm import text_block
 
 
 class EditError(RuntimeError):
@@ -259,32 +260,57 @@ def build_frame_edit_messages(
 _FRAME_MARK_RE = re.compile(r"^%+\s*(?:FRAME\s+(\d+)|(TITLE))\s*$", re.MULTILINE)
 
 
+_TITLE_RULE = (
+    "The title page comes from the preamble's title commands, marked %% TITLE: answer it "
+    "with a line `%% TITLE` followed by the revised \\title, \\subtitle, \\author, "
+    "\\institute and \\date commands only (keep any [short] arguments). "
+)
+
+
+def _with_attachments(
+    parts: list[tuple[str, list[dict[str, Any]]]], context: str
+) -> str | list[dict[str, Any]]:
+    """Join (text, extra blocks) parts into one message; plain text when nothing is attached."""
+    texts = [context] if context else []
+    if not any(blocks for _, blocks in parts):
+        return "\n\n".join(texts + [text for text, _ in parts])
+    content: list[dict[str, Any]] = [text_block(t) for t in texts]
+    for text, blocks in parts:
+        content.append(text_block(text))
+        content.extend(blocks)
+    return content
+
+
 def build_frames_edit_messages(
     requests: list[tuple[Frame, str]],
     template_main_tex: str,
     context: str = "",
     title: tuple[str, str] | None = None,
+    attachments: dict[int, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """One call that revises several frames; each comes back after a `%% FRAME n` line.
 
     context: anything every change needs to know (the deck's image files...).
     title: (the title commands, the change asked for the title page), if any.
+    attachments: frame index (TITLE_INDEX for the title) -> content blocks shown
+    right after that change, such as new images the user attached to it.
     """
+    attachments = attachments or {}
     parts = [
-        f"%% FRAME {frame.index}\n{frame.tex}\n\nChange for frame {frame.index}:\n{instruction}"
+        (
+            f"%% FRAME {frame.index}\n{frame.tex}\n\nChange for frame {frame.index}:\n{instruction}",
+            attachments.get(frame.index, []),
+        )
         for frame, instruction in requests
     ]
     title_rule = ""
     if title is not None:
-        parts.insert(0, f"%% TITLE\n{title[0]}\n\nChange for the title page:\n{title[1]}")
-        title_rule = (
-            "The title page comes from the preamble's title commands, marked %% TITLE: answer it "
-            "with a line `%% TITLE` followed by the revised \\title, \\subtitle, \\author, "
-            "\\institute and \\date commands only (keep any [short] arguments). "
+        parts.insert(
+            0,
+            (f"%% TITLE\n{title[0]}\n\nChange for the title page:\n{title[1]}", attachments.get(TITLE_INDEX, [])),
         )
-    content = "\n\n".join(parts)
-    if context:
-        content = f"{context}\n\n{content}"
+        title_rule = _TITLE_RULE
+    content = _with_attachments(parts, context)
     return [
         {
             "role": "system",
@@ -335,6 +361,136 @@ def replace_frames(tex: str, frames: list[Frame], new: dict[int, str]) -> str:
             raise EditError("This deck has no title commands to change")
         tex = replace_title_block(tex, block, new[TITLE_INDEX])
     return tex
+
+
+DECK_INDEX = -1  # attachments key for the whole-deck request
+
+_DECK_MARK_RE = re.compile(
+    r"^%+\s*(?:FRAME\s+(\d+)|DELETE\s+(\d+)|INSERT\s+AFTER\s+(\d+)|(TITLE))\s*$", re.MULTILINE
+)
+_NUMBER_MARK_RE = re.compile(r"^%% FRAME \d+\n", re.MULTILINE)
+
+DECK_REPLY_RULE = (
+    "Every frame of the deck is preceded by a line `%% FRAME <number>`. Reply with only what "
+    "changes, as blocks: `%% FRAME <n>` followed by the complete revised frame (or several "
+    "frames, to split it); `%% DELETE <n>` to remove frame n; `%% INSERT AFTER <n>` followed by "
+    "new frames and any \\section lines they need (n = 0 puts them before the first frame); "
+    "`%% TITLE` followed by the revised \\title, \\subtitle, \\author, \\institute and \\date "
+    "commands only. Leave out every frame that stays the same, and always use the numbers of "
+    "the deck as given, not as they will be after your changes. Only when the preamble must "
+    "change, or when most frames change, output the complete revised document from "
+    "\\documentclass to \\end{document} instead. No explanation, no markdown fences."
+)
+
+
+def numbered_deck(tex: str) -> str:
+    """The deck with a `%% FRAME n` line before every frame, as the model sees it."""
+    lines = tex.split("\n")
+    for frame in reversed(parse_frames(tex)):
+        lines.insert(frame.start_line - 1, f"%% FRAME {frame.index}")
+    return "\n".join(lines)
+
+
+def build_deck_edit_messages(
+    tex: str,
+    template_main_tex: str,
+    instruction: str,
+    pages: list[tuple[int, str]] = (),  # type: ignore[assignment]
+    context: str = "",
+    attachments: dict[int, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """One call for a whole-deck request plus any per-slide requests; the reply is
+    applied by apply_deck_reply.
+
+    pages: (frame index or TITLE_INDEX, change) pairs.
+    attachments: request key (frame index, TITLE_INDEX, DECK_INDEX) -> extra blocks.
+    """
+    attachments = attachments or {}
+    parts: list[tuple[str, list[dict[str, Any]]]] = []
+    if instruction.strip():
+        parts.append((f"Revision request for the whole deck:\n{instruction}", attachments.get(DECK_INDEX, [])))
+    for index, change in pages:
+        label = "the title page (answer with %% TITLE)" if index == TITLE_INDEX else f"frame {index}"
+        parts.append((f"Change for {label}:\n{change}", attachments.get(index, [])))
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are revising a XeLaTeX Beamer deck. " + DECK_REPLY_RULE + " "
+                + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
+            ),
+        },
+        {"role": "user", "content": template_main_tex},
+        {"role": "user", "content": numbered_deck(tex)},
+        {"role": "user", "content": _with_attachments(parts, context)},
+    ]
+
+
+def _frames_text(chunk: str, what: str) -> list[str]:
+    """Lines up to the last \\end{frame} (\\section lines may come first); at least
+    one complete frame."""
+    text = _strip_markdown_fences(chunk).strip("\n")
+    try:
+        frames = parse_frames(text)
+    except EditError as e:
+        raise EditError(f"{what}: {e}") from e
+    if not frames:
+        raise EditError(f"{what}: no complete \\begin{{frame}}...\\end{{frame}} block")
+    return text.split("\n")[: frames[-1].end_line]
+
+
+def apply_deck_reply(tex: str, reply: str, required: list[int] = ()) -> str:  # type: ignore[assignment]
+    """Apply a reply written to DECK_REPLY_RULE: a full document, or change blocks.
+
+    required: frame indices (TITLE_INDEX for the title) the user asked about; each
+    must be answered by a FRAME, DELETE or TITLE block unless the whole document
+    came back.
+    """
+    text = _strip_markdown_fences(reply)
+    if r"\documentclass" in text:
+        return _NUMBER_MARK_RE.sub("", text)
+    marks = list(_DECK_MARK_RE.finditer(text))
+    if not marks:
+        raise EditError("The model returned neither changed slides nor a full document")
+    frames = parse_frames(tex)
+    count = len(frames)
+    edits: list[tuple[int, int, list[str]]] = []  # 0-based [start, end) line ranges
+    touched: set[int] = set()
+    title_text: str | None = None
+    for k, mark in enumerate(marks):
+        chunk = text[mark.end() : marks[k + 1].start() if k + 1 < len(marks) else len(text)]
+        replace, delete, after, title = mark.groups()
+        if title:
+            title_text = chunk.strip("\n")
+            touched.add(TITLE_INDEX)
+            continue
+        n = int(replace or delete or after)
+        if not (0 if after else 1) <= n <= count:
+            raise EditError(f"The model referred to slide {n}, but the deck has {count}")
+        if after:
+            at = frames[n - 1].end_line if n else frames[0].start_line - 1 if frames else 0
+            edits.append((at, at, _frames_text(chunk, f"New slides after {n}")))
+            continue
+        if n in touched:
+            raise EditError(f"The model changed slide {n} twice")
+        touched.add(n)
+        frame = frames[n - 1]
+        new = [] if delete else _frames_text(chunk, f"Slide {n}")
+        edits.append((frame.start_line - 1, frame.end_line, new))
+    missing = [i for i in required if i not in touched]
+    if missing:
+        names = ", ".join("title page" if i == TITLE_INDEX else str(i) for i in missing)
+        raise EditError(f"Model did not answer the request for slide(s) {names}")
+    lines = tex.split("\n")
+    for start, end, new in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        lines[start:end] = new
+    out = "\n".join(lines)
+    if title_text is not None:
+        block = title_block(out)
+        if block is None:
+            raise EditError("This deck has no title commands to change")
+        out = replace_title_block(out, block, title_text)
+    return out
 
 
 def extract_frame(response: str) -> str:

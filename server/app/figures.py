@@ -9,6 +9,7 @@ optional note and the pixel size.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from .llm import image_block, text_block
 
 FIGURE_DIR = deck.FIGURE_DIR
 MAX_FIGURES = 12
+MAX_DECK_FIGURES = 40  # including images attached to later edits
 MAX_FIGURE_BYTES = 20 * 1024 * 1024
 MAX_FIGURE_SIDE = 4096  # the browser sends at most 2400; this guards direct API use
 MAX_NOTE_CHARS = 300
@@ -48,6 +50,45 @@ def store(gdir: Path, uploads: list[tuple[str, bytes, str]]) -> list[dict[str, A
              "width": width, "height": height}
         )
     return records
+
+
+def add(gdir: Path, existing: list[dict[str, Any]], uploads: list[tuple[str, bytes, str]]) -> list[dict[str, Any]]:
+    """Images attached to edits of a finished deck: numbered after the existing ones.
+
+    Returns the new records only; the caller appends them to meta.figures."""
+    if len(existing) + len(uploads) > MAX_DECK_FIGURES:
+        raise FigureError(f"At most {MAX_DECK_FIGURES} images per deck")
+    folder = Path(gdir) / FIGURE_DIR
+    taken = [int(m[1]) for f in folder.glob("fig-*.*") if (m := re.match(r"fig-(\d+)\.", f.name))]
+    number = max(taken, default=0)
+    records: list[dict[str, Any]] = []
+    for name, data, note in uploads:
+        clean, ext, width, height = _normalize(name, data)
+        folder.mkdir(parents=True, exist_ok=True)
+        number += 1
+        rel = f"{FIGURE_DIR}/fig-{number:02d}.{ext}"
+        (Path(gdir) / rel).write_bytes(clean)
+        records.append(
+            {"file": rel, "name": name, "note": note.strip()[:MAX_NOTE_CHARS],
+             "width": width, "height": height}
+        )
+    return records
+
+
+def request_blocks(gdir: Path, figures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """New images attached to one change request: description and picture each."""
+    blocks: list[dict[str, Any]] = [
+        text_block(
+            "Image(s) the user attached to this change. Use each where the change asks; include "
+            "it only as \\includegraphics[width=<w>\\linewidth,height=<h>\\textheight,keepaspectratio]"
+            "{<file>} with the file name exactly as listed, a full-width layout for a wide image and "
+            "a columns layout for a square or tall one, and never crop, stretch or redraw it."
+        )
+    ]
+    for figure in figures:
+        blocks.append(text_block(describe(figure)))
+        blocks.append(image_block(preview(gdir, figure)))
+    return blocks
 
 
 def _normalize(name: str, data: bytes) -> tuple[bytes, str, int, int]:

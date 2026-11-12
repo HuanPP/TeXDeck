@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app import store, tasks
 from app.config import settings
+from app.edit import numbered_deck
 from app.main import _run_refine, app
 from tests.conftest import FakeLlm
 
@@ -114,11 +115,13 @@ def test_run_refine_success(
     messages = client.calls[0]
     assert len(messages) == 4
     assert messages[0]["role"] == "system"
-    assert "revising a complete XeLaTeX Beamer deck" in messages[0]["content"]
+    assert "revising a XeLaTeX Beamer deck" in messages[0]["content"]
+    assert "%% DELETE <n>" in messages[0]["content"]  # may answer with changed slides only
     assert "No explanation, no markdown fences." in messages[0]["content"]
     assert r"\documentclass" in messages[1]["content"]  # template main.tex
-    assert messages[2]["content"] == _ORIGINAL
-    assert messages[3]["content"].startswith("Revision request:\nAdd a second slide\n")
+    assert messages[2]["content"] == numbered_deck(_ORIGINAL)
+    assert "%% FRAME 1\n\\begin{frame}" in messages[2]["content"]
+    assert "Revision request for the whole deck:\nAdd a second slide" in messages[3]["content"]
     assert "<memory>" in messages[3]["content"]  # may add to what is remembered
 
 
@@ -139,7 +142,7 @@ def test_run_refine_retries_once_on_invalid_output(
     retry = client.calls[1]
     assert retry[4]["role"] == "assistant"
     assert retry[4]["content"] == "not latex at all"
-    assert "Previous output was invalid" in retry[5]["content"]
+    assert "could not be used" in retry[5]["content"]
     assert (gdir / "llm" / "refine_1_retry_prompt.json").is_file()
     assert store.load_meta(meta.id).refine_count == 1
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Download, FileText, Package, Presentation, RotateCw } from "lucide-react";
+import { Download, FileText, ImagePlus, Package, Presentation, RotateCw } from "lucide-react";
 import {
+  addFigures,
   applyChanges,
   bundleUrl,
   getFrames,
@@ -9,13 +10,14 @@ import {
   locateText,
   logUrl,
   pdfUrl,
+  figureUrl,
   pptxUrl,
-  refineGeneration,
   regenerateGeneration,
   texUrl,
-  type QueuedPage,
+  type DeckFigure,
   type QueuedText,
 } from "../api";
+import { prepareFigure } from "../imageTools";
 import PdfViewer, { type PageBox, type PageMark, type TextClick } from "../components/PdfViewer";
 import QuickEdit, { type QuickEditState } from "../components/QuickEdit";
 import Segmented from "../components/Segmented";
@@ -28,10 +30,13 @@ import type { FrameItem, TaskEvent, GenerationMeta } from "../types";
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // Changes wait in the browser (per deck, across reloads) until applied together.
+// Images attached to a request are uploaded when it is queued (DeckFigure records).
 type PendingText = QueuedText & { page: number; box: PageBox; shown: string };
-type PendingPage = QueuedPage & { page: number; title: string };
-type Pending = { texts: PendingText[]; pages: PendingPage[] };
+type PendingPage = { index: number; instruction: string; figures: DeckFigure[]; page: number; title: string };
+type PendingDeck = { instruction: string; figures: DeckFigure[] };
+type Pending = { texts: PendingText[]; pages: PendingPage[]; deck?: PendingDeck };
 const NOTHING: Pending = { texts: [], pages: [] };
+const MAX_ATTACHED = 6;
 const pendingKey = (id: string) => `texdeck.pending.${id}`;
 
 // Just the changed part of a text fix, with a few characters around it.
@@ -53,7 +58,10 @@ function changedPart(before: string, after: string) {
 function loadPending(id: string): Pending {
   try {
     const data = JSON.parse(localStorage.getItem(pendingKey(id)) ?? "null");
-    return data && Array.isArray(data.texts) && Array.isArray(data.pages) ? data : NOTHING;
+    if (!(data && Array.isArray(data.texts) && Array.isArray(data.pages))) return NOTHING;
+    // Lists saved before images could be attached have no `figures`.
+    const pages = data.pages.map((r: PendingPage) => ({ ...r, figures: r.figures ?? [] }));
+    return { ...data, pages };
   } catch {
     return NOTHING;
   }
@@ -92,13 +100,19 @@ export default function Generation() {
   const setPending = useCallback((next: Pending | ((p: Pending) => Pending)) => {
     setPendingState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
-      if (value.texts.length || value.pages.length) localStorage.setItem(pendingKey(id), JSON.stringify(value));
+      if (value.texts.length || value.pages.length || value.deck) {
+        localStorage.setItem(pendingKey(id), JSON.stringify(value));
+      }
       else localStorage.removeItem(pendingKey(id));
       return value;
     });
   }, [id]);
   useEffect(() => setPendingState(loadPending(id)), [id]);
-  const pendingCount = pending.texts.length + pending.pages.length;
+  const pendingCount = pending.texts.length + pending.pages.length + (pending.deck ? 1 : 0);
+  // Images picked for the request being written; uploaded when it is added.
+  const [attached, setAttached] = useState<{ file: File; url: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadMeta = useCallback(async () => {
     if (!id) return;
@@ -187,7 +201,8 @@ export default function Generation() {
       await applyChanges(
         id,
         pending.texts.map(({ line, source, start, end, text, raw }) => ({ line, source, start, end, text, raw })),
-        pending.pages.map(({ index, instruction }) => ({ index, instruction })),
+        pending.pages.map(({ index, instruction, figures }) => ({ index, instruction, figures: figures.map((f) => f.file) })),
+        pending.deck ? { instruction: pending.deck.instruction, figures: pending.deck.figures.map((f) => f.file) } : null,
       );
       setWatch(true);
     } catch (err) {
@@ -291,41 +306,80 @@ export default function Generation() {
   // `page` maps the viewer page to a frame; `index` is the key for the edit API.
   const frame = frames.find((f) => f.page === page);
 
-  // Queue a request for this slide; a second one for it is added to the first.
-  function handleEdit(e: FormEvent) {
+  function attach(files: Iterable<File>) {
+    const images = [...files].filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
+    if (!images.length) return;
+    setEditError(null);
+    setAttached((a) => {
+      const room = MAX_ATTACHED - a.length;
+      if (images.length > room) setEditError(`At most ${MAX_ATTACHED} images per request`);
+      return [...a, ...images.slice(0, Math.max(0, room)).map((file) => ({ file, url: URL.createObjectURL(file) }))];
+    });
+  }
+
+  function unattach(index: number) {
+    setAttached((a) => {
+      URL.revokeObjectURL(a[index].url);
+      return a.filter((_, i) => i !== index);
+    });
+  }
+
+  // Queue a request for this slide or the whole deck; a second one for the same
+  // target is added to the first. Attached images are uploaded now.
+  async function handleQueue(e: FormEvent) {
     e.preventDefault();
     if (!id || !editText.trim()) return setEditError("Please describe the change");
-    if (!frame) return setEditError("This page has no editable slide");
+    if (scope === "page" && !frame) return setEditError("This page has no editable slide");
     setEditError(null);
+    let added: DeckFigure[] = [];
+    if (attached.length) {
+      setUploading(true);
+      try {
+        const files = await Promise.all(attached.map((a) => prepareFigure(a.file)));
+        added = (await addFigures(id, files, files.map((f) => f.name))).figures;
+      } catch (err) {
+        setEditError(errMsg(err));
+        return;
+      } finally {
+        setUploading(false);
+      }
+      attached.forEach((a) => URL.revokeObjectURL(a.url));
+      setAttached([]);
+    }
     const text = editText.trim();
     setPending((p) => {
-      const old = p.pages.find((r) => r.index === frame.index);
+      if (scope === "deck") {
+        const old = p.deck;
+        return {
+          ...p,
+          deck: {
+            instruction: old ? `${old.instruction}\n${text}` : text,
+            figures: [...(old?.figures ?? []), ...added],
+          },
+        };
+      }
+      const target = frame!;
+      const old = p.pages.find((r) => r.index === target.index);
       const entry: PendingPage = {
-        index: frame.index, page, title: frame.title,
+        index: target.index, page, title: target.title,
         instruction: old ? `${old.instruction}\n${text}` : text,
+        figures: [...(old?.figures ?? []), ...added],
       };
-      return { ...p, pages: [...p.pages.filter((r) => r.index !== frame.index), entry] };
+      return { ...p, pages: [...p.pages.filter((r) => r.index !== target.index), entry] };
     });
     setEditText("");
   }
 
-  async function handleRefine(e: FormEvent) {
-    e.preventDefault();
-    if (!id || !editText.trim()) return setEditError("Please describe the change");
-    if (pendingCount) return setEditError("Apply or discard the queued changes first");
-    setEditError(null);
-    setEditing(true);
-    setProgress({ gen_id: id, status: "running", percent: 0, stage: "Submitting refine…", error: "" });
-    try {
-      await refineGeneration(id, editText.trim());
-      // Same flow as slide edits: the task state is registered before the 202
-      // returns, so re-attaching the WS now cannot pick up a stale snapshot.
-      setWatch(true);
-    } catch (err) {
-      setEditing(false);
-      setProgress(null);
-      setEditError(errMsg(err));
-    }
+  function figureStrip(list: DeckFigure[]) {
+    if (!list.length) return null;
+    return (
+      <span className="mt-1 flex flex-wrap gap-1">
+        {list.map((f) => (
+          <img key={f.file} src={figureUrl(id, f.file)} alt={f.name} title={f.name}
+            className="h-10 w-10 border border-amber-200 object-cover" />
+        ))}
+      </span>
+    );
   }
 
   async function handleRegenerate() {
@@ -558,12 +612,25 @@ export default function Generation() {
                 <span className="shrink-0 font-mono text-xs text-amber-800">p.{r.page}</span>
                 <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-slate-700">
                   {r.title ? `${r.title}: ` : ""}{r.instruction}
+                  {figureStrip(r.figures)}
                 </span>
                 <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
                   aria-label="Remove this request"
                   onClick={() => setPending((p) => ({ ...p, pages: p.pages.filter((x) => x !== r) }))}>×</button>
               </li>
             ))}
+            {pending.deck && (
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 font-mono text-xs text-amber-800">all</span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-slate-700">
+                  Whole deck: {pending.deck.instruction}
+                  {figureStrip(pending.deck.figures)}
+                </span>
+                <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
+                  aria-label="Remove the whole-deck request"
+                  onClick={() => setPending((p) => ({ ...p, deck: undefined }))}>×</button>
+              </li>
+            )}
           </ul>
         </section>
       )}
@@ -615,7 +682,7 @@ export default function Generation() {
                 )}
               </div>
             )}
-            <form onSubmit={scope === "page" ? handleEdit : handleRefine}
+            <form onSubmit={(e) => void handleQueue(e)}
               className="space-y-3 border-t border-[var(--color-border)] pt-4">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-sm text-slate-600" htmlFor="change-instruction">Change</label>
@@ -624,12 +691,11 @@ export default function Generation() {
                   { value: "deck", label: "Whole deck" },
                 ]} />
               </div>
-              {scope === "page" && (
-                <p className="text-xs text-slate-500">
-                  To fix wording, click the text on the slide. Requests and fixes on any page wait in
-                  one list and are applied together, with one compile.
-                </p>
-              )}
+              <p className="text-xs text-slate-500">
+                {scope === "page" && "To fix wording, click the text on the slide. "}
+                Requests for any page and for the whole deck wait in one list and go to the model in
+                one call when applied, with one compile.
+              </p>
               {scope === "page" && frames.length > 0 && !frame && (
                 <p id="edit-no-frame-hint" className="text-xs text-slate-500">
                   This page has no editable slide (it may be an auto-generated section or
@@ -638,20 +704,47 @@ export default function Generation() {
               )}
               <textarea id="change-instruction" className="input-field min-h-28 text-sm"
                 value={editText} onChange={(e) => setEditText(e.target.value)}
+                onPaste={(e) => {
+                  const files = [...e.clipboardData.files];
+                  if (files.some((f) => f.type.startsWith("image/"))) {
+                    e.preventDefault();
+                    attach(files);
+                  }
+                }}
                 placeholder={scope === "page"
                   ? "e.g. Change the bar chart to a line chart"
                   : "e.g. Tighten all bullet points to one line and unify tense"}
                 disabled={busy || (scope === "page" && !frame)}
                 aria-describedby={scope === "page" && frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
+              <div className="flex flex-wrap items-center gap-2">
+                {attached.map((a, i) => (
+                  <span key={a.url} className="relative">
+                    <img src={a.url} alt={a.file.name} title={a.file.name}
+                      className="h-12 w-12 border border-[var(--color-border)] object-cover" />
+                    <button type="button" aria-label={`Remove ${a.file.name}`} disabled={uploading}
+                      className="absolute -right-1.5 -top-1.5 h-4 w-4 rounded-full bg-slate-700 text-[10px] leading-4 text-white"
+                      onClick={() => unattach(i)}>×</button>
+                  </span>
+                ))}
+                <button type="button" className="btn-secondary text-xs" disabled={busy || uploading
+                  || attached.length >= MAX_ATTACHED || (scope === "page" && !frame)}
+                  onClick={() => fileInputRef.current?.click()}>
+                  <ImagePlus className="h-4 w-4" /> Attach image
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif" multiple hidden
+                  onChange={(e) => { attach(e.target.files ?? []); e.target.value = ""; }} />
+              </div>
               {editError && (
                 <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{editError}</div>
               )}
-              <button type="submit" className="btn-primary w-full" disabled={busy || (scope === "page" && !frame)}>
-                {busy ? "Working…" : scope === "page" ? "Add to changes" : "Apply to every slide"}
+              <button type="submit" className="btn-primary w-full"
+                disabled={busy || uploading || (scope === "page" && !frame)}>
+                {uploading ? "Uploading images…" : busy ? "Working…" : "Add to changes"}
               </button>
-              {scope === "deck" && (
-                <p className="text-xs text-slate-500">If the result does not compile, the deck is left as it was.</p>
-              )}
+              <p className="text-xs text-slate-500">
+                Images can also be pasted into the box. If the result does not compile, the deck is left
+                as it was.
+              </p>
             </form>
           </aside>
         </div>

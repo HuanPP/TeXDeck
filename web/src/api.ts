@@ -128,14 +128,26 @@ export function editSourceText(id: string, hit: LocatedText, value: string): Pro
 
 // Changes queued on the page, applied in one job that compiles once.
 export type QueuedText = { line: number; source: string; start: number; end: number; text: string; raw: boolean };
-export type QueuedPage = { index: number; instruction: string };
+// `figures` are files returned by addFigures, attached to that request.
+export type QueuedPage = { index: number; instruction: string; figures: string[] };
+export type QueuedDeck = { instruction: string; figures: string[] };
 
-export const applyChanges = (id: string, texts: QueuedText[], pages: QueuedPage[]) =>
+export const applyChanges = (id: string, texts: QueuedText[], pages: QueuedPage[], deck: QueuedDeck | null) =>
   requestJson<void>(`/api/generations/${id}/batch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ texts, pages }),
+    body: JSON.stringify({ texts, pages, deck }),
   });
+
+// Images for queued requests join the deck's image files right away.
+export type DeckFigure = { file: string; name: string; note: string; width: number; height: number };
+export function addFigures(id: string, images: Blob[], names: string[]): Promise<{ figures: DeckFigure[] }> {
+  const form = new FormData();
+  images.forEach((image, i) => form.append("images", image, names[i]));
+  return requestJson(`/api/generations/${id}/figures`, { method: "POST", body: form });
+}
+export const figureUrl = (id: string, file: string) =>
+  `/api/generations/${id}/figures/${encodeURIComponent(file.split("/").pop() ?? file)}`;
 
 // What the model remembers about the user (habits, mistakes to avoid).
 export type Memory = { habits: string[]; mistakes: string[] };
