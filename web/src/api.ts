@@ -223,6 +223,27 @@ export type SourceAnchor = {
 };
 export type SourceMap = { sources: { index: number; name: string; pages: number }[]; anchors: SourceAnchor[] };
 export const getSourceMap = (id: string) => requestJson<SourceMap>(`/api/generations/${id}/source-map`);
+// Learn: questions to the model, kept as threads (see server/app/chat.py).
+export type QuoteBox = { x: number; y: number; w: number; h: number };
+export type ChatAnchor = {
+  where: "source" | "notes"; doc: number; page: number; text: string; rects: QuoteBox[];
+  msg?: string; gone?: boolean;
+};
+export type ChatMessage = {
+  id: string; role: "user" | "assistant"; content: string; status: "pending" | "done" | "error"; at: number;
+};
+export type ChatThread = { id: string; number: number; anchors: ChatAnchor[]; messages: ChatMessage[]; created_at: number };
+export const listThreads = (id: string) =>
+  requestJson<{ threads: ChatThread[] }>(`/api/generations/${id}/threads`).then((r) => r.threads);
+export const askQuestion = (id: string, question: string, thread: string | null, anchors: ChatAnchor[]) =>
+  requestJson<ChatThread>(`/api/generations/${id}/threads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, thread, anchors }),
+  });
+export const deleteThread = (id: string, thread: string) =>
+  requestJson<void>(`/api/generations/${id}/threads/${thread}`, { method: "DELETE" });
+
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
 export const pptxUrl = (id: string, fonts?: string[]) =>

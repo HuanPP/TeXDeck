@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, figures, fonts, layout, memory, notes_map, pdf, store, tasks
+from . import chat, deck, figures, fonts, layout, memory, notes_map, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -114,6 +114,12 @@ class BatchBody(BaseModel):
     texts: list[TextChangeBody] = []
     pages: list[PageChangeBody] = []
     deck: DeckChangeBody | None = None  # a whole-deck request, sent with the slide requests
+
+
+class AskBody(BaseModel):
+    question: str
+    thread: str | None = None  # continue this thread; None starts one
+    anchors: list[dict[str, Any]] = []  # quotes: where, doc, page, text, rects
 
 
 class CallbackUrlBody(BaseModel):
@@ -1425,6 +1431,32 @@ def api_source_map(gen_id: str) -> dict[str, Any]:
             for a in placed
         ],
     }
+
+
+@app.get("/api/generations/{gen_id}/threads")
+def api_list_threads(gen_id: str) -> dict[str, Any]:
+    _load(gen_id)
+    return {"threads": chat.threads_for_view(store.generation_dir(gen_id))}
+
+
+@app.post("/api/generations/{gen_id}/threads", status_code=202)
+def api_ask(gen_id: str, body: AskBody) -> dict[str, Any]:
+    """Ask about the notebook; the answer arrives in the thread list."""
+    meta = _load(gen_id)
+    _require_model()
+    try:
+        thread = chat.ask(store.generation_dir(gen_id), body.question, body.thread, body.anchors,
+                          len(meta.source_names))
+    except chat.ChatError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return thread
+
+
+@app.delete("/api/generations/{gen_id}/threads/{thread_id}", status_code=204)
+def api_delete_thread(gen_id: str, thread_id: str) -> Response:
+    _load(gen_id)
+    chat.delete(store.generation_dir(gen_id), thread_id)
+    return Response(status_code=204)
 
 
 @app.post("/api/generations/{gen_id}/frames/{index}/edit")

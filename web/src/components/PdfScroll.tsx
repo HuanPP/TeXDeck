@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Document, Page } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { lineAround, type PageMark, type TextClick } from "./PdfViewer";
+import { lineAround, type PageBox, type PageMark, type TextClick } from "./PdfViewer";
 
 // A continuous, scrolling PDF reader for the notebook columns: every page in
 // one column, rendered only near the viewport, with a text layer to select from.
@@ -11,6 +11,30 @@ const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 const GAP = 12;
 const RENDER_MARGIN = 1200; // px above and below the viewport that get rendered
+
+// Text selected on one page: its words and the line boxes it covers.
+export type PageSelection = { page: number; text: string; rects: PageBox[]; at: { x: number; y: number } };
+// A quote asked about: underlined, with its thread's number at the top left.
+export type Underline = { key: string; page: number; rects: PageBox[]; number: number; active: boolean; title: string };
+
+// The selection's boxes on one page, one per line, as fractions of the page.
+function lineBoxes(rects: DOMRect[], page: DOMRect): PageBox[] {
+  const lines: { l: number; t: number; r: number; b: number }[] = [];
+  for (const r of [...rects].sort((a, b) => a.top - b.top || a.left - b.left)) {
+    const mid = (r.top + r.bottom) / 2;
+    const line = lines.find((x) => mid > x.t && mid < x.b);
+    if (line) {
+      line.l = Math.min(line.l, r.left); line.r = Math.max(line.r, r.right);
+      line.t = Math.min(line.t, r.top); line.b = Math.max(line.b, r.bottom);
+    } else {
+      lines.push({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+    }
+  }
+  return lines.map((x) => ({
+    x: (x.l - page.left) / page.width, y: (x.t - page.top) / page.height,
+    w: (x.r - x.l) / page.width, h: (x.b - x.t) / page.height,
+  }));
+}
 
 export type PdfScrollHandle = {
   // Scroll so the point (page, y as a fraction of the page height) sits near the top.
@@ -27,9 +51,15 @@ type Props = {
   marks?: PageMark[];
   onPageChange?: (page: number) => void;
   hint?: string;
+  // Text selected (null when the selection goes away).
+  onSelect?: (selection: PageSelection | null) => void;
+  underlines?: Underline[];
+  onUnderlineClick?: (key: string) => void;
 };
 
-export default function PdfScroll({ file, label, ref, onDoubleClick, onTextClick, marks = [], onPageChange, hint }: Props) {
+export default function PdfScroll({
+  file, label, ref, onDoubleClick, onTextClick, marks = [], onPageChange, hint, onSelect, underlines = [], onUnderlineClick,
+}: Props) {
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -119,6 +149,29 @@ export default function PdfScroll({ file, label, ref, onDoubleClick, onTextClick
     if (el) setView({ top: el.scrollTop, bottom: el.scrollTop + el.clientHeight });
   }, [sizes, width]);
 
+  // After a drag (or a double-click that selects a word): report the selection
+  // if it lies in this viewer, clipped to the page it starts on.
+  function handleMouseUp() {
+    if (!onSelect) return;
+    window.setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return onSelect(null);
+      const range = sel.getRangeAt(0);
+      const node = range.startContainer;
+      const start = node instanceof Element ? node : node.parentElement;
+      const pageEl = start?.closest<HTMLElement>("[data-page]");
+      if (!pageEl || !scrollRef.current?.contains(pageEl)) return onSelect(null);
+      const text = sel.toString().replace(/\s+/g, " ").trim();
+      if (!text) return onSelect(null);
+      const box = pageEl.getBoundingClientRect();
+      const rects = [...range.getClientRects()].filter((r) =>
+        r.width > 1 && r.height > 1 && r.top < box.bottom && r.bottom > box.top && r.left < box.right && r.right > box.left);
+      if (!rects.length) return onSelect(null);
+      const last = rects.reduce((a, b) => (b.bottom > a.bottom || (b.bottom === a.bottom && b.right > a.right) ? b : a));
+      onSelect({ page: Number(pageEl.dataset.page), text, rects: lineBoxes(rects, box), at: { x: last.right, y: last.bottom } });
+    }, 0);
+  }
+
   async function handleLoad(pdf: PDFDocumentProxy) {
     const out: { w: number; h: number }[] = [];
     for (let n = 1; n <= pdf.numPages; n++) {
@@ -160,7 +213,8 @@ export default function PdfScroll({ file, label, ref, onDoubleClick, onTextClick
       <Document file={file} onLoadSuccess={(pdf) => void handleLoad(pdf)} className="min-h-0 flex-1"
         onLoadError={(err) => setLoadError(err.message)}
         loading={<div className="p-12 text-center text-sm text-slate-500">Rendering PDF…</div>}>
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-auto bg-slate-100">
+        <div ref={scrollRef} onScroll={onScroll} onMouseUp={handleMouseUp}
+          onMouseDown={() => onSelect?.(null)} className="h-full overflow-auto bg-slate-100">
           <div className="relative mx-auto" style={{ width: pageWidth, height: (tops[total - 1] ?? 0) + (heights[total - 1] ?? 0) + GAP }}>
             {sizes.map((_, i) => {
               const n = i + 1;
@@ -204,6 +258,28 @@ export default function PdfScroll({ file, label, ref, onDoubleClick, onTextClick
                     <div key={k} title={m.label} aria-hidden="true"
                       className="pointer-events-none absolute z-10 rounded-sm bg-amber-300/40 outline outline-2 outline-amber-500"
                       style={{ left: `${m.box.x * 100}%`, top: `${m.box.y * 100}%`, width: `${m.box.w * 100}%`, height: `${m.box.h * 100}%` }} />
+                  ))}
+                  {underlines.filter((u) => u.page === n).map((u) => (
+                    <div key={u.key}>
+                      {u.rects.map((r, k) => (
+                        <div key={k} aria-hidden="true"
+                          className={`pointer-events-none absolute z-10 ${u.active ? "bg-indigo-400/15" : ""}`}
+                          style={{
+                            left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%`,
+                            borderBottom: `2px solid ${u.active ? "rgb(79 70 229)" : "rgb(129 140 248 / 0.8)"}`,
+                          }} />
+                      ))}
+                      {u.number > 0 && u.rects[0] && (
+                        <button type="button" title={u.title} aria-label={`Open question ${u.number}`}
+                          className={`absolute z-20 flex h-4 min-w-4 -translate-x-full -translate-y-1/2 items-center justify-center rounded-full px-1 font-sans text-[10px] leading-none text-white shadow ${u.active ? "bg-indigo-700" : "bg-indigo-500 hover:bg-indigo-700"}`}
+                          style={{ left: `${u.rects[0].x * 100}%`, top: `${u.rects[0].y * 100}%` }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); onUnderlineClick?.(u.key); }}
+                          onDoubleClick={(e) => e.stopPropagation()}>
+                          {u.number}
+                        </button>
+                      )}
+                    </div>
                   ))}
                   {flash?.page === n && (
                     <div key={flash.key} aria-hidden="true"

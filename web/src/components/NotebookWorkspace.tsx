@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { getSourceMap, pdfUrl, sourcePdfUrl, sourceTextUrl, type SourceAnchor, type SourceMap } from "../api";
-import PdfScroll, { type PdfScrollHandle } from "./PdfScroll";
+import { ChevronLeft, ChevronRight, MessageSquareText } from "lucide-react";
+import {
+  askQuestion, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl,
+  type ChatAnchor, type ChatThread, type SourceAnchor, type SourceMap,
+} from "../api";
+import NotebookChat from "./NotebookChat";
+import PdfScroll, { type PageSelection, type PdfScrollHandle, type Underline } from "./PdfScroll";
 import type { PageMark, TextClick } from "./PdfViewer";
+import Segmented from "./Segmented";
 
 // Learn's notebook: the source on the left, the notes in the middle, the side
 // panel (AI, edits) on the right. Double-clicking either PDF jumps the other to
@@ -54,16 +59,22 @@ type Props = {
   sourceKind: string;
   sourceNames: string[];
   title: string;
-  side: ReactNode; // the right column's content
-  sideTitle: ReactNode;
-  onNotesTextClick?: (click: TextClick) => void;
+  editPanel: ReactNode; // the right column's Edit tab
+  onNotesTextClick?: (click: TextClick) => void; // click-to-edit, while the Edit tab is open
   notesMarks?: PageMark[];
   onNotesPageChange?: (page: number) => void;
 };
 
 export default function NotebookWorkspace({
-  id, pdfBust, sourceKind, sourceNames, title, side, sideTitle, onNotesTextClick, notesMarks, onNotesPageChange,
+  id, pdfBust, sourceKind, sourceNames, title, editPanel, onNotesTextClick, notesMarks, onNotesPageChange,
 }: Props) {
+  const [sideTab, setSideTab] = useState<"ai" | "edit">("ai");
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [quotes, setQuotes] = useState<ChatAnchor[]>([]);
+  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [selection, setSelection] = useState<(ChatAnchor & { at: { x: number; y: number } }) | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
   const [map, setMap] = useState<SourceMap | null>(null);
   const [doc, setDoc] = useState(1);
   const [cols, setColsState] = useState<Cols>(loadCols);
@@ -73,7 +84,7 @@ export default function NotebookWorkspace({
   const sourceRef = useRef<PdfScrollHandle | null>(null);
   const notesRef = useRef<PdfScrollHandle | null>(null);
   const cycle = useRef<{ key: string; i: number }>({ key: "", i: 0 });
-  const jump = useRef<{ page: number } | null>(null);
+  const jump = useRef<{ page: number; y?: number } | null>(null);
 
   const setCols = useCallback((next: Cols) => {
     setColsState(next);
@@ -102,9 +113,73 @@ export default function NotebookWorkspace({
     const j = jump.current;
     if (j && sourceRef.current) {
       jump.current = null;
-      sourceRef.current.scrollTo(j.page);
+      sourceRef.current.scrollTo(j.page, j.y);
     }
   }, [doc]);
+
+  // Threads: loaded with the notes (a recompile moves quotes from the notes),
+  // then polled while an answer is on its way.
+  const loadThreads = useCallback(() => listThreads(id).then(setThreads, () => undefined), [id]);
+  useEffect(() => { void loadThreads(); }, [loadThreads, pdfBust]);
+  const answering = threads.some((t) => t.messages.some((m) => m.status === "pending"));
+  useEffect(() => {
+    if (!answering) return;
+    const timer = window.setInterval(() => void loadThreads(), 2000);
+    return () => window.clearInterval(timer);
+  }, [answering, loadThreads]);
+
+  function select(where: "source" | "notes") {
+    return (s: PageSelection | null) =>
+      setSelection(s && { where, doc: where === "source" ? doc : 0, page: s.page, text: s.text, rects: s.rects, at: s.at });
+  }
+
+  function quoteSelection() {
+    if (!selection) return;
+    const { at: _at, ...anchor } = selection;
+    setQuotes((q) => [...q, anchor]);
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+    setSideTab("ai");
+    if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
+    setFocusKey((k) => k + 1);
+  }
+
+  async function ask(question: string, thread: string | null) {
+    setChatError(null);
+    try {
+      const made = await askQuestion(id, question, thread, quotes);
+      setQuotes([]);
+      setThreads((all) => [...all.filter((t) => t.id !== made.id), made]);
+      if (openThread && openThread !== made.id) setOpenThread(null);
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+  }
+
+  function goTo(a: ChatAnchor) {
+    const y = a.rects[0]?.y ?? 0;
+    if (a.where === "notes") return notesRef.current?.scrollTo(a.page, y);
+    if (a.doc !== doc) {
+      jump.current = { page: a.page, y };
+      setDoc(a.doc);
+    } else {
+      sourceRef.current?.scrollTo(a.page, y);
+    }
+  }
+
+  function openFromText(threadId: string) {
+    setOpenThread(threadId);
+    setSideTab("ai");
+    if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
+  }
+
+  const underlines = (where: "source" | "notes"): Underline[] => threads.flatMap((t) => t.anchors
+    .filter((a) => a.where === where && !a.gone && (where === "notes" || a.doc === doc))
+    .map((a) => ({
+      key: t.id, page: a.page, rects: a.rects, number: t.number,
+      active: t.id === openThread, title: t.messages[0]?.content ?? "",
+    })));
 
   const anchors = map?.anchors ?? [];
   const linked = anchors.length > 0;
@@ -195,7 +270,8 @@ export default function NotebookWorkspace({
             <PdfScroll key={doc} ref={sourceRef} file={sourcePdfUrl(id, doc)}
               label={current?.name ?? "Source"}
               hint={linked ? "Double-click a page to find its notes" : undefined}
-              onDoubleClick={linked ? (page) => sourceToNotes(page) : undefined} />
+              onDoubleClick={linked ? (page) => sourceToNotes(page) : undefined}
+              onSelect={select("source")} underlines={underlines("source")} onUnderlineClick={openFromText} />
           )}
         </div>
       </section>
@@ -208,7 +284,9 @@ export default function NotebookWorkspace({
               ? "These notes have no page links (made before they existed); regenerate to link them to the source"
               : undefined}
           onDoubleClick={linked ? notesToSource : undefined}
-          onTextClick={onNotesTextClick} marks={notesMarks} onPageChange={onNotesPageChange} />
+          onTextClick={sideTab === "edit" ? onNotesTextClick : undefined}
+          marks={sideTab === "edit" ? notesMarks : undefined} onPageChange={onNotesPageChange}
+          onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={openFromText} />
       </section>
       {cols.rightOpen ? (
         <>
@@ -216,19 +294,42 @@ export default function NotebookWorkspace({
           <aside className="flex min-w-0 shrink-0 flex-col border border-[var(--color-border)] bg-white"
             style={{ width: `${cols.right * 100}%` }}>
             <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-2 py-1">
-              <div className="min-w-0 flex-1">{sideTitle}</div>
+              <div className="min-w-0 flex-1">
+                <Segmented label="Side panel" value={sideTab} onChange={setSideTab} options={[
+                  { value: "ai", label: "Ask AI" },
+                  { value: "edit", label: "Edit" },
+                ]} />
+              </div>
               <button type="button" className="p-1 text-slate-400 hover:text-slate-700" aria-label="Collapse side panel"
                 title="Collapse" onClick={() => setCols({ ...cols, rightOpen: false })}>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">{side}</div>
+            <div className={`min-h-0 flex-1 ${sideTab === "edit" ? "overflow-auto" : ""}`}>
+              {sideTab === "edit" ? editPanel : (
+                <NotebookChat threads={threads} quotes={quotes} focusKey={focusKey} error={chatError}
+                  onRemoveQuote={(i) => setQuotes((q) => q.filter((_, j) => j !== i))}
+                  onAsk={ask} openThread={openThread} onOpenThread={setOpenThread} onGoTo={goTo}
+                  onDelete={(t) => {
+                    if (openThread === t) setOpenThread(null);
+                    setThreads((all) => all.filter((x) => x.id !== t));
+                    void deleteThread(id, t).catch(() => loadThreads());
+                  }} />
+              )}
+            </div>
           </aside>
         </>
       ) : (
         <button type="button" className="ml-1.5 flex w-8 shrink-0 flex-col items-center gap-2 border border-[var(--color-border)] bg-white pt-2 text-slate-500 hover:text-slate-800"
           aria-label="Open side panel" title="Open side panel" onClick={() => setCols({ ...cols, rightOpen: true })}>
           <ChevronLeft className="h-4 w-4" />
+        </button>
+      )}
+      {selection && (
+        <button type="button" aria-label="Ask AI about the selection" onMouseDown={(e) => e.preventDefault()} onClick={quoteSelection}
+          className="fixed z-40 inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1.5 font-sans text-xs text-white shadow-lg hover:bg-indigo-700"
+          style={{ left: Math.min(selection.at.x + 6, window.innerWidth - 120), top: selection.at.y + 6 }}>
+          <MessageSquareText className="h-3.5 w-3.5" /> Ask AI
         </button>
       )}
       {status && (

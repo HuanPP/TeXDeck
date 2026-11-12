@@ -84,7 +84,6 @@ export default function Generation() {
   const [editText, setEditText] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [scope, setScope] = useState<"page" | "deck">("page");
-  const [sideTab, setSideTab] = useState<"ai" | "edit">("ai");
   const [texOpen, setTexOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -824,19 +823,9 @@ export default function Generation() {
           style={{ height: "calc(100vh - 12.25rem)", minHeight: 520 }}>
           <NotebookWorkspace id={id} pdfBust={pdfBust} sourceKind={meta.source_kind} sourceNames={meta.source_names}
             title={displayTitle(meta)}
-            sideTitle={
-              <Segmented label="Side panel" value={sideTab} onChange={setSideTab} options={[
-                { value: "ai", label: "Ask AI" },
-                { value: "edit", label: "Edit" },
-              ]} />
-            }
-            side={sideTab === "edit" ? editPanel : (
-              <p className="p-4 text-sm leading-relaxed text-slate-500">
-                Questions about the source and the notes will go here.
-              </p>
-            )}
-            onNotesTextClick={sideTab === "edit" && !busy ? handleTextClick : undefined}
-            notesMarks={sideTab === "edit" ? textMarks : undefined}
+            editPanel={editPanel}
+            onNotesTextClick={busy ? undefined : handleTextClick}
+            notesMarks={textMarks}
             onNotesPageChange={setPage} />
         </div>
       )}
