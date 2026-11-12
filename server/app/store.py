@@ -42,6 +42,7 @@ class GenerationMeta:
     language: str = "source"  # slide language: "source" (match the material) | "en" | "zh"
     error_kind: str = ""  # "model" when `error` came from the model provider; read only with `error`
     owner: str = ""  # account that made it; "" without accounts (and before them: the admin's)
+    kind: str = "deck"  # "deck" (Presentation) | "notes" (Learn); older meta.json are decks
     # User images to place on the slides, in upload order:
     # {"file": "figures/fig-01.png", "name", "note", "width", "height"}
     figures: list[dict[str, Any]] = field(default_factory=list)
@@ -78,6 +79,7 @@ def new_generation(
     language: str = "source",
     owner: str = "",
     figures: list[dict[str, Any]] | None = None,
+    kind: str = "deck",
 ) -> GenerationMeta:
     gen_id, directory = _claim_generation_dir()
     now = _now_iso()
@@ -101,6 +103,7 @@ def new_generation(
         language=language,
         owner=owner,
         figures=list(figures or []),
+        kind=kind,
     )
     _write_meta_file(directory / "meta.json", meta)
     return meta

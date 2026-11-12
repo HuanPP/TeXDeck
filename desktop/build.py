@@ -90,10 +90,11 @@ def fetch_tectonic() -> None:
 
 def stage_templates() -> None:
     """Copy only git-tracked template files, so local private packs never ship."""
-    out = STAGE / "templates"
-    shutil.rmtree(out, ignore_errors=True)
+    for folder in ("templates", "note-templates"):
+        shutil.rmtree(STAGE / folder, ignore_errors=True)
     files = subprocess.run(
-        ["git", "ls-files", "-z", "templates"], cwd=ROOT, check=True, capture_output=True
+        ["git", "ls-files", "-z", "templates", "note-templates"],
+        cwd=ROOT, check=True, capture_output=True,
     ).stdout.decode().split("\0")
     for rel in filter(None, files):
         src = ROOT / rel

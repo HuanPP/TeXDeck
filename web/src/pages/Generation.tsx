@@ -310,7 +310,8 @@ export default function Generation() {
   // The frames API returns a synctex-resolved PDF `page` per frame (index and
   // page diverge with section splash pages, \pause, allowframebreaks…).
   // `page` maps the viewer page to a frame; `index` is the key for the edit API.
-  const frame = frames.find((f) => f.page === page);
+  // A notesheet can run over several pages: it covers first_page..page.
+  const frame = frames.find((f) => (f.first_page ?? f.page) <= page && page <= f.page);
 
   function attach(files: Iterable<File>) {
     const images = [...files].filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
@@ -430,6 +431,8 @@ export default function Generation() {
     );
   }
   if (!meta) return <p className="text-sm text-slate-500">Loading…</p>;
+  const notes = meta.kind === "notes";
+  const home = notes ? "/learn" : "/present";
 
   const showProgress = meta.status === "running" || busy;
   const failed = meta.status === "failed" && !busy;
@@ -494,10 +497,12 @@ export default function Generation() {
               <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
                 <Download className="h-4 w-4" /> PDF
               </a>
-              <a className="btn-secondary text-sm" href={pptxUrl(id, myFonts ?? undefined)} download
-                title="Editable PowerPoint: text boxes over the PDF's own graphics">
-                <Presentation className="h-4 w-4" /> PPTX
-              </a>
+              {!notes && (
+                <a className="btn-secondary text-sm" href={pptxUrl(id, myFonts ?? undefined)} download
+                  title="Editable PowerPoint: text boxes over the PDF's own graphics">
+                  <Presentation className="h-4 w-4" /> PPTX
+                </a>
+              )}
               <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
                 <FileText className="h-4 w-4" /> main.tex
               </a>
@@ -579,7 +584,7 @@ export default function Generation() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-amber-900">
               {pendingCount} {pendingCount === 1 ? "change" : "changes"} waiting. Nothing is compiled until you
-              apply them; marked text on the slides shows where.
+              apply them; marked text on the {notes ? "pages" : "slides"} shows where.
             </p>
             <div className="flex gap-2">
               <button type="button" className="btn-secondary text-sm" disabled={busy}
@@ -673,7 +678,7 @@ export default function Generation() {
                 request here changes those.
               </p>
             )}
-            {frame && frame.index !== 0 && (
+            {frame && frame.index !== 0 && !notes && (
               <div className="border-t border-[var(--color-border)] pt-4">
                 <p className="text-xs text-slate-500">Speaker notes</p>
                 {frame.notes ? (
@@ -693,14 +698,14 @@ export default function Generation() {
               <div className="flex items-center justify-between gap-2">
                 <label className="text-sm text-slate-600" htmlFor="change-instruction">Change</label>
                 <Segmented label="What to change" value={scope} onChange={setScope} disabled={busy} options={[
-                  { value: "page", label: "This page" },
-                  { value: "deck", label: "Whole deck" },
+                  { value: "page", label: notes ? "This sheet" : "This page" },
+                  { value: "deck", label: notes ? "All notes" : "Whole deck" },
                 ]} />
               </div>
               <p className="text-xs text-slate-500">
-                {scope === "page" && "To fix wording, click the text on the slide. "}
-                Requests for any page and for the whole deck wait in one list and go to the model in
-                one call when applied, with one compile.
+                {scope === "page" && `To fix wording, click the text on the ${notes ? "page" : "slide"}. `}
+                Requests for any {notes ? "sheet and for all the notes" : "page and for the whole deck"} wait
+                in one list and go to the model in one call when applied, with one compile.
               </p>
               {scope === "page" && frames.length > 0 && !frame && (
                 <p id="edit-no-frame-hint" className="text-xs text-slate-500">
@@ -717,9 +722,13 @@ export default function Generation() {
                     attach(files);
                   }
                 }}
-                placeholder={scope === "page"
-                  ? "e.g. Change the bar chart to a line chart"
-                  : "e.g. Tighten all bullet points to one line and unify tense"}
+                placeholder={notes
+                  ? scope === "page"
+                    ? "e.g. Split the causes into their own heading"
+                    : "e.g. Shorter: keep only definitions and numbers"
+                  : scope === "page"
+                    ? "e.g. Change the bar chart to a line chart"
+                    : "e.g. Tighten all bullet points to one line and unify tense"}
                 disabled={busy || (scope === "page" && !frame)}
                 aria-describedby={scope === "page" && frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
               <div className="flex flex-wrap items-center gap-2">
@@ -748,8 +757,8 @@ export default function Generation() {
                 {uploading ? "Uploading images…" : busy ? "Working…" : "Add to changes"}
               </button>
               <p className="text-xs text-slate-500">
-                Images can also be pasted into the box. If the result does not compile, the deck is left
-                as it was.
+                Images can also be pasted into the box. If the result does not compile, the{" "}
+                {notes ? "notes are" : "deck is"} left as it was.
               </p>
             </form>
           </aside>
@@ -761,7 +770,7 @@ export default function Generation() {
           onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })} />
       )}
 
-      <Link to="/" className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>
+      <Link to={home} className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>
     </div>
   );
 }

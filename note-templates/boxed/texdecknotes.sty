@@ -1,0 +1,203 @@
+% texdecknotes.sty -- study notes in boxed sheets: a centred title, bold
+% sub-headings, dotted bullet points with a wide hanging indent, and
+% label/value rows. Body font: Cabin (SIL OFL 1.1, bundled in font/).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{texdecknotes}[2026/11/12 TeXDeck study notes]
+
+% Option zh: Chinese labels for the inline marks (\eg prints 例如).
+\newif\iftd@zh
+\DeclareOption{zh}{\td@zhtrue}
+\ProcessOptions\relax
+
+\RequirePackage[a4paper,margin=2cm,top=2.2cm,bottom=2.2cm]{geometry}
+\RequirePackage{fontspec}
+\RequirePackage{xcolor}
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{enumitem}
+\RequirePackage{tabularx}
+\RequirePackage{array}
+\RequirePackage{booktabs}
+\RequirePackage{lmodern}
+\RequirePackage{amsmath,amssymb}
+\RequirePackage{graphicx}
+\RequirePackage{xeCJK}
+
+% ---- fonts -------------------------------------------------------------------
+\setmainfont{Cabin}[
+    Path = font/,
+    Extension = .otf,
+    UprightFont = *-Regular,
+    ItalicFont = *-Italic,
+    BoldFont = *-Bold,
+    BoldItalicFont = *-BoldItalic,
+]
+\setsansfont{Cabin}[
+    Path = font/,
+    Extension = .otf,
+    UprightFont = *-Regular,
+    ItalicFont = *-Italic,
+    BoldFont = *-Bold,
+    BoldItalicFont = *-BoldItalic,
+]
+% Keep curly quotes Latin (xeCJK would pad them to full width).
+\xeCJKDeclareCharClass{Default}{"2018, "2019, "201C, "201D}
+% Cabin has no arrows, maths operators or circled digits (→ ≥ ≈ − ①); notes
+% use them often, so take them from the CJK face, which has them all.
+\xeCJKDeclareCharClass{FullLeft}{"2460 -> "24FF}
+\xeCJKDeclareCharClass{CJK}{"2190 -> "21FF, "2200 -> "22FF, "2713}
+\IfFontExistsTF{Noto Sans CJK SC}{%
+    \setCJKmainfont{Noto Sans CJK SC}[Scale = 0.9, BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+    \setCJKsansfont{Noto Sans CJK SC}[Scale = 0.9, BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{\IfFontExistsTF{Source Han Sans SC}{%
+    \setCJKmainfont{Source Han Sans SC}[Scale = 0.9, BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+    \setCJKsansfont{Source Han Sans SC}[Scale = 0.9, BoldFont = {* Bold}, AutoFakeSlant = 0.15]%
+}{%
+    \setCJKmainfont{FandolHei-Regular}[Extension = .otf, Scale = 0.9, BoldFont = FandolHei-Bold, AutoFakeSlant = 0.15]%
+    \setCJKsansfont{FandolHei-Regular}[Extension = .otf, Scale = 0.9, BoldFont = FandolHei-Bold, AutoFakeSlant = 0.15]%
+}}
+
+% Math letters and digits in the body face so formulas match the notes.
+\RequirePackage[italic,nolessnomore]{mathastext}
+
+% ---- colours -----------------------------------------------------------------
+% Chinese pages read darker than Latin ones at the same size: CJK glyphs fill
+% the em square. The zh option lightens the ink and opens the line spacing.
+\iftd@zh
+    \definecolor{noteink}{HTML}{333333}
+\else
+    \definecolor{noteink}{HTML}{1F1F1F}
+\fi
+\definecolor{notehead}{HTML}{262626}
+\definecolor{noterule}{HTML}{4A4A4A}
+\definecolor{notesoft}{HTML}{6B6B6B}
+\color{noteink}
+
+% ---- page --------------------------------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+\iftd@zh\linespread{1.18}\fi
+\fontsize{11.5}{16}\selectfont
+\raggedbottom
+
+% \title{...} is not printed as a title block: it runs small and grey at the
+% top left of every page, so a loose printed page still says what it is.
+\RequirePackage{fancyhdr}
+\def\td@title{}
+\renewcommand{\title}[1]{\gdef\td@title{#1}}
+\setlength{\headheight}{14pt}
+\fancypagestyle{plain}{%
+    \fancyhf{}%
+    \renewcommand{\headrulewidth}{0pt}%
+    \fancyhead[L]{\fontsize{9}{11}\selectfont\color{notesoft}\td@title}%
+    \fancyfoot[C]{\fontsize{9}{11}\selectfont\color{notesoft}\thepage}%
+}
+\pagestyle{plain}
+
+% ---- the sheet ---------------------------------------------------------------
+% \begin{notesheet}{Title} ... \end{notesheet}: one boxed topic. Breaks across
+% pages when long. \begin{notesheet}[left]{Title} sets the title flush left.
+\newtcolorbox{notesheet}[2][center]{
+    enhanced, breakable,
+    sharp corners, boxrule=0.7pt, colframe=noterule, colback=white,
+    left=10pt, right=10pt, top=10pt, bottom=12pt,
+    before skip=0pt, after skip=18pt,
+    fontupper=\fontsize{11.5}{16}\selectfont,
+    before upper={%
+        \ifx\relax#2\relax\else
+            {\csname td@align@#1\endcsname
+             \fontsize{21}{26}\selectfont\bfseries\noindent\textcolor{notehead}{#2}\par}%
+            \nopagebreak\vspace{9pt}\@afterheading
+            % (colour set inside the line: a colour change between paragraphs
+            % leaves a node that TeX may break after, stranding the heading)
+        \fi
+    },
+}
+\newcommand{\td@align@center}{\centering}
+\newcommand{\td@align@left}{\raggedright}
+
+% Every heading and lead is glued to what follows it (\@afterheading also
+% cancels the break LaTeX invites before a list or table), so a heading never
+% ends a page alone.
+% \td@keep: a heading right after another heading may not start a new page.
+\newcommand{\td@keep}{\par\if@nobreak\nopagebreak\fi}
+% Heading levels inside a sheet: title 21pt > \notehead 16pt > \notesub 12.5pt,
+% all bold, so each step reads at a glance.
+% \notehead{Heading}: a part of the sheet.
+\newcommand{\notehead}[1]{%
+    \td@keep\addvspace{14pt}%
+    {\fontsize{16}{20}\selectfont\bfseries\noindent\textcolor{notehead}{#1}\par}%
+    \nopagebreak\vspace{5pt}%
+    \@afterheading
+}
+% \notesub{Sub-heading}: a smaller group inside a part.
+\newcommand{\notesub}[1]{%
+    \td@keep\addvspace{8pt}%
+    {\fontsize{12.5}{16}\selectfont\bfseries\noindent\textcolor{notehead}{#1}\par}%
+    \nopagebreak\vspace{3pt}%
+    \@afterheading
+}
+
+% Plain lead-in line (e.g. "The supply is limited because").
+\newcommand{\notelead}[1]{\td@keep\addvspace{5pt}#1\par\nopagebreak\vspace{2pt}\@afterheading}
+
+% ---- bullets -----------------------------------------------------------------
+% A solid round dot sitting on the x-height middle, like a printed worksheet.
+\newcommand{\td@dot}{\tikz[baseline=0pt]\fill (0,0.5ex) circle (0.2em);}
+\setlist[itemize,1]{
+    label={\td@dot},
+    labelindent=0pt, labelwidth=0.9em, labelsep=1.7em, leftmargin=!, align=left,
+    itemsep=5pt, topsep=3pt, parsep=0pt, partopsep=0pt,
+}
+\setlist[itemize,2]{
+    label={--},
+    labelindent=0pt, labelwidth=0.9em, labelsep=1.7em, leftmargin=!, align=left,
+    itemsep=2pt, topsep=2pt, parsep=0pt,
+}
+\setlist[enumerate,1]{
+    label={\bfseries\arabic*}, labelindent=0pt, labelwidth=0.9em, labelsep=1.7em,
+    leftmargin=!, align=left,
+    itemsep=4pt, topsep=3pt, parsep=0pt,
+}
+
+% ---- label / value rows ------------------------------------------------------
+% \begin{notefacts} \fact{Name of ferry company:}{NorthLink Ferries} ... \end{notefacts}
+% Bulleted rows with the value aligned in a second column. The label column is
+% as wide as the widest label plus a 2em gap (at most 45% of the line), so
+% short labels sit close to their values and long ones still line up.
+\RequirePackage{environ}
+\newlength{\td@factw}
+\newlength{\td@tmpw}
+\NewEnviron{notefacts}{%
+    \setlength{\td@factw}{0pt}%
+    \begingroup
+        \def\fact##1##2{%
+            \settowidth{\td@tmpw}{##1}%
+            \ifdim\td@tmpw>\td@factw \global\td@factw=\td@tmpw \fi}%
+        \setbox0=\hbox{\BODY}%
+    \endgroup
+    \par\addvspace{3pt}%
+    \begin{list}{\td@dot\hfill}{%
+        \setlength{\leftmargin}{2.6em}\setlength{\labelsep}{1.7em}%
+        \setlength{\labelwidth}{0.9em}\setlength{\itemsep}{5pt}%
+        \setlength{\topsep}{0pt}\setlength{\parsep}{0pt}}%
+        \addtolength{\td@factw}{2em}%
+        \ifdim\td@factw>0.45\linewidth \setlength{\td@factw}{0.45\linewidth}\fi
+        \BODY
+    \end{list}\par\addvspace{3pt}%
+}
+\newcommand{\fact}[2]{%
+    \item \parbox[t]{\td@factw}{\raggedright #1\ifhmode\unskip\nobreak\fi\strut}%
+    \parbox[t]{\dimexpr\linewidth-\td@factw\relax}{\raggedright #2\ifhmode\unskip\nobreak\fi\strut}%
+}
+
+% ---- inline marks ------------------------------------------------------------
+% \key{term}: a term worth remembering (bold). \eg{...}: a soft example aside.
+\newcommand{\key}[1]{\textbf{#1}}
+\newcommand{\eg}[1]{{\color{notesoft}\iftd@zh 例：#1\else e.g.\ #1\fi}}
+\newcommand{\aside}[1]{{\color{notesoft}\iftd@zh （#1）\else (#1)\fi}}
+
+% ---- tables ------------------------------------------------------------------
+\renewcommand{\arraystretch}{1.25}
+
+\endinput

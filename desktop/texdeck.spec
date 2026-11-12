@@ -20,6 +20,7 @@ a = Analysis(
     binaries=[(str(STAGE / "bin" / TECTONIC), "bin")],
     datas=[
         (str(STAGE / "templates"), "templates"),
+        (str(STAGE / "note-templates"), "note-templates"),
         (str(ROOT / "web" / "dist"), "web/dist"),
         # python-pptx builds every deck from its bundled default.pptx.
         *collect_data_files("pptx"),

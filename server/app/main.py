@@ -337,10 +337,11 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
         )
         figure_blocks = figures.prompt_blocks(gdir, meta.figures) if meta.figures else None
         figure_files = deck.figure_files(gdir)
+        notes = template.kind == "notes"
         messages = deck.build_generation_messages(
-            template, request, documents, figure_blocks, memory.note()
+            template, request, documents, figure_blocks, "" if notes else memory.note()
         )
-        progress("Generating slides with the model", 50)
+        progress("Writing notes with the model" if notes else "Generating slides with the model", 50)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, "generate", messages, response)
@@ -354,8 +355,10 @@ def _run_generation(gen_id: str, progress: ProgressCallback) -> None:
                     "role": "user",
                     "content": (
                         f"Previous output was invalid: {first_err}\n"
-                        "Re-output a complete, compilable XeLaTeX Beamer document. "
-                        "No explanation, no markdown fences."
+                        + ("Re-output a complete, compilable XeLaTeX document that follows the "
+                           "notes template. " if notes else
+                           "Re-output a complete, compilable XeLaTeX Beamer document. ")
+                        + "No explanation, no markdown fences."
                     ),
                 },
             ]
@@ -413,9 +416,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         if frame is None:
             raise RuntimeError(f"Slide index not found: {index}")
         template = deck.get_template(meta.template_key)
-        context = "\n\n".join(
-            part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context()) if part
-        )
+        context = _edit_context(meta)
         messages = build_frame_edit_messages(frame, instruction, template.main_tex, context)
         progress("Editing one slide with the model", 30)
         client = create_client(on_usage=usage.add)
@@ -509,8 +510,11 @@ def _run_line_edit(gen_id: str, line: int, old: str, new: str, progress: Progres
 
 
 def _edit_context(meta: GenerationMeta) -> str:
+    # Remembered habits are about slides ("at most three bullets a slide"); notes
+    # keep to their own template rules instead.
+    remembered = memory.edit_context() if meta.kind == "deck" else ""
     return "\n\n".join(
-        part for part in (figures.catalog(meta.figures) if meta.figures else "", memory.edit_context()) if part
+        part for part in (figures.catalog(meta.figures) if meta.figures else "", remembered) if part
     )
 
 
@@ -987,10 +991,11 @@ def api_save_memory(body: MemoryBody) -> dict[str, list[str]]:
 @app.get("/api/templates")
 def api_list_templates() -> list[dict[str, Any]]:
     builtin = [
-        {"key": t.key, "name": t.name, "customizable": bool(t.meta.get("customize"))}
+        {"key": t.key, "name": t.name, "kind": t.kind, "customizable": bool(t.meta.get("customize"))}
         for t in deck.list_templates()
     ]
-    return builtin + custom_templates.list_custom()
+    # Custom templates all derive from slide packs.
+    return builtin + [{**c, "kind": "deck"} for c in custom_templates.list_custom()]
 
 
 def _template_or_404(key: str) -> deck.Template:
@@ -1203,6 +1208,7 @@ async def api_create_generation(
         institute=(institute or "").strip(),
         language=language,
         owner=auth.current_user.get() or "",
+        kind=template.kind,
     )
     gdir = store.generation_dir(meta.id)
     # source_XX.pdf index encodes reading order; original names live in meta.source_names
@@ -1305,6 +1311,8 @@ def api_get_pptx(gen_id: str, fonts_: str | None = Query(None, alias="fonts")) -
     """fonts: comma-separated names (from /api/fonts) installed where the file will
     be opened; each PDF font gets the nearest of them. Without it, Office names."""
     meta = _load(gen_id)
+    if meta.kind != "deck":
+        raise HTTPException(400, detail="Only slide decks export to PowerPoint")
     pdf_path = _file(gen_id, "main.pdf", "PDF not generated yet")
     known = {name.casefold() for name in fonts.all_names()}
     installed = None if fonts_ is None else sorted(
@@ -1341,9 +1349,12 @@ def api_list_frames(gen_id: str) -> list[dict[str, Any]]:
     except EditError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     out = [
-        {"index": f.index, "title": f.title, "page": f.page, "tex": f.tex, "notes": frame_notes(f.tex)}
+        {"index": f.index, "title": f.title, "page": f.page, "first_page": f.first_page or f.page,
+         "tex": f.tex, "notes": frame_notes(f.tex)}
         for f in frames
     ]
+    if _load(gen_id).kind == "notes":
+        return out  # notes have no title page; \title only labels the pages
     # The title page shows the preamble's title commands: through \maketitle
     # outside any frame (most templates, then on page 1), or a \titlepage
     # frame. A request for that page edits those commands.
@@ -1393,7 +1404,7 @@ def api_locate_text(gen_id: str, body: LocateBody) -> dict[str, Any]:
         frames = resolve_frame_pages(parse_frames(tex), tex_path)
     except EditError:
         frames = []  # no synctex / odd source: search the whole file instead
-    frame = next((f for f in frames if f.page == body.page), None)
+    frame = next((f for f in frames if (f.first_page or f.page) <= body.page <= f.page), None)
     hit = locate_line(tex, body.text, frame, frames, body.before, body.after)
     if hit is None:
         raise HTTPException(404, detail="Could not find this text in the LaTeX source")
@@ -1557,6 +1568,7 @@ def api_regenerate(gen_id: str) -> JSONResponse:
         language=old_meta.language,
         owner=auth.current_user.get() or "",
         figures=old_meta.figures,
+        kind=old_meta.kind,
     )
     new_dir = store.generation_dir(meta.id)
     for source in sources:

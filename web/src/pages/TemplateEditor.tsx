@@ -223,7 +223,7 @@ export default function TemplateEditor() {
     try {
       await deleteCustomTemplate(key);
       setDirty(false);
-      navigate("/");
+      navigate("/present");
     } catch (e) {
       setSaveError(errorText(e));
     }
@@ -233,7 +233,7 @@ export default function TemplateEditor() {
     return (
       <div className="app-surface p-6">
         <p className="text-red-600">{loadError}</p>
-        <Link to="/" className="mt-3 inline-block text-[var(--color-primary)]">Back</Link>
+        <Link to="/present" className="mt-3 inline-block text-[var(--color-primary)]">Back</Link>
       </div>
     );
   }
@@ -245,13 +245,13 @@ export default function TemplateEditor() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Link to="/" aria-label="Back" className="text-slate-500 hover:text-slate-800"><ArrowLeft size={18} /></Link>
+          <Link to="/present" aria-label="Back" className="text-slate-500 hover:text-slate-800"><ArrowLeft size={18} /></Link>
           <h1 className="text-2xl">{key ? "Edit template" : "New template"}</h1>
         </div>
         <div className="flex items-center gap-2">
           {savedAt && !dirty && <span className="text-sm text-slate-500">Saved {savedAt}</span>}
           {key && !dirty && (
-            <Link to={`/?template=${encodeURIComponent(key)}`} className="btn-secondary no-underline">Make a deck with it</Link>
+            <Link to={`/present?template=${encodeURIComponent(key)}`} className="btn-secondary no-underline">Make a deck with it</Link>
           )}
           <button type="button" className="btn-primary" disabled={!draft || saving || (!!key && !dirty)} onClick={() => void save()}>
             {saving ? "Saving…" : key ? "Save changes" : "Save template"}

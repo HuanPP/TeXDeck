@@ -18,19 +18,16 @@ class EditError(RuntimeError):
 
 @dataclass(slots=True)
 class Frame:
+    """One editable unit: a Beamer frame, or a notesheet of study notes."""
+
     index: int  # order of appearance in the tex, 1-based
     title: str  # title from \begin{frame}{title}; "" if absent
     start_line: int  # 1-based, line of \begin{frame}
     end_line: int  # 1-based, line of \end{frame}
     tex: str  # full frame source including the begin/end lines
-    page: int  # PDF page from synctex; 0 if unresolved
+    page: int  # PDF page from synctex (the unit's last page); 0 if unresolved
+    first_page: int = 0  # first PDF page; a notesheet can run over several
 
-
-# Match bare frame / [opt] / [opt]{title} / {title}
-_BEGIN_FRAME_RE = re.compile(
-    r"\\begin\{frame\}(?:\[[^\]]*\])?(?:\{([^}]*)\})?"
-)
-_END_FRAME = r"\end{frame}"
 
 # Shared by single-slide edits and whole-deck revisions.
 KEEP_NOTES_RULE = (
@@ -39,9 +36,51 @@ KEEP_NOTES_RULE = (
     "inside the frame, just before \\end{frame}."
 )
 
+# Edits to study notes keep to the template's writing rules.
+NOTES_EDIT_RULE = (
+    "Keep to the writing rules in the notes template's instruction block: headings that "
+    "name their content, one checkable fact per bullet, tables only where its table rule "
+    "allows. Do not invent facts; add new content only when the request supplies it or "
+    "asks for it."
+)
 
-def parse_frames(tex: str) -> list[Frame]:
-    """Pair \\begin{frame} with \\end{frame} line by line; page starts as 0."""
+
+@dataclass(frozen=True, slots=True)
+class Unit:
+    """What a document is made of, and how prompts name it."""
+
+    env: str  # LaTeX environment of one unit
+    noun: str  # "frame" / "sheet"
+    document: str  # what the whole source is
+    rules: str  # rules every edit prompt carries
+
+    @property
+    def begin(self) -> str:
+        return f"\\begin{{{self.env}}}"
+
+    @property
+    def end(self) -> str:
+        return f"\\end{{{self.env}}}"
+
+
+DECK_UNIT = Unit("frame", "frame", "XeLaTeX Beamer deck", KEEP_NOTES_RULE + " " + DIAGRAM_RULE)
+NOTES_UNIT = Unit("notesheet", "sheet", "XeLaTeX study-notes document", NOTES_EDIT_RULE)
+
+
+def unit_of(tex: str) -> Unit:
+    """Notes when the source (or a reply chunk, or a template) uses notesheets."""
+    return NOTES_UNIT if r"\begin{notesheet}" in tex or "{texdecknotes}" in tex else DECK_UNIT
+
+
+def _begin_re(unit: Unit) -> re.Pattern[str]:
+    # Match bare / [opt] / [opt]{title} / {title}
+    return re.compile(rf"\\begin\{{{unit.env}\}}(?:\[[^\]]*\])?(?:\{{([^}}]*)\}})?")
+
+
+def parse_frames(tex: str, unit: Unit | None = None) -> list[Frame]:
+    """Pair \\begin{frame} with \\end{frame} (or notesheets) line by line; page starts as 0."""
+    unit = unit or unit_of(tex)
+    begin_re, begin_tag, end_tag = _begin_re(unit), unit.begin, unit.end
     lines = tex.splitlines()
     frames: list[Frame] = []
     open_start: int | None = None
@@ -53,20 +92,20 @@ def parse_frames(tex: str) -> list[Frame]:
         if _is_comment_line(line):
             continue
 
-        if r"\begin{frame}" in line:
+        if begin_tag in line:
             if open_start is not None:
                 raise EditError(f"Unclosed frame starting at line {open_start}")
-            m = _BEGIN_FRAME_RE.search(line)
+            m = begin_re.search(line)
             if m is None:
                 # Literal match but irregular form; still treat as frame start
                 open_title = ""
-                begin_end = line.index(r"\begin{frame}") + len(r"\begin{frame}")
+                begin_end = line.index(begin_tag) + len(begin_tag)
             else:
                 open_title = m.group(1) if m.group(1) is not None else ""
                 begin_end = m.end()
             open_start = line_no
             # Compact frames close on the line they open; models emit these.
-            if _END_FRAME in line[begin_end:]:
+            if end_tag in line[begin_end:]:
                 index += 1
                 frames.append(
                     Frame(
@@ -82,7 +121,7 @@ def parse_frames(tex: str) -> list[Frame]:
                 open_title = ""
             continue
 
-        if _END_FRAME in line:
+        if end_tag in line:
             if open_start is None:
                 continue
             index += 1
@@ -119,6 +158,13 @@ def resolve_frame_pages(frames: list[Frame], tex_path: Path) -> list[Frame]:
     lines = read_synctex_lines(tex_path)
     for frame in frames:
         frame.page = _forward_page(lines, frame.end_line)
+        inside = [lines[n] for n in range(frame.start_line, frame.end_line + 1) if n in lines]
+        if inside and r"\begin{notesheet}" in frame.tex:
+            # A notesheet breaks across pages and its \end line typesets nothing,
+            # so its pages are the span of its own lines.
+            frame.first_page, frame.page = min(inside), max(inside)
+        else:
+            frame.first_page = min([*inside, frame.page]) if frame.page else 0
     return frames
 
 
@@ -232,14 +278,15 @@ def build_frame_edit_messages(
     template_main_tex: str,
     figure_catalog: str = "",
 ) -> list[dict[str, Any]]:
+    unit = unit_of(template_main_tex)
     return [
         {
             "role": "system",
             "content": (
-                "You are a single-frame Beamer editor. Output only one complete "
-                "\\begin{frame}...\\end{frame} block. "
-                "No explanation, no markdown fences, and do not change anything outside this frame. "
-                + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
+                f"You are editing one {unit.noun} of a {unit.document}. Output only one complete "
+                f"{unit.begin}...{unit.end} block. "
+                f"No explanation, no markdown fences, and do not change anything outside this {unit.noun}. "
+                + unit.rules
             ),
         },
         {
@@ -311,15 +358,17 @@ def build_frames_edit_messages(
         )
         title_rule = _TITLE_RULE
     content = _with_attachments(parts, context)
+    unit = unit_of(template_main_tex)
     return [
         {
             "role": "system",
             "content": (
-                "You are editing several frames of a Beamer deck at once. For every frame "
-                "below, output the complete revised frame: first a line `%% FRAME <number>`, "
-                "then its whole \\begin{frame}...\\end{frame} block. Output exactly these "
-                "frames, in the given order, and nothing else: no explanation, no markdown "
-                "fences, nothing outside the frames. " + title_rule + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
+                f"You are editing several {unit.noun}s of a {unit.document} at once. For every "
+                f"{unit.noun} below, output the complete revised {unit.noun}: first a line "
+                f"`%% FRAME <number>`, then its whole {unit.begin}...{unit.end} block. Output "
+                f"exactly these {unit.noun}s, in the given order, and nothing else: no "
+                f"explanation, no markdown fences, nothing outside the {unit.noun}s. "
+                + title_rule + unit.rules
             ),
         },
         {"role": "user", "content": template_main_tex},
@@ -382,6 +431,21 @@ DECK_REPLY_RULE = (
     "\\documentclass to \\end{document} instead. No explanation, no markdown fences."
 )
 
+NOTES_REPLY_RULE = (
+    "Every notesheet is preceded by a line `%% FRAME <number>`. Reply with only what "
+    "changes, as blocks: `%% FRAME <n>` followed by the complete revised notesheet (or "
+    "several notesheets, to split it); `%% DELETE <n>` to remove sheet n; `%% INSERT AFTER <n>` "
+    "followed by new notesheets (n = 0 puts them before the first sheet); `%% TITLE` followed "
+    "by the revised \\title command only. Leave out every sheet that stays the same, and always "
+    "use the numbers as given, not as they will be after your changes. Only when the preamble "
+    "must change, or when most sheets change, output the complete revised document from "
+    "\\documentclass to \\end{document} instead. No explanation, no markdown fences."
+)
+
+
+def _reply_rule(unit: Unit) -> str:
+    return NOTES_REPLY_RULE if unit is NOTES_UNIT else DECK_REPLY_RULE
+
 
 def numbered_deck(tex: str) -> str:
     """The deck with a `%% FRAME n` line before every frame, as the model sees it."""
@@ -408,17 +472,16 @@ def build_deck_edit_messages(
     attachments = attachments or {}
     parts: list[tuple[str, list[dict[str, Any]]]] = []
     if instruction.strip():
-        parts.append((f"Revision request for the whole deck:\n{instruction}", attachments.get(DECK_INDEX, [])))
+        whole = "the notes" if unit_of(tex) is NOTES_UNIT else "the whole deck"
+        parts.append((f"Revision request for {whole}:\n{instruction}", attachments.get(DECK_INDEX, [])))
+    unit = unit_of(tex)
     for index, change in pages:
-        label = "the title page (answer with %% TITLE)" if index == TITLE_INDEX else f"frame {index}"
+        label = "the title page (answer with %% TITLE)" if index == TITLE_INDEX else f"{unit.noun} {index}"
         parts.append((f"Change for {label}:\n{change}", attachments.get(index, [])))
     return [
         {
             "role": "system",
-            "content": (
-                "You are revising a XeLaTeX Beamer deck. " + DECK_REPLY_RULE + " "
-                + KEEP_NOTES_RULE + " " + DIAGRAM_RULE
-            ),
+            "content": f"You are revising a {unit.document}. " + _reply_rule(unit) + " " + unit.rules,
         },
         {"role": "user", "content": template_main_tex},
         {"role": "user", "content": numbered_deck(tex)},
@@ -435,7 +498,8 @@ def _frames_text(chunk: str, what: str) -> list[str]:
     except EditError as e:
         raise EditError(f"{what}: {e}") from e
     if not frames:
-        raise EditError(f"{what}: no complete \\begin{{frame}}...\\end{{frame}} block")
+        unit = unit_of(text)
+        raise EditError(f"{what}: no complete {unit.begin}...{unit.end} block")
     return text.split("\n")[: frames[-1].end_line]
 
 
@@ -496,8 +560,9 @@ def apply_deck_reply(tex: str, reply: str, required: list[int] = ()) -> str:  # 
 def extract_frame(response: str) -> str:
     """After stripping fences, require exactly one full frame block; else raise."""
     s = _strip_markdown_fences(response)
-    begins = list(re.finditer(r"\\begin\{frame\}", s))
-    ends = list(re.finditer(r"\\end\{frame\}", s))
+    unit = unit_of(s)
+    begins = list(re.finditer(re.escape(unit.begin), s))
+    ends = list(re.finditer(re.escape(unit.end), s))
     if len(begins) != 1 or len(ends) != 1 or begins[0].start() >= ends[0].start():
         raise EditError("Model did not return a complete slide frame block")
     return s[begins[0].start() : ends[0].end()]

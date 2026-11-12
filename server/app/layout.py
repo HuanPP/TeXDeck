@@ -23,6 +23,7 @@ import fitz
 from . import deck, figures
 from .deck import CompileError, DeckError, Template
 from .edit import (
+    NOTES_UNIT,
     EditError,
     Frame,
     build_frames_edit_messages,
@@ -30,6 +31,7 @@ from .edit import (
     parse_frames,
     replace_frames,
     resolve_frame_pages,
+    unit_of,
 )
 from .llm import LlmClient, ProgressCallback, image_block, text_block
 
@@ -184,9 +186,11 @@ def build_deck_fix_messages(
     unused_previews: list[Path],
     requirements: str,
 ) -> list[dict[str, Any]]:
+    notes = unit_of(tex) is NOTES_UNIT
     request = (
-        "Problems in this deck:\n" + "\n".join(f"- {p}" for p in problems)
-        + "\n\n" + figures.catalog(records) + "\n\n" + deck.PLACEMENT_RULE
+        "Problems in this document:\n" + "\n".join(f"- {p}" for p in problems)
+        + "\n\n" + figures.catalog(records) + "\n\n"
+        + (deck.NOTES_PLACEMENT_RULE if notes else deck.PLACEMENT_RULE)
     )
     if requirements.strip():
         request += (
@@ -201,7 +205,12 @@ def build_deck_fix_messages(
         {
             "role": "system",
             "content": (
-                "You are revising a complete XeLaTeX Beamer deck to fix the problems listed. "
+                "You are revising a complete XeLaTeX study-notes document to fix the problems "
+                "listed. Output only the full revised, compilable document. No explanation, no "
+                "markdown fences. Change only what the problems require; keep every other sheet "
+                "and all wording as they are."
+                if notes
+                else "You are revising a complete XeLaTeX Beamer deck to fix the problems listed. "
                 "Output only the full revised, compilable document. No explanation, no markdown "
                 "fences. Change only what the problems require; keep every other slide, all "
                 "wording and the \\note{...} speaker notes as they are. " + deck.DIAGRAM_RULE
@@ -233,7 +242,8 @@ def check_and_fix(
     pdf_path = Path(gdir) / "main.pdf"
     for round_no in range(1, _MAX_ROUNDS + 1):
         current = tex_path.read_text(encoding="utf-8")
-        issues = frame_issues(current, log, pdf_path, tex_path)
+        # Notesheets break across pages, so slide overflow and overlap checks do not apply.
+        issues = {} if template.kind == "notes" else frame_issues(current, log, pdf_path, tex_path)
         missing = unused_figures(current, records) if require_all_figures else []
         if not issues and not missing:
             return
@@ -243,7 +253,7 @@ def check_and_fix(
         frames = parse_frames(current)
         if missing:
             problems = [
-                f"{figures.describe(f)} It is not on any slide; add it." for f in missing
+                f"{figures.describe(f)} It is not used anywhere; add it." for f in missing
             ] + [
                 f"Slide {f.index} ({f.title or 'untitled'}): {issue}"
                 for f in frames for issue in issues.get(f.index, [])

@@ -114,3 +114,14 @@ The desktop release bundles an unmodified Tectonic binary as its TeX engine:
 
 TeX packages and fonts Tectonic downloads at run time come from its TeX Live
 based bundle and keep their own licenses.
+
+
+8. Cabin font (Learn notes template)
+------------------------------------
+note-templates/boxed/font/ bundles the Cabin font files unmodified:
+
+    Cabin
+    Source : https://github.com/impallari/Cabin
+    License: SIL Open Font License 1.1 (note-templates/boxed/font/OFL.txt)
+    Copyright (c) 2011, Pablo Impallari, Igino Marini,
+    with Reserved Font Name Cabin.

@@ -1,0 +1,192 @@
+% =============================================================================
+% SYSTEM INSTRUCTION TO LLM:
+% This file is a PROMPT TEMPLATE for STUDY NOTES (A4 portrait, printed or read
+% on screen). You MUST output a FULL, FINAL, COMPILABLE XeLaTeX document built
+% from it: keep the preamble, replace every sample sheet with notes on the
+% user's material, and delete this instruction block and every comment that
+% starts with "% [GUIDE]".
+%
+% WHAT THESE NOTES ARE FOR
+% The reader already met this material once and uses the notes to review it
+% and to find a fact again quickly. So the notes keep the material's skeleton
+% -- its claims, definitions, mechanisms, conditions, numbers, comparisons and
+% conclusions -- and drop everything that only helps a first reading: stories,
+% motivation, repetition, transitions, hedging, acknowledgements, references.
+%
+% CRITICAL RULES:
+% 1. PREAMBLE: do not change it, except the package option -- write
+%    \usepackage[zh]{texdecknotes} when the notes are in Chinese and
+%    \usepackage{texdecknotes} otherwise -- and the \title{...} line.
+% 2. CONTENT COMES ONLY FROM THE MATERIAL. Do not add facts, examples, numbers
+%    or advice the material does not contain. Keep its terms, names, units and
+%    figures exactly; when the material defines a term, use that term.
+% 3. ORGANISE BY TOPIC, NOT BY PAGE ORDER. One notesheet = one topic a reader
+%    would review in one sitting (2--6 sheets in total). Inside a sheet,
+%    \notehead{...} splits it into parts and \notesub{...} splits a part into
+%    groups only when a part has two or more clear groups. Never more levels.
+% 4. HEADINGS NAME THEIR CONTENT. Write "光反应的产物", "Causes of the 1929
+%    crash"; never "概述", "背景", "其他", "总结", "Introduction", "Key points".
+%    Every heading has at least two bullets under it.
+% 5. ONE BULLET = ONE FACT. Write the fact itself in a short phrase or clause,
+%    normally one line, at most two. Cut filler words ("非常", "重要的是",
+%    "it is worth noting that"). A bullet must say something checkable: if it
+%    only says that something matters, rewrite it to say what it does.
+%    A "Label：" prefix is allowed only when the label is the thing the bullet
+%    is about (a term, a factor, a type: "温度：……"); never a word that could
+%    label a bullet on any topic, such as "核心论断：", "核心含义：", "机制：",
+%    "要点：", "定义：", "Key idea:" -- drop it and start with the content. An \eg or \aside that
+%    would push the bullet past two lines becomes a nested bullet instead.
+% 6. LISTS SAY WHAT THEY LIST. When the material gives N causes / conditions
+%    / steps / types, put the category in a \notelead{...} line ("影响光合速率
+%    的三个因素") and give each member its own bullet, in parallel wording.
+%    If the lead states a number, the list has exactly that many bullets.
+%    Steps in order use enumerate; everything else uses itemize.
+%    One list per heading or lead: never put two lists back to back. If the
+%    points fall into groups, give each group a \notesub{...} (a short bold
+%    label such as "核心概念区分"); \notelead is plain text, only for a lead-in
+%    phrase or sentence that says what the next list enumerates.
+% 7. PICK THE FORM BY THE SHAPE OF THE INFORMATION:
+%    - label and value pairs (definitions, dates, quantities, settings):
+%      notefacts with \fact{Label:}{value};
+%    - NO TABLES by default. A table is allowed only when ALL of these hold:
+%      (a) it compares 3 or more things, or 2 things on 3 or more attributes;
+%      (b) every cell is a number or at most about 8 characters / 4 words;
+%      (c) it has at most 5 columns and 8 rows.
+%      If any cell would need a sentence, write no table: give each thing its
+%      own \notesub and list its points under it. Allowed tables use plain
+%      \begin{tabular}{l l l} with \toprule, \midrule, \bottomrule;
+%    - a key formula: introduce it with a \notelead (never a bullet that ends
+%      in "公式：" with the formula outside it), display it, then a notefacts
+%      block that says what each symbol means, with units;
+%    - a cause-and-effect chain: one bullet per link, written "A → B";
+%    - sub-points of one bullet: a nested itemize (dash bullets), one level only.
+% 8. MARKS, SPARINGLY: \key{...} only for a term or number the reader must
+%    remember (at most about one per bullet, never a whole clause);
+%    \eg{...} for an example the material gives; \aside{...} for a short
+%    qualification. Never use \textbf, colours or font-size commands yourself.
+% 9. SPACE FOLLOWS WEIGHT. Spend lines in proportion to how much the material
+%    develops a point; a point mentioned once in passing gets one bullet or
+%    nothing. Do not give every heading the same number of bullets.
+%    LENGTH IS A HARD LIMIT, unless the Requirements set another: the whole
+%    document is at most 6 pages and about 60 bullets, and at most about one
+%    page per 3 pages of source material (a 6-page article gets 2 pages).
+%    Notes that cover everything are a copy, not notes: choose. The main line
+%    of the material gets the space; appendices, supplementary experiments,
+%    implementation details and long result tables share at most one sheet,
+%    keeping only their conclusions and the few numbers worth remembering.
+% 10. NO WRAP-UP. Do not end with a summary sheet that repeats earlier bullets.
+%    A final part on easily confused points is allowed only when the material
+%    itself contrasts them.
+% 11. LATEX HYGIENE: escape % & # _ $ in text (\% \& \# \_ \$); write units
+%    with a thin space (5\,cm); use $...$ for chemistry and maths symbols
+%    (CO$_2$). No \section, \tableofcontents, \maketitle, tikz, colour or
+%    \vspace commands. Use \includegraphics only for the user image files
+%    listed in the request (figures/...), as
+%    \begin{center}\includegraphics[width=<w>\linewidth]{<file>}\end{center};
+%    when none are listed, no external image files exist.
+% 12. Only these packages are available (already loaded by texdecknotes):
+%    fontspec, xeCJK, tcolorbox, enumitem, tabularx, booktabs, amsmath,
+%    amssymb, graphicx. Do NOT add \usepackage lines.
+%
+% The sample below is in Chinese only to show the format; the output language
+% is set by the request.
+% =============================================================================
+
+\documentclass{article}
+\usepackage[zh]{texdecknotes}
+
+% Short title of the whole set of notes (shown small at the top of each page).
+\title{光合作用}
+
+\begin{document}
+
+% [GUIDE] A sheet = one topic. The title is the topic itself, centred by
+% [GUIDE] default; keep the default for every sheet.
+\begin{notesheet}{光合作用的条件与过程}
+
+% [GUIDE] Lead-in + parallel bullets: the lead names what is being listed.
+\notelead{光合作用需要的三样东西}
+\begin{itemize}
+    \item \key{光}：主要利用红光和蓝紫光
+    \item 二氧化碳：经叶片的\key{气孔}进入
+    \item 水：由根吸收，经导管运到叶片
+\end{itemize}
+% [GUIDE] BAD:  \item 光是光合作用中非常重要的一个条件
+% [GUIDE] GOOD: \item 光：主要利用红光和蓝紫光      (says WHAT, not THAT)
+
+% [GUIDE] \notehead splits the sheet; \notesub only when a part has 2+ groups.
+\notehead{两个阶段}
+\notesub{光反应（类囊体膜上）}
+\begin{itemize}
+    \item 水被分解，释放\key{氧气}
+    \item 光能转化为 ATP 和 NADPH 中的化学能
+\end{itemize}
+\notesub{暗反应（叶绿体基质中）}
+\begin{itemize}
+    \item 又称\key{卡尔文循环}；不直接需要光，但要用光反应的产物
+    \item CO$_2$ 先与 RuBP 结合，再被还原成糖
+    \begin{itemize}
+        \item 每固定 6 个 CO$_2$，得到 1 个葡萄糖
+        \item 消耗 18 个 ATP、12 个 NADPH
+    \end{itemize}
+\end{itemize}
+
+% [GUIDE] A cause-and-effect chain: one link per bullet, "A → B".
+\notehead{光照不足时发生什么}
+\begin{itemize}
+    \item 光照减弱 → 光反应产生的 ATP、NADPH 减少
+    \item ATP、NADPH 减少 → 暗反应中 C$_3$ 的还原变慢，C$_3$ 积累
+\end{itemize}
+\end{notesheet}
+
+\begin{notesheet}{影响光合速率的因素}
+
+% [GUIDE] Space follows weight: the material develops light the most, so it
+% [GUIDE] gets the most bullets; do not pad the others to match.
+\notelead{三个主要因素}
+\begin{itemize}
+    \item 光照强度：达到\key{光饱和点}之前，越强越快 \aside{之后不再增加}
+    \item 温度：通过酶的活性起作用，过高反而下降
+    \item CO$_2$ 浓度：温室中常人工补充 \eg{燃烧沼气}
+\end{itemize}
+
+% [GUIDE] Label/value pairs: notefacts. Use it for an experiment's set-up,
+% [GUIDE] a person's dates, a definition list, settings and quantities.
+\notehead{实验：光照强度的影响}
+\begin{notefacts}
+    \fact{材料：}{金鱼藻，放在盛清水的试管中}
+    \fact{自变量：}{台灯与试管的距离（10、20、30、40\,cm）}
+    \fact{因变量：}{每分钟产生的气泡数}
+    \fact{控制变量：}{水温、CO$_2$ 浓度、植物大小}
+\end{notefacts}
+
+% [GUIDE] The one allowed table: 2 things on 3 attributes, every cell short.
+% [GUIDE] Adding a row such as "能量变化" whose cells need a sentence would
+% [GUIDE] break rule 7 -- then drop the table and use one \notesub per thing.
+\notehead{光反应与暗反应对比}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+ & 光反应 & 暗反应 \\
+\midrule
+场所 & 类囊体膜 & 叶绿体基质 \\
+是否需要光 & 需要 & 不直接需要 \\
+产物 & O$_2$、ATP、NADPH & 糖类 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% [GUIDE] A key formula: display it, then say what the symbols mean.
+\notehead{总反应式}
+\notelead{在叶绿体中、有光的条件下：}
+\[
+6\,\mathrm{CO_2} + 12\,\mathrm{H_2O} \xrightarrow[\text{叶绿体}]{\text{光}}
+\mathrm{C_6H_{12}O_6} + 6\,\mathrm{O_2} + 6\,\mathrm{H_2O}
+\]
+\begin{itemize}
+    \item 产物中 O$_2$ 的氧全部来自\key{水}，不来自 CO$_2$
+    \item 水既是反应物又是产物：消耗 12 个，生成 6 个
+\end{itemize}
+\end{notesheet}
+
+\end{document}

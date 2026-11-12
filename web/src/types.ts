@@ -29,7 +29,11 @@ export type GenerationMeta = {
   // Pages of the compiled PDF (frame_count counts \begin{frame} only, so it
   // misses the title, section and Q&A pages the template adds). 0 if unknown.
   pdf_pages?: number;
+  kind?: Kind; // missing on older generations: "deck"
 };
+
+// Presentation makes slide decks; Learn makes study notes.
+export type Kind = "deck" | "notes";
 
 export type FigureItem = {
   file: string; // "figures/fig-01.png"
@@ -44,6 +48,7 @@ export type SlideLanguage = "source" | "en" | "zh";
 export type TemplateItem = {
   key: string;
   name: string;
+  kind?: Kind;
   customizable?: boolean; // built-in pack the template editor can derive from
   custom?: boolean; // made in the template editor
   base?: string;
@@ -70,7 +75,8 @@ export type TemplateDraft = {
 export type CustomTemplateSpec = TemplateDraft & { key: string; created_at: string; updated_at: string };
 
 export type LayoutBox = { kind: "text" | "image"; x: number; y: number; w: number; h: number };
-export type FrameItem = { index: number; title: string; page: number; tex: string; notes: string };
+// page: last PDF page of the unit; first_page: its first (a notesheet can span pages).
+export type FrameItem = { index: number; title: string; page: number; first_page?: number; tex: string; notes: string };
 export type TaskEvent = {
   gen_id: string;
   status: TaskStatus;

@@ -208,7 +208,7 @@ def test_editor_flow(client: TestClient, fake_compile: None) -> None:
     assert r.status_code == 200, r.text
     key = r.json()["key"]
     listed = client.get("/api/templates").json()
-    assert {"key": key, "name": "Lab", "base": "navy", "custom": True} in listed
+    assert {"key": key, "name": "Lab", "base": "navy", "custom": True, "kind": "deck"} in listed
     assert client.get(f"/api/custom-templates/{key}").json()["editor"]["background"]["rotation"] == 15
 
     r = client.get(f"/api/templates/{key}/preview.png")

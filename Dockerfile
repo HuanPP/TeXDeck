@@ -22,6 +22,7 @@ COPY server/pyproject.toml server/pyproject.toml
 COPY server/app server/app
 RUN pip install --no-cache-dir ./server
 COPY templates templates
+COPY note-templates note-templates
 COPY --from=web /build/dist web/dist
 
 # Bake-time smoke test: one bundled template through the real toolchain, so a

@@ -14,7 +14,7 @@ import StatusBadge from "../components/StatusBadge";
 import { prepareFigure } from "../imageTools";
 import { modelReady, useModel } from "../model";
 import { displayTitle } from "../title";
-import type { GenerationMeta, SlideLanguage, TemplateItem } from "../types";
+import type { GenerationMeta, Kind, SlideLanguage, TemplateItem } from "../types";
 
 const MAX_IMAGES = 12; // the server's figures.MAX_FIGURES
 
@@ -29,7 +29,12 @@ const fmt = (iso: string) => {
   }
 };
 
-export default function Home() {
+const kindOf = (x: { kind?: Kind }): Kind => x.kind ?? "deck";
+
+// Presentation (kind "deck") and Learn (kind "notes") share this page: the
+// form, the templates and the history all show only their own kind.
+export default function Home({ kind }: { kind: Kind }) {
+  const notes = kind === "notes";
   const navigate = useNavigate();
   const [search] = useSearchParams();
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -68,9 +73,10 @@ export default function Home() {
   useEffect(() => {
     void (async () => {
       try {
-        const [tpls, gens] = await Promise.all([listTemplates(), listGenerations()]);
+        const [all, gens] = await Promise.all([listTemplates(), listGenerations()]);
+        const tpls = all.filter((t) => kindOf(t) === kind);
         setTemplates(tpls);
-        setItems(gens);
+        setItems(gens.filter((g) => kindOf(g) === kind));
         // ?template= comes from the template editor's "Make a deck with it".
         const wanted = tpls.find((t) => t.key === search.get("template")) ?? tpls[0];
         if (wanted) setTemplateKey(wanted.key);
@@ -98,7 +104,7 @@ export default function Home() {
   useEffect(() => {
     if (!anyRunning) return;
     const timer = window.setInterval(() => {
-      listGenerations().then(setItems).catch(() => undefined);
+      listGenerations().then((gens) => setItems(gens.filter((g) => kindOf(g) === kind))).catch(() => undefined);
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [anyRunning]);
@@ -164,8 +170,8 @@ export default function Home() {
         language,
         template_key: templateKey,
         instruction: instruction.trim(),
-        author: author.trim(),
-        institute: institute.trim(),
+        author: notes ? "" : author.trim(),
+        institute: notes ? "" : institute.trim(),
         files: sourceTab === "pdf" ? files : undefined,
         source_text: sourceTab === "text" ? sourceText : undefined,
         images: images.map((img) => ({ file: img.file, note: img.note.trim() })),
@@ -217,7 +223,7 @@ export default function Home() {
   return (
     <div className="space-y-10">
       <section className="app-surface p-6">
-        <h1 className="mb-6 text-2xl">New generation</h1>
+        <h1 className="mb-6 text-2xl">{notes ? "New study notes" : "New slide deck"}</h1>
         {model && !ready && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <span>Connect a model first: your ChatGPT or Claude plan, or an API key.</span>
@@ -296,7 +302,9 @@ export default function Home() {
           <div>
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <span className="text-sm text-slate-600">Images to include (optional)</span>
-              <span className="text-xs text-slate-400">The model picks the slide, size and position</span>
+              <span className="text-xs text-slate-400">
+                {notes ? "The model picks where they go and how big" : "The model picks the slide, size and position"}
+              </span>
             </div>
             {images.length > 0 && (
               <ul className="mb-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -337,7 +345,11 @@ export default function Home() {
                 }}
               >
                 <ImagePlus className="h-4 w-4" />
-                {images.length ? "Add more images" : "Add photos, screenshots or logos to put on the slides"}
+                {images.length
+                  ? "Add more images"
+                  : notes
+                    ? "Add photos, diagrams or screenshots to put in the notes"
+                    : "Add photos, screenshots or logos to put on the slides"}
                 <input type="file" multiple accept="image/*,.heic,.heif" className="sr-only"
                   onChange={(e) => {
                     void addImages(e.target.files);
@@ -374,7 +386,7 @@ export default function Home() {
                         </div>
                       ) : (
                         <img src={templatePreviewUrl(t.key)} alt="" loading="lazy"
-                          className="h-full w-full object-cover"
+                          className={`h-full w-full object-cover ${notes ? "object-top" : ""}`}
                           onError={() =>
                             setPreviewFailed((prev) => new Set(prev).add(t.key))
                           } />
@@ -394,11 +406,13 @@ export default function Home() {
                   </div>
                 );
               })}
-              <Link to="/templates/new"
-                className="flex min-h-28 flex-col items-center justify-center gap-1 border border-dashed border-slate-300 text-sm text-slate-500 no-underline hover:border-slate-400 hover:text-slate-700">
-                <Plus size={18} />
-                New template
-              </Link>
+              {!notes && (
+                <Link to="/templates/new"
+                  className="flex min-h-28 flex-col items-center justify-center gap-1 border border-dashed border-slate-300 text-sm text-slate-500 no-underline hover:border-slate-400 hover:text-slate-700">
+                  <Plus size={18} />
+                  New template
+                </Link>
+              )}
             </div>
           </div>
 
@@ -410,8 +424,8 @@ export default function Home() {
                 placeholder="Leave empty to use the document's own title" />
             </div>
             <div>
-              <span className="mb-2 block text-sm text-slate-600">Slide language</span>
-              <Segmented label="Slide language" value={language} onChange={setLanguage} options={[
+              <span className="mb-2 block text-sm text-slate-600">{notes ? "Notes language" : "Slide language"}</span>
+              <Segmented label={notes ? "Notes language" : "Slide language"} value={language} onChange={setLanguage} options={[
                 { value: "source", label: "Same as material" },
                 { value: "en", label: "English" },
                 { value: "zh", label: "中文" },
@@ -424,13 +438,13 @@ export default function Home() {
               aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
               <ChevronRight className={`h-4 w-4 transition-transform ${moreOpen ? "rotate-90" : ""}`} />
               More options
-              {!moreOpen && (author || institute || instruction) ? (
+              {!moreOpen && ((!notes && (author || institute)) || instruction) ? (
                 <span className="text-xs text-slate-500">(filled in)</span>
               ) : null}
             </button>
             {moreOpen && (
               <div className="mt-4 space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
+                {!notes && <div className="grid gap-6 md:grid-cols-2">
                   <div>
                     <label className="mb-2 block text-sm text-slate-600" htmlFor="author">Author</label>
                     <input id="author" className="input-field" value={author}
@@ -443,14 +457,16 @@ export default function Home() {
                       onChange={(e) => setInstitute(e.target.value)}
                       placeholder="e.g. Dept. of Physics, MIT" />
                   </div>
-                </div>
+                </div>}
                 <div>
                   <label className="mb-2 block text-sm text-slate-600" htmlFor="instruction">
                     Extra instructions
                   </label>
                   <textarea id="instruction" className="input-field min-h-24" value={instruction}
                     onChange={(e) => setInstruction(e.target.value)}
-                    placeholder="e.g. Keep it under 10 slides, one slide per experiment, skip the related work" />
+                    placeholder={notes
+                      ? "e.g. Only chapters 2 and 3, keep it to two pages, list every formula"
+                      : "e.g. Keep it under 10 slides, one slide per experiment, skip the related work"} />
                 </div>
               </div>
             )}

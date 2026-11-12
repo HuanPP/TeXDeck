@@ -70,6 +70,7 @@ def configure(data: Path) -> None:
     load_env_file(data / "texdeck.env")
     defaults = {
         "TEXDECK_TEMPLATES_DIR": root / "templates",
+        "TEXDECK_NOTE_TEMPLATES_DIR": root / "note-templates",
         "TEXDECK_WEB_DIST_DIR": root / "web" / "dist",
         "TEXDECK_ARTIFACT_ROOT": data / "artifacts",
         "TEXDECK_CHATGPT_AUTH_FILE": data / "chatgpt-auth.json",

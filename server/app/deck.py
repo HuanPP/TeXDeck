@@ -50,6 +50,11 @@ class Template:
     extra: dict[str, bytes | Path] = field(default_factory=dict)
     base: str = ""  # the built-in pack a custom template derives from
 
+    @property
+    def kind(self) -> str:
+        """"deck" (Presentation: Beamer slides) or "notes" (Learn: study notes)."""
+        return "notes" if self.meta.get("kind") == "notes" else "deck"
+
 
 @dataclass(slots=True)
 class DeckRequest:
@@ -123,6 +128,45 @@ DIAGRAM_RULE = (
     "the plot, so that neighbouring labels never run into each other."
 )
 
+# ---- Learn: study notes -----------------------------------------------------
+# The notes template's own instruction block carries the writing rules; these
+# are the request-level rules that differ from slides.
+
+NOTES_LANGUAGE_RULES = {
+    "source": (
+        "Output language: the language of the source material (the dominant one if it "
+        "mixes languages), unless the Requirements explicitly ask for another language."
+    ),
+    "en": (
+        "Output language: English. Write all notes in English even when the source "
+        "material is in another language, unless the Requirements explicitly ask otherwise."
+    ),
+    "zh": (
+        "Output language: Simplified Chinese. Write all notes in Simplified Chinese even "
+        "when the source material is in another language, unless the Requirements "
+        "explicitly ask otherwise. Keep technical terms, names and formulas as they are."
+    ),
+}
+
+NOTES_PLACEMENT_RULE = (
+    "User images: the user supplied image files (listed and shown after the source "
+    "material) that must appear in the notes. Put each one in the sheet, under the "
+    "heading, whose content it fits best, or where its user note says; use every image "
+    "exactly once unless the Requirements say otherwise. Include an image only as "
+    "\\begin{center}\\includegraphics[width=<w>\\linewidth,height=0.4\\textheight,"
+    "keepaspectratio]{<file>}\\end{center} with the file name exactly as listed: "
+    "w = 0.8 for a wide image, 0.4-0.5 for a square or tall one, smaller for a logo-like "
+    "one. Add one short line under it saying what it shows only when the notes do not "
+    "already say so. Never crop, stretch, rotate or redraw a user image, and never "
+    "reference any other image file."
+)
+
+NOTES_SOURCE_IMAGES_RULE = (
+    "Images inside the source material: write down what charts, diagrams and tables "
+    "show -- their key numbers, trends and relations -- as bullets (or as a table when "
+    "the template's table rule allows one). Never try to redraw them."
+)
+
 # User images live here, relative to the deck's compile directory.
 FIGURE_DIR = "figures"
 
@@ -152,20 +196,30 @@ class CompileResult:
     attempts: int
 
 
-def list_templates() -> list[Template]:
+def _template_roots() -> list[Path]:
+    return [Path(settings.templates_dir), Path(settings.note_templates_dir)]
+
+
+def list_templates(kind: str | None = None) -> list[Template]:
+    """Built-in packs of every kind, or of one kind ("deck" / "notes")."""
     root = Path(settings.templates_dir)
     if not root.is_dir():
         raise DeckError(f"Templates directory not found: {root}")
 
     templates: list[Template] = []
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
+    for root in _template_roots():
+        if not root.is_dir():
             continue
-        meta_path = child / "template.json"
-        if not meta_path.is_file():
-            continue
-        templates.append(_load_template_from_dir(child))
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            meta_path = child / "template.json"
+            if not meta_path.is_file():
+                continue
+            templates.append(_load_template_from_dir(child))
 
+    if kind is not None:
+        templates = [t for t in templates if t.kind == kind]
     templates.sort(key=lambda t: t.name)
     return templates
 
@@ -180,12 +234,13 @@ def get_template(key: str) -> Template:
 
 
 def builtin_template(key: str) -> Template:
-    root = Path(settings.templates_dir)
-    candidate = root / key
-    meta_path = candidate / "template.json"
-    if not candidate.is_dir() or not meta_path.is_file():
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
         raise ValueError(f"Unknown template: {key}")
-    return _load_template_from_dir(candidate)
+    for root in _template_roots():
+        candidate = root / key
+        if candidate.is_dir() and (candidate / "template.json").is_file():
+            return _load_template_from_dir(candidate)
+    raise ValueError(f"Unknown template: {key}")
 
 
 def _load_template_from_dir(directory: Path) -> Template:
@@ -240,6 +295,8 @@ def build_generation_messages(
 ) -> list[dict[str, Any]]:
     """figure_blocks: the user's images as figures.prompt_blocks renders them.
     memory_note: what is remembered about this user (memory.note()), if anything."""
+    if template.kind == "notes":
+        return _build_notes_messages(template, request, documents, figure_blocks)
     system = (
         "Output only one complete, compilable XeLaTeX Beamer document. "
         "No explanation, no markdown fences."
@@ -277,7 +334,63 @@ def build_generation_messages(
     else:
         title_parts.append("There are no image files; do not use \\includegraphics.")
     title_message = "\n".join(title_parts)
+    material_content = _material_content(request, documents, figure_blocks)
 
+    # Five segments: title+request is repeated after the material (W11 experiment:
+    # baseline 4-msg produced 10 frames; 5-msg produced 8 — closer to "under 8").
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": template.main_tex},
+        {"role": "user", "content": title_message},
+        {"role": "user", "content": material_content},
+        {"role": "user", "content": title_message},
+    ]
+
+
+def _build_notes_messages(
+    template: Template,
+    request: DeckRequest,
+    documents: list[PdfDocument],
+    figure_blocks: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Learn: the same five segments as a deck, with the notes rules. No speaker
+    notes, author or institute, and no remembered slide habits."""
+    system = (
+        "Output only one complete, compilable XeLaTeX document that follows the notes "
+        "template. No explanation, no markdown fences."
+    )
+    if request.title.strip():
+        parts = [f"Title: {request.title}"]
+    else:
+        parts = [
+            "No title was provided; use the title of the source material, or a short "
+            "fitting title if it has none."
+        ]
+    if request.instruction.strip():
+        parts.append(f"Requirements: {request.instruction}")
+    parts.append(NOTES_LANGUAGE_RULES.get(request.language, NOTES_LANGUAGE_RULES["source"]))
+    parts.append(NOTES_SOURCE_IMAGES_RULE)
+    if figure_blocks:
+        parts.append(NOTES_PLACEMENT_RULE)
+    else:
+        parts.append("There are no image files; do not use \\includegraphics.")
+    request_message = "\n".join(parts)
+    material_content = _material_content(request, documents, figure_blocks)
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": template.main_tex},
+        {"role": "user", "content": request_message},
+        {"role": "user", "content": material_content},
+        {"role": "user", "content": request_message},
+    ]
+
+
+def _material_content(
+    request: DeckRequest,
+    documents: list[PdfDocument],
+    figure_blocks: list[dict[str, Any]] | None,
+) -> str | list[dict[str, Any]]:
+    """The source (page images or pasted text) followed by the user's images."""
     if documents:
         multi = len(documents) > 1
         material: list[dict[str, Any]] = []
@@ -318,16 +431,7 @@ def build_generation_messages(
         if isinstance(material_content, str):
             material_content = [text_block(material_content)]
         material_content = material_content + figure_blocks
-
-    # Five segments: title+request is repeated after the material (W11 experiment:
-    # baseline 4-msg produced 10 frames; 5-msg produced 8 — closer to "under 8").
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": template.main_tex},
-        {"role": "user", "content": title_message},
-        {"role": "user", "content": material_content},
-        {"role": "user", "content": title_message},
-    ]
+    return material_content
 
 
 def extract_tex(
@@ -351,9 +455,14 @@ def extract_tex(
     if after.strip():
         raise DeckError("Incomplete model LaTeX: content after \\end{document}")
 
-    theme_directive = _theme_directive(template)
-    if theme_directive is not None and theme_directive not in strip_tex_comments(tex):
-        raise DeckError(f"Incomplete model LaTeX: missing {theme_directive}")
+    if template is not None and template.kind == "notes":
+        # Notes pick the package option themselves ([zh] for Chinese notes).
+        if not _NOTES_PACKAGE_RE.search(strip_tex_comments(tex)):
+            raise DeckError("Incomplete model LaTeX: missing \\usepackage{texdecknotes}")
+    else:
+        theme_directive = _theme_directive(template)
+        if theme_directive is not None and theme_directive not in strip_tex_comments(tex):
+            raise DeckError(f"Incomplete model LaTeX: missing {theme_directive}")
 
     # Template header comments may keep [STYLE REF] text; only the de-commented
     # body is checked for leftovers.
@@ -421,6 +530,8 @@ def check_body(body: str, figures: list[str] | tuple[str, ...] = ()) -> None:
             )
 
 
+_NOTES_PACKAGE_RE = re.compile(r"\\usepackage(?:\[[^\]]*\])?\{texdecknotes\}")
+
 _THEME_DIRECTIVE_RE = re.compile(
     r"\\usepackage(?:\[[^\]]*\])?\{[a-zA-Z]*beamer[a-zA-Z]*\}|\\usetheme\{[^}]+\}"
 )
@@ -482,16 +593,17 @@ def _tex_context_around_error(tex: str, compile_log: str, radius: int = 10) -> s
     if line_no < 1 or line_no > len(lines):
         return f"(error line l.{line_no} is outside the source, which has {len(lines)} lines)"
 
+    env = "notesheet" if r"\begin{notesheet}" in tex else "frame"
     begin_frame: int | None = None
     for n in range(line_no, 0, -1):
-        if r"\begin{frame}" in lines[n - 1]:
+        if rf"\begin{{{env}}}" in lines[n - 1]:
             begin_frame = n
             break
 
     end_frame: int | None = None
     if begin_frame is not None:
         for n in range(max(line_no, begin_frame), len(lines) + 1):
-            if r"\end{frame}" in lines[n - 1]:
+            if rf"\end{{{env}}}" in lines[n - 1]:
                 end_frame = n
                 break
 
@@ -519,10 +631,16 @@ def build_repair_messages(
 ) -> list[dict[str, Any]]:
     error_block = _extract_compile_error_block(compile_log)
     tex_context = _tex_context_around_error(tex, compile_log)
+    packages = (
+        "texdecknotes (it loads fontspec / xeCJK / tcolorbox / enumitem / tabularx / "
+        "booktabs / amsmath / amssymb / graphicx). "
+        if _NOTES_PACKAGE_RE.search(tex)
+        else "collegebeamer / tikz / pgfplots / amsmath / amssymb / pifont / "
+        "booktabs / colortbl / multirow. "
+    )
     preamble_note = (
         "The document preamble is fixed and must not be changed. Allowed packages: "
-        "collegebeamer / tikz / pgfplots / amsmath / amssymb / pifont / "
-        "booktabs / colortbl / multirow. "
+        + packages
         + (
             "The only image files are: " + ", ".join(figures) + "; "
             "do not reference any other image file; "
