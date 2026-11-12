@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import threading
@@ -9,12 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, figures, layout, memory, pdf, store, tasks
+from . import deck, figures, fonts, layout, memory, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -58,7 +59,6 @@ from .llm import (
     set_model,
 )
 from .pptx_export import EXPORT_VERSION as PPTX_EXPORT_VERSION
-from .pptx_export import PLATFORMS as PPTX_PLATFORMS
 from .pptx_export import PptxExportError, pdf_to_pptx
 from .store import GenerationMeta
 
@@ -1291,28 +1291,40 @@ def _page_notes(gen_id: str) -> dict[int, str]:
     return {f.page: n for f in frames if f.page and (n := frame_notes(f.tex))}
 
 
+@app.get("/api/fonts")
+def api_font_names() -> list[str]:
+    """Font names the browser checks for before downloading a PPTX (see fonts.py)."""
+    return fonts.all_names()
+
+
+_PPTX_KEEP = 4  # cached PPTX variants (one per set of installed fonts) kept per deck
+
+
 @app.get("/api/generations/{gen_id}/deck.pptx")
-def api_get_pptx(gen_id: str, platform: str = "windows") -> FileResponse:
-    """platform: where the file will be opened ("windows" or "mac"); font names differ."""
+def api_get_pptx(gen_id: str, fonts_: str | None = Query(None, alias="fonts")) -> FileResponse:
+    """fonts: comma-separated names (from /api/fonts) installed where the file will
+    be opened; each PDF font gets the nearest of them. Without it, Office names."""
     meta = _load(gen_id)
-    if platform not in PPTX_PLATFORMS:
-        raise HTTPException(400, detail=f"platform must be one of {', '.join(PPTX_PLATFORMS)}")
     pdf_path = _file(gen_id, "main.pdf", "PDF not generated yet")
+    known = {name.casefold() for name in fonts.all_names()}
+    installed = None if fonts_ is None else sorted(
+        {n.strip() for n in fonts_.split(",") if n.strip().casefold() in known}
+    )
+    key = "office" if installed is None else hashlib.sha256("\n".join(installed).encode()).hexdigest()[:10]
     # Versioned name: an improved exporter must not serve decks cached by the old one.
-    suffix = "" if platform == "windows" else f".{platform}"
-    out = pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}{suffix}.pptx")
-    current = {pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}{'' if p == 'windows' else '.' + p}.pptx")
-               for p in PPTX_PLATFORMS}
+    out = pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}.{key}.pptx")
     # Built on first download and rebuilt whenever an edit recompiles the PDF.
     with _pptx_lock:
         if not out.is_file() or out.stat().st_mtime < pdf_path.stat().st_mtime:
             try:
-                pdf_to_pptx(pdf_path, out, notes=_page_notes(gen_id), platform=platform)
+                pdf_to_pptx(pdf_path, out, notes=_page_notes(gen_id), installed=installed)
             except PptxExportError as e:
                 raise HTTPException(422, detail=str(e)) from e
-            for old in pdf_path.parent.glob("main*.pptx"):
-                if old not in current:
-                    old.unlink(missing_ok=True)
+        current = f"main.v{PPTX_EXPORT_VERSION}."
+        cached = sorted(pdf_path.parent.glob("main*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)
+        for i, old in enumerate(cached):
+            if not old.name.startswith(current) or i >= _PPTX_KEEP:
+                old.unlink(missing_ok=True)
     return FileResponse(
         out,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

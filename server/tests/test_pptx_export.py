@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz
 from pptx import Presentation
 
-from app.pptx_export import _cjk_office_font, _is_math_font, _latin_office_font, pdf_to_pptx
+from app.pptx_export import _is_math_font, pdf_to_pptx
 
 
 def _make_pdf(path: Path) -> None:
@@ -57,37 +57,6 @@ def test_math_fonts_are_recognised() -> None:
         assert _is_math_font(font), font
 
 
-def test_fonts_map_to_office_fonts_of_the_same_design() -> None:
-    latin = {
-        "NimbusRomNo9L-Regu": "Times New Roman",
-        "TeXGyreSchola-Regular": "Century Schoolbook",
-        "Merriweather-Regular": "Cambria",
-        "FiraMono-Regular": "Consolas",
-        "FiraSans-Book": "Calibri",
-        "URWGothic-Book": "Century Gothic",
-        "SomeSlabSerif-Regular": "Cambria",
-    }
-    for font, office in latin.items():
-        assert _cjk_office_font(font, "Text") is None, font
-        assert _latin_office_font(font) == office, font
-    # Style words inside Latin names do not make a font CJK.
-    assert _cjk_office_font("Flamingo-Regular", "Text") is None
-    cjk = {
-        ("STKaiti", "楷书"): "KaiTi",
-        ("KaitiSC-Regular", "楷书"): "KaiTi",
-        ("LXGWWenKai-Regular", "文楷"): "KaiTi",
-        ("STXingkai", "行楷"): "STXingkai",
-        ("FandolFang-Regular", "仿宋"): "FangSong",
-        ("SongtiSC-Regular", "宋体"): "SimSun",
-        ("PingFangSC-Regular", "苹方"): "Microsoft YaHei",
-        ("NotoSerifCJKjp-Regular", "2024"): "SimSun",
-        ("#E6#A5#B7#E4#BD#93", "楷体"): "KaiTi",
-        ("UnknownSerifCN", "中文"): "SimSun",
-    }
-    for (font, text), office in cjk.items():
-        assert _cjk_office_font(font, text) == office, font
-
-
 def _chars(spec: list[tuple[str, float, float]]) -> list[dict]:
     return [{"c": c, "bbox": (x0, 0.0, x1, 10.0)} for c, x0, x1 in spec]
 
@@ -132,19 +101,3 @@ def test_speaker_notes_go_to_the_matching_slide(tmp_path: Path) -> None:
     prs = Presentation(str(out))
     assert not prs.slides[0].has_notes_slide
     assert prs.slides[1].notes_slide.notes_text_frame.text == "Explain the result.\nThen pause."
-
-
-def test_mac_download_uses_macos_names_for_the_same_designs() -> None:
-    from pptx.oxml.ns import qn
-
-    from app.pptx_export import MAC_FONTS, _retarget_fonts, _set_fonts
-
-    prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    run = slide.shapes.add_textbox(0, 0, 100, 100).text_frame.paragraphs[0].add_run()
-    run.text = "x"
-    _set_fonts(run._r.get_or_add_rPr(), "Palatino Linotype", "SimSun")
-    _retarget_fonts(prs, MAC_FONTS)
-    rpr = run._r.get_or_add_rPr()
-    assert rpr.find(qn("a:latin")).get("typeface") == "Palatino"
-    assert rpr.find(qn("a:ea")).get("typeface") == "SimSun"  # CJK names are kept

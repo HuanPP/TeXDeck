@@ -223,7 +223,7 @@ def test_pptx_endpoint_caches_and_rebuilds(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
     assert "My_Deck.pptx" in r.headers["content-disposition"]
-    cached = gdir / f"main.v{EXPORT_VERSION}.pptx"
+    cached = gdir / f"main.v{EXPORT_VERSION}.office.pptx"
     assert cached.is_file() and not (gdir / "main.v0.pptx").exists()
 
     # Unchanged PDF: served from cache.
@@ -235,5 +235,11 @@ def test_pptx_endpoint_caches_and_rebuilds(client: TestClient) -> None:
     os.utime(gdir / "main.pdf", ns=(before + 10**9, before + 10**9))
     assert client.get(f"/api/generations/{meta.id}/deck.pptx").status_code == 200
     assert cached.stat().st_mtime_ns > before
+
+    # Fonts installed on the downloading machine: a file of its own; unknown names ignored.
+    r = client.get(f"/api/generations/{meta.id}/deck.pptx", params={"fonts": "Palatino,Times,NotAFont"})
+    assert r.status_code == 200
+    assert len(list(gdir.glob(f"main.v{EXPORT_VERSION}.*.pptx"))) == 2
+    assert "Palatino" in client.get("/api/fonts").json()
 
     assert client.get("/api/generations/20000101-000000-0000/deck.pptx").status_code == 404

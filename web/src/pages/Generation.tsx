@@ -11,6 +11,7 @@ import {
   logUrl,
   pdfUrl,
   figureUrl,
+  localFonts,
   pptxUrl,
   regenerateGeneration,
   texUrl,
@@ -113,6 +114,11 @@ export default function Generation() {
   const [attached, setAttached] = useState<{ file: File; url: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Installed fonts, so the PPTX names fonts this computer has.
+  const [myFonts, setMyFonts] = useState<string[] | null>(null);
+  useEffect(() => {
+    void localFonts().then(setMyFonts);
+  }, []);
 
   const loadMeta = useCallback(async () => {
     if (!id) return;
@@ -488,7 +494,7 @@ export default function Generation() {
               <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
                 <Download className="h-4 w-4" /> PDF
               </a>
-              <a className="btn-secondary text-sm" href={pptxUrl(id)} download
+              <a className="btn-secondary text-sm" href={pptxUrl(id, myFonts ?? undefined)} download
                 title="Editable PowerPoint: text boxes over the PDF's own graphics">
                 <Presentation className="h-4 w-4" /> PPTX
               </a>
