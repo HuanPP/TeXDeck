@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronRight, FileUp, ImagePlus, Palette, Pencil, Plus, RotateCw, Trash2, X } from "lucide-react";
+import {
+  ChevronRight, FileUp, ImagePlus, MoreVertical, NotebookText, Palette, Pencil, Plus, RotateCw, Search, Trash2, X,
+} from "lucide-react";
 import {
   createGeneration,
   deleteGeneration,
@@ -27,6 +29,13 @@ const fmt = (iso: string) => {
   } catch {
     return iso;
   }
+};
+
+const fmtDay = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
 
 const kindOf = (x: { kind?: Kind }): Kind => x.kind ?? "deck";
@@ -67,6 +76,8 @@ export default function Home({ kind }: { kind: Kind }) {
   const [query, setQuery] = useState("");
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const confirmTimerRef = useRef(0);
 
@@ -110,6 +121,12 @@ export default function Home({ kind }: { kind: Kind }) {
   }, [anyRunning]);
 
   useEffect(() => () => window.clearTimeout(confirmTimerRef.current), []);
+  useEffect(() => {
+    if (!newOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNewOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newOpen]);
   useEffect(() => () => imagesRef.current.forEach((img) => URL.revokeObjectURL(img.url)), []);
 
   async function addImages(list: FileList | File[] | null) {
@@ -213,6 +230,119 @@ export default function Home({ kind }: { kind: Kind }) {
     }
   }
 
+  // Learn: a list of notebooks; the form opens over it.
+  function notebookList() {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-3xl">My notebooks</h1>
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+            <label className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input type="search" className="input-field rounded-full" style={{ paddingLeft: "2.25rem" }} aria-label="Search notebooks"
+                placeholder="Search notebooks" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </label>
+            <button type="button" className="btn-primary rounded-full px-5" onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" /> New notebook
+            </button>
+          </div>
+        </div>
+        {model && !ready && !newOpen && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span>Connect a model first: your ChatGPT or Claude plan, or an API key.</span>
+            <button type="button" className="btn-primary px-3 py-1 text-sm" onClick={() => setPanelOpen(true)}>
+              Connect a model
+            </button>
+          </div>
+        )}
+        {(loadError || historyError) && (
+          <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadError || historyError}
+          </div>
+        )}
+        {items.length === 0 && !loadError ? (
+          <div className="flex flex-col items-center gap-3 py-20 text-slate-500">
+            <p>No notebooks yet. Start one from a PDF or pasted text.</p>
+            <button type="button" className="btn-secondary" onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" /> New notebook
+            </button>
+          </div>
+        ) : visibleItems.length === 0 ? (
+          <p className="text-sm text-slate-500">No notebooks match “{query.trim()}”</p>
+        ) : (
+          <table className="w-full table-fixed text-left">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] text-sm text-slate-600">
+                <th className="py-4 pl-4 font-normal">Title</th>
+                <th className="hidden w-36 py-4 text-center font-normal md:table-cell">Sources</th>
+                <th className="hidden w-40 py-4 text-center font-normal sm:table-cell">Created</th>
+                <th className="w-28 py-4 text-center font-normal">Status</th>
+                <th className="w-14 py-4" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {visibleItems.map((g) => {
+                const sources = g.source_kind === "text" ? 1 : g.source_names.length;
+                return (
+                  <tr key={g.id} className="cursor-pointer border-b border-[var(--color-border)] hover:bg-slate-50"
+                    onClick={() => navigate(`/g/${g.id}`)}>
+                    <td className="py-5 pl-4 pr-4">
+                      <span className="flex items-center gap-3">
+                        <NotebookText className="h-5 w-5 shrink-0 text-slate-400" />
+                        <span className="line-clamp-2 text-[var(--color-heading)]">{displayTitle(g)}</span>
+                      </span>
+                    </td>
+                    <td className="hidden text-center text-sm text-slate-600 md:table-cell">
+                      {g.source_kind === "text" ? "Pasted text" : `${sources} ${sources === 1 ? "Source" : "Sources"}`}
+                    </td>
+                    <td className="hidden text-center text-sm text-slate-600 sm:table-cell">{fmtDay(g.created_at)}</td>
+                    <td className="text-center"><StatusBadge status={g.status} /></td>
+                    <td className="relative text-center" onClick={(e) => e.stopPropagation()}>
+                      <button type="button" className="p-1.5 text-slate-500 hover:text-slate-800"
+                        aria-label={`Actions for "${displayTitle(g)}"`} aria-expanded={menuId === g.id}
+                        onClick={() => { setMenuId((m) => (m === g.id ? null : g.id)); setConfirmDeleteId(null); }}>
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                      {menuId === g.id && <div className="fixed inset-0 z-10" onClick={() => setMenuId(null)} />}
+                      {menuId === g.id && (
+                        <div className="absolute right-2 top-full z-20 w-44 border border-[var(--color-border)] bg-white py-1 text-left text-sm shadow-lg">
+                          <button type="button" className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50 disabled:opacity-40"
+                            disabled={g.status === "running" || regeneratingId !== null}
+                            onClick={() => { setMenuId(null); void handleRegenerate(g.id); }}>
+                            <RotateCw className="h-4 w-4" /> Regenerate
+                          </button>
+                          {confirmDeleteId === g.id ? (
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50"
+                              onClick={() => { setMenuId(null); void handleDelete(g.id); }}>
+                              <Trash2 className="h-4 w-4" /> Confirm delete
+                            </button>
+                          ) : (
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50"
+                              onClick={() => armDelete(g.id)}>
+                              <Trash2 className="h-4 w-4" /> Delete
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {newOpen && (
+          <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 sm:p-10"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setNewOpen(false); }}>
+            <div className="w-full max-w-3xl border border-[var(--color-border)] bg-white shadow-xl">
+              {formSection}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const q = query.trim().toLowerCase();
   const visibleItems = q
     ? items.filter((g) =>
@@ -220,10 +350,17 @@ export default function Home({ kind }: { kind: Kind }) {
       )
     : items;
 
-  return (
-    <div className="space-y-10">
-      <section className="app-surface p-6">
-        <h1 className="mb-6 text-2xl">{notes ? "New study notes" : "New slide deck"}</h1>
+  const formSection = (
+      <section className={notes ? "p-6" : "app-surface p-6"}>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h1 className="text-2xl">{notes ? "New notebook" : "New slide deck"}</h1>
+          {notes && (
+            <button type="button" className="p-1 text-slate-500 hover:text-slate-800" aria-label="Close"
+              onClick={() => setNewOpen(false)}>
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
         {model && !ready && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <span>Connect a model first: your ChatGPT or Claude plan, or an API key.</span>
@@ -481,7 +618,13 @@ export default function Home({ kind }: { kind: Kind }) {
           </button>
         </form>
       </section>
+  );
 
+  if (notes) return notebookList();
+
+  return (
+    <div className="space-y-10">
+      {formSection}
       <section>
         <h2 className="mb-4 text-xl">History</h2>
         {loadError && (

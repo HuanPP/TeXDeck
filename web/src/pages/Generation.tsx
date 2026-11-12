@@ -19,6 +19,7 @@ import {
   type QueuedText,
 } from "../api";
 import { prepareFigure } from "../imageTools";
+import NotebookWorkspace from "../components/NotebookWorkspace";
 import PdfViewer, { type PageBox, type PageMark, type TextClick } from "../components/PdfViewer";
 import QuickEdit, { type QuickEditState } from "../components/QuickEdit";
 import Segmented from "../components/Segmented";
@@ -83,6 +84,7 @@ export default function Generation() {
   const [editText, setEditText] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [scope, setScope] = useState<"page" | "deck">("page");
+  const [sideTab, setSideTab] = useState<"ai" | "edit">("ai");
   const [texOpen, setTexOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -465,8 +467,165 @@ export default function Generation() {
     </div>
   );
 
+  const textMarks = pending.texts.map((t): PageMark => ({ page: t.page, box: t.box, label: `${t.shown} → ${t.text}` }));
+  const editPanel = (
+    <div className="flex flex-col gap-4 p-4">
+    <div>
+      <p className="text-xs text-slate-500">Current page</p>
+      <h2 className="mt-1 text-lg">
+        Page {page}{frame?.title ? ` · ${frame.title}` : ""}
+      </h2>
+      {frame?.tex && (
+        <button type="button" className="mt-1 text-xs text-[var(--color-primary)] hover:underline"
+          aria-expanded={texOpen} onClick={() => setTexOpen((o) => !o)}>
+          {texOpen ? "Hide LaTeX" : "Show LaTeX"}
+        </button>
+      )}
+    </div>
+    {texOpen && frame?.tex && (
+      <div className="max-h-72 min-h-0 overflow-auto border border-[var(--color-border)] bg-slate-50 p-3">
+        <pre className="whitespace-pre-wrap break-all font-mono text-xs text-slate-600">{frame.tex}</pre>
+      </div>
+    )}
+    {frame && frame.index === 0 && (
+      <p className="border-t border-[var(--color-border)] pt-4 text-xs leading-relaxed text-slate-500">
+        The title page is made from the deck's title, subtitle, author, institute and date. A
+        request here changes those.
+      </p>
+    )}
+    {frame && frame.index !== 0 && !notes && (
+      <div className="border-t border-[var(--color-border)] pt-4">
+        <p className="text-xs text-slate-500">Speaker notes</p>
+        {frame.notes ? (
+          <p className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+            {frame.notes}
+          </p>
+        ) : (
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            No notes for this slide. Ask for them below (e.g. "Write speaker notes for this
+            slide"), or add them to every slide with Whole deck. Notes also go into the PPTX.
+          </p>
+        )}
+      </div>
+    )}
+    <form onSubmit={(e) => void handleQueue(e)}
+      className="space-y-3 border-t border-[var(--color-border)] pt-4">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-sm text-slate-600" htmlFor="change-instruction">Change</label>
+        <Segmented label="What to change" value={scope} onChange={setScope} disabled={busy} options={[
+          { value: "page", label: notes ? "This sheet" : "This page" },
+          { value: "deck", label: notes ? "All notes" : "Whole deck" },
+        ]} />
+      </div>
+      <p className="text-xs text-slate-500">
+        {scope === "page" && `To fix wording, click the text on the ${notes ? "page" : "slide"}. `}
+        Requests for any {notes ? "sheet and for all the notes" : "page and for the whole deck"} wait
+        in one list and go to the model in one call when applied, with one compile.
+      </p>
+      {scope === "page" && frames.length > 0 && !frame && (
+        <p id="edit-no-frame-hint" className="text-xs text-slate-500">
+          This page has no editable slide (it may be an auto-generated section or
+          continuation page). Go to a content slide, or change the whole deck.
+        </p>
+      )}
+      <textarea id="change-instruction" className="input-field min-h-28 text-sm"
+        value={editText} onChange={(e) => setEditText(e.target.value)}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files];
+          if (files.some((f) => f.type.startsWith("image/"))) {
+            e.preventDefault();
+            attach(files);
+          }
+        }}
+        placeholder={notes
+          ? scope === "page"
+            ? "e.g. Split the causes into their own heading"
+            : "e.g. Shorter: keep only definitions and numbers"
+          : scope === "page"
+            ? "e.g. Change the bar chart to a line chart"
+            : "e.g. Tighten all bullet points to one line and unify tense"}
+        disabled={busy || (scope === "page" && !frame)}
+        aria-describedby={scope === "page" && frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
+      <div className="flex flex-wrap items-center gap-2">
+        {attached.map((a, i) => (
+          <span key={a.url} className="relative">
+            <img src={a.url} alt={a.file.name} title={a.file.name}
+              className="h-12 w-12 border border-[var(--color-border)] object-cover" />
+            <button type="button" aria-label={`Remove ${a.file.name}`} disabled={uploading}
+              className="absolute -right-1.5 -top-1.5 h-4 w-4 rounded-full bg-slate-700 text-[10px] leading-4 text-white"
+              onClick={() => unattach(i)}>×</button>
+          </span>
+        ))}
+        <button type="button" className="btn-secondary text-xs" disabled={busy || uploading
+          || attached.length >= MAX_ATTACHED || (scope === "page" && !frame)}
+          onClick={() => fileInputRef.current?.click()}>
+          <ImagePlus className="h-4 w-4" /> Attach image
+        </button>
+        <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif" multiple hidden
+          onChange={(e) => { attach(e.target.files ?? []); e.target.value = ""; }} />
+      </div>
+      {editError && (
+        <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{editError}</div>
+      )}
+      <button type="submit" className="btn-primary w-full"
+        disabled={busy || uploading || (scope === "page" && !frame)}>
+        {uploading ? "Uploading images…" : busy ? "Working…" : "Add to changes"}
+      </button>
+      <p className="text-xs text-slate-500">
+        Images can also be pasted into the box. If the result does not compile, the{" "}
+        {notes ? "notes are" : "deck is"} left as it was.
+      </p>
+    </form>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
+      {notes ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Link to={home} className="shrink-0 text-sm text-[var(--color-primary)] no-underline hover:underline">
+              ← Notebooks
+            </Link>
+            <h1 className="min-w-0 truncate text-xl" title={displayTitle(meta)}>{displayTitle(meta)}</h1>
+            <StatusBadge status={busy ? "running" : meta.status} />
+            <span className="hidden truncate text-xs text-slate-400 xl:inline"
+              title={meta.source_names.join(", ")}>
+              {(meta.pdf_pages || meta.frame_count) > 0 ? `${meta.pdf_pages || meta.frame_count} pages` : ""}
+              {llmCalls > 0 ? ` · ${meta.llm_model || "LLM"} · ${fmtTokens(meta.llm_prompt_tokens)} in / ${fmtTokens(meta.llm_completion_tokens)} out` : ""}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2 [&>*]:py-1.5">
+          {succeeded && (
+            <>
+              <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
+                <Download className="h-4 w-4" /> PDF
+              </a>
+              {!notes && (
+                <a className="btn-secondary text-sm" href={pptxUrl(id, myFonts ?? undefined)} download
+                  title="Editable PowerPoint: text boxes over the PDF's own graphics">
+                  <Presentation className="h-4 w-4" /> PPTX
+                </a>
+              )}
+              <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
+                <FileText className="h-4 w-4" /> main.tex
+              </a>
+              <a className="btn-secondary text-sm" href={bundleUrl(id)} download>
+                <Package className="h-4 w-4" /> Overleaf zip
+              </a>
+            </>
+          )}
+          {!(failed && modelError) && (
+            <button type="button" className="btn-secondary text-sm"
+              disabled={busy || meta.status === "running" || regenerating}
+              onClick={() => void handleRegenerate()}>
+              <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
+              {regenerating ? "Regenerating…" : "Regenerate"}
+            </button>
+          )}
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-3">
@@ -521,6 +680,8 @@ export default function Generation() {
           )}
         </div>
       </div>
+
+      )}
 
       {error && (
         <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -646,131 +807,45 @@ export default function Generation() {
         </section>
       )}
 
-      {succeeded && (
+      {succeeded && !notes && (
         <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[1fr_320px]">
           <section className="app-surface flex min-h-[60vh] min-w-0 flex-col p-3">
             <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage}
               onTextClick={busy ? undefined : handleTextClick}
-              marks={pending.texts.map((t): PageMark => ({ page: t.page, box: t.box, label: `${t.shown} → ${t.text}` }))}
+              marks={textMarks}
               markedPages={new Set([...pending.texts.map((t) => t.page), ...pending.pages.map((r) => r.page)])} />
           </section>
-          <aside className="app-surface flex flex-col gap-4 p-4">
-            <div>
-              <p className="text-xs text-slate-500">Current page</p>
-              <h2 className="mt-1 text-lg">
-                Page {page}{frame?.title ? ` · ${frame.title}` : ""}
-              </h2>
-              {frame?.tex && (
-                <button type="button" className="mt-1 text-xs text-[var(--color-primary)] hover:underline"
-                  aria-expanded={texOpen} onClick={() => setTexOpen((o) => !o)}>
-                  {texOpen ? "Hide LaTeX" : "Show LaTeX"}
-                </button>
-              )}
-            </div>
-            {texOpen && frame?.tex && (
-              <div className="max-h-72 min-h-0 overflow-auto border border-[var(--color-border)] bg-slate-50 p-3">
-                <pre className="whitespace-pre-wrap break-all font-mono text-xs text-slate-600">{frame.tex}</pre>
-              </div>
-            )}
-            {frame && frame.index === 0 && (
-              <p className="border-t border-[var(--color-border)] pt-4 text-xs leading-relaxed text-slate-500">
-                The title page is made from the deck's title, subtitle, author, institute and date. A
-                request here changes those.
-              </p>
-            )}
-            {frame && frame.index !== 0 && !notes && (
-              <div className="border-t border-[var(--color-border)] pt-4">
-                <p className="text-xs text-slate-500">Speaker notes</p>
-                {frame.notes ? (
-                  <p className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                    {frame.notes}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                    No notes for this slide. Ask for them below (e.g. "Write speaker notes for this
-                    slide"), or add them to every slide with Whole deck. Notes also go into the PPTX.
-                  </p>
-                )}
-              </div>
-            )}
-            <form onSubmit={(e) => void handleQueue(e)}
-              className="space-y-3 border-t border-[var(--color-border)] pt-4">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-sm text-slate-600" htmlFor="change-instruction">Change</label>
-                <Segmented label="What to change" value={scope} onChange={setScope} disabled={busy} options={[
-                  { value: "page", label: notes ? "This sheet" : "This page" },
-                  { value: "deck", label: notes ? "All notes" : "Whole deck" },
-                ]} />
-              </div>
-              <p className="text-xs text-slate-500">
-                {scope === "page" && `To fix wording, click the text on the ${notes ? "page" : "slide"}. `}
-                Requests for any {notes ? "sheet and for all the notes" : "page and for the whole deck"} wait
-                in one list and go to the model in one call when applied, with one compile.
-              </p>
-              {scope === "page" && frames.length > 0 && !frame && (
-                <p id="edit-no-frame-hint" className="text-xs text-slate-500">
-                  This page has no editable slide (it may be an auto-generated section or
-                  continuation page). Go to a content slide, or change the whole deck.
-                </p>
-              )}
-              <textarea id="change-instruction" className="input-field min-h-28 text-sm"
-                value={editText} onChange={(e) => setEditText(e.target.value)}
-                onPaste={(e) => {
-                  const files = [...e.clipboardData.files];
-                  if (files.some((f) => f.type.startsWith("image/"))) {
-                    e.preventDefault();
-                    attach(files);
-                  }
-                }}
-                placeholder={notes
-                  ? scope === "page"
-                    ? "e.g. Split the causes into their own heading"
-                    : "e.g. Shorter: keep only definitions and numbers"
-                  : scope === "page"
-                    ? "e.g. Change the bar chart to a line chart"
-                    : "e.g. Tighten all bullet points to one line and unify tense"}
-                disabled={busy || (scope === "page" && !frame)}
-                aria-describedby={scope === "page" && frames.length > 0 && !frame ? "edit-no-frame-hint" : undefined} />
-              <div className="flex flex-wrap items-center gap-2">
-                {attached.map((a, i) => (
-                  <span key={a.url} className="relative">
-                    <img src={a.url} alt={a.file.name} title={a.file.name}
-                      className="h-12 w-12 border border-[var(--color-border)] object-cover" />
-                    <button type="button" aria-label={`Remove ${a.file.name}`} disabled={uploading}
-                      className="absolute -right-1.5 -top-1.5 h-4 w-4 rounded-full bg-slate-700 text-[10px] leading-4 text-white"
-                      onClick={() => unattach(i)}>×</button>
-                  </span>
-                ))}
-                <button type="button" className="btn-secondary text-xs" disabled={busy || uploading
-                  || attached.length >= MAX_ATTACHED || (scope === "page" && !frame)}
-                  onClick={() => fileInputRef.current?.click()}>
-                  <ImagePlus className="h-4 w-4" /> Attach image
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif" multiple hidden
-                  onChange={(e) => { attach(e.target.files ?? []); e.target.value = ""; }} />
-              </div>
-              {editError && (
-                <div role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{editError}</div>
-              )}
-              <button type="submit" className="btn-primary w-full"
-                disabled={busy || uploading || (scope === "page" && !frame)}>
-                {uploading ? "Uploading images…" : busy ? "Working…" : "Add to changes"}
-              </button>
-              <p className="text-xs text-slate-500">
-                Images can also be pasted into the box. If the result does not compile, the{" "}
-                {notes ? "notes are" : "deck is"} left as it was.
-              </p>
-            </form>
-          </aside>
+          <aside className="app-surface">{editPanel}</aside>
         </div>
       )}
 
+      {succeeded && notes && (
+        <div className="relative left-1/2 w-[calc(100vw-2rem)] -translate-x-1/2"
+          style={{ height: "calc(100vh - 12.25rem)", minHeight: 520 }}>
+          <NotebookWorkspace id={id} pdfBust={pdfBust} sourceKind={meta.source_kind} sourceNames={meta.source_names}
+            title={displayTitle(meta)}
+            sideTitle={
+              <Segmented label="Side panel" value={sideTab} onChange={setSideTab} options={[
+                { value: "ai", label: "Ask AI" },
+                { value: "edit", label: "Edit" },
+              ]} />
+            }
+            side={sideTab === "edit" ? editPanel : (
+              <p className="p-4 text-sm leading-relaxed text-slate-500">
+                Questions about the source and the notes will go here.
+              </p>
+            )}
+            onNotesTextClick={sideTab === "edit" && !busy ? handleTextClick : undefined}
+            notesMarks={sideTab === "edit" ? textMarks : undefined}
+            onNotesPageChange={setPage} />
+        </div>
+      )}
       {quick && (
         <QuickEdit state={quick} onClose={closeQuick} onSave={saveQuick}
           onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })} />
       )}
 
-      <Link to={home} className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>
+      {!notes && <Link to={home} className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>}
     </div>
   );
 }

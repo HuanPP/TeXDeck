@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
+import fitz
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import deck, figures, fonts, layout, memory, pdf, store, tasks
+from . import deck, figures, fonts, layout, memory, notes_map, pdf, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -1367,6 +1368,63 @@ def api_list_frames(gen_id: str) -> list[dict[str, Any]]:
             out.insert(0, {"index": TITLE_INDEX, "title": "Title page", "page": page,
                            "tex": block.text, "notes": ""})
     return out
+
+
+@app.get("/api/generations/{gen_id}/sources/{index}.pdf")
+def api_source_pdf(gen_id: str, index: int) -> FileResponse:
+    """One uploaded source PDF (1-based, in reading order)."""
+    meta = _load(gen_id)
+    if not 1 <= index <= len(meta.source_names):
+        raise HTTPException(404, detail="No such source document")
+    return FileResponse(
+        _file(gen_id, f"source_{index:02d}.pdf", "Source PDF is missing"),
+        media_type="application/pdf",
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/api/generations/{gen_id}/source.txt")
+def api_source_text(gen_id: str) -> FileResponse:
+    _load(gen_id)
+    return FileResponse(_file(gen_id, "source.txt", "No pasted text source"),
+                        media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/generations/{gen_id}/source-map")
+def api_source_map(gen_id: str) -> dict[str, Any]:
+    """Where each \\src-marked heading of the notes sits, and which source page
+    it summarises: the two-way link between the notes and the source PDFs."""
+    meta = _load(gen_id)
+    gdir = store.generation_dir(gen_id)
+    sources = []
+    for i, name in enumerate(meta.source_names, start=1):
+        path = gdir / f"source_{i:02d}.pdf"
+        if path.is_file():
+            with fitz.open(path) as doc:
+                sources.append({"index": i, "name": name, "pages": doc.page_count})
+    anchors: list[notes_map.Anchor] = []
+    tex_path = gdir / "main.tex"
+    pdf_path = gdir / "main.pdf"
+    if meta.kind == "notes" and sources and tex_path.is_file() and pdf_path.is_file():
+        try:
+            anchors = notes_map.place_anchors(
+                notes_map.parse_anchors(tex_path.read_text(encoding="utf-8")), tex_path, pdf_path
+            )
+        except EditError:
+            anchors = []  # no synctex: the notes still show, unlinked
+    pages = {s["index"]: s["pages"] for s in sources}
+    placed = sorted(
+        (a for a in anchors if a.notes_page and 1 <= a.page <= pages.get(a.doc, 0)),
+        key=lambda a: (a.notes_page, a.y),
+    )
+    return {
+        "sources": sources,
+        "anchors": [
+            {"doc": a.doc, "page": a.page, "to": min(a.to, pages[a.doc]), "level": a.level,
+             "title": a.title, "notes_page": a.notes_page, "y": round(a.y, 5)}
+            for a in placed
+        ],
+    }
 
 
 @app.post("/api/generations/{gen_id}/frames/{index}/edit")

@@ -167,6 +167,13 @@ NOTES_SOURCE_IMAGES_RULE = (
     "the template's table rule allows one). Never try to redraw them."
 )
 
+NOTES_SOURCE_PAGES_RULE = (
+    "Source pages: end the line of every \\begin{notesheet}{...}, \\notehead{...} and "
+    "\\notesub{...} with \\src{...} naming the source page its content comes from "
+    "(template rule 13), using the page labels shown with the material."
+)
+NOTES_NO_PAGES_RULE = "The material is pasted text without page labels: write no \\src."
+
 # User images live here, relative to the deck's compile directory.
 FIGURE_DIR = "figures"
 
@@ -370,6 +377,7 @@ def _build_notes_messages(
         parts.append(f"Requirements: {request.instruction}")
     parts.append(NOTES_LANGUAGE_RULES.get(request.language, NOTES_LANGUAGE_RULES["source"]))
     parts.append(NOTES_SOURCE_IMAGES_RULE)
+    parts.append(NOTES_SOURCE_PAGES_RULE if documents else NOTES_NO_PAGES_RULE)
     if figure_blocks:
         parts.append(NOTES_PLACEMENT_RULE)
     else:

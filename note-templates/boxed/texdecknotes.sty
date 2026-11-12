@@ -197,6 +197,12 @@
 \newcommand{\eg}[1]{{\color{notesoft}\iftd@zh 例：#1\else e.g.\ #1\fi}}
 \newcommand{\aside}[1]{{\color{notesoft}\iftd@zh （#1）\else (#1)\fi}}
 
+% ---- source pages ------------------------------------------------------------
+% \src{12}, \src{2:12}, \src{12-14}: the source page(s) a sheet or heading
+% summarises. Prints nothing; TeXDeck reads it (with synctex) to line the
+% notes up with the source PDF.
+\newcommand{\src}[1]{\ignorespaces}
+
 % ---- tables ------------------------------------------------------------------
 \renewcommand{\arraystretch}{1.25}
 

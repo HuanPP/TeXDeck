@@ -215,6 +215,14 @@ export const deleteCustomTemplate = (key: string) =>
   requestJson<void>(`/api/custom-templates/${encodeURIComponent(key)}`, { method: "DELETE" });
 export const pdfUrl = (id: string, bust = 0) =>
   `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
+// Learn: the source PDFs, and where each \\src-marked heading of the notes sits.
+export const sourcePdfUrl = (id: string, index: number) => `/api/generations/${id}/sources/${index}.pdf`;
+export const sourceTextUrl = (id: string) => `/api/generations/${id}/source.txt`;
+export type SourceAnchor = {
+  doc: number; page: number; to: number; level: number; title: string; notes_page: number; y: number;
+};
+export type SourceMap = { sources: { index: number; name: string; pages: number }[]; anchors: SourceAnchor[] };
+export const getSourceMap = (id: string) => requestJson<SourceMap>(`/api/generations/${id}/source-map`);
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
 export const pptxUrl = (id: string, fonts?: string[]) =>

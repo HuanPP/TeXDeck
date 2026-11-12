@@ -88,7 +88,7 @@ function neighbour(all: Piece[], line: DOMRect, height: number, dir: -1 | 1): st
 
 // The clicked line, plus the lines around it as context: a wrapped fragment
 // or a repeated label is told apart by what surrounds it.
-function lineAround(span: HTMLElement): { text: string; before: string; after: string; rect: DOMRect } {
+export function lineAround(span: HTMLElement): { text: string; before: string; after: string; rect: DOMRect } {
   const layer = span.closest(".textLayer");
   const own = { s: span, r: span.getBoundingClientRect() };
   if (!layer) return { text: span.textContent ?? "", before: "", after: "", rect: own.r };

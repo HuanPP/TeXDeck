@@ -87,6 +87,14 @@
 % 12. Only these packages are available (already loaded by texdecknotes):
 %    fontspec, xeCJK, tcolorbox, enumitem, tabularx, booktabs, amsmath,
 %    amssymb, graphicx. Do NOT add \usepackage lines.
+% 13. SOURCE PAGES. When the material comes as numbered page images, end the
+%    line of every \begin{notesheet}{...}, \notehead{...} and \notesub{...}
+%    with \src{N}: N is the label of the source page where that part's content
+%    is (the page it starts on), \src{N-M} when it draws on consecutive pages,
+%    \src{D:N} or \src{D:N-M} for page N of document D when there are several
+%    documents. Use the page labels given with the material, never PDF page
+%    counts you work out yourself. \src prints nothing. When the material is
+%    pasted text with no page labels, write no \src at all.
 %
 % The sample below is in Chinese only to show the format; the output language
 % is set by the request.
@@ -101,8 +109,9 @@
 \begin{document}
 
 % [GUIDE] A sheet = one topic. The title is the topic itself, centred by
-% [GUIDE] default; keep the default for every sheet.
-\begin{notesheet}{光合作用的条件与过程}
+% [GUIDE] default; keep the default for every sheet. \src{N} ends the line of
+% [GUIDE] each sheet, \notehead and \notesub (rule 13).
+\begin{notesheet}{光合作用的条件与过程}\src{1}
 
 % [GUIDE] Lead-in + parallel bullets: the lead names what is being listed.
 \notelead{光合作用需要的三样东西}
@@ -115,13 +124,13 @@
 % [GUIDE] GOOD: \item 光：主要利用红光和蓝紫光      (says WHAT, not THAT)
 
 % [GUIDE] \notehead splits the sheet; \notesub only when a part has 2+ groups.
-\notehead{两个阶段}
-\notesub{光反应（类囊体膜上）}
+\notehead{两个阶段}\src{2-3}
+\notesub{光反应（类囊体膜上）}\src{2}
 \begin{itemize}
     \item 水被分解，释放\key{氧气}
     \item 光能转化为 ATP 和 NADPH 中的化学能
 \end{itemize}
-\notesub{暗反应（叶绿体基质中）}
+\notesub{暗反应（叶绿体基质中）}\src{3}
 \begin{itemize}
     \item 又称\key{卡尔文循环}；不直接需要光，但要用光反应的产物
     \item CO$_2$ 先与 RuBP 结合，再被还原成糖
@@ -132,14 +141,14 @@
 \end{itemize}
 
 % [GUIDE] A cause-and-effect chain: one link per bullet, "A → B".
-\notehead{光照不足时发生什么}
+\notehead{光照不足时发生什么}\src{4}
 \begin{itemize}
     \item 光照减弱 → 光反应产生的 ATP、NADPH 减少
     \item ATP、NADPH 减少 → 暗反应中 C$_3$ 的还原变慢，C$_3$ 积累
 \end{itemize}
 \end{notesheet}
 
-\begin{notesheet}{影响光合速率的因素}
+\begin{notesheet}{影响光合速率的因素}\src{5}
 
 % [GUIDE] Space follows weight: the material develops light the most, so it
 % [GUIDE] gets the most bullets; do not pad the others to match.
@@ -152,7 +161,7 @@
 
 % [GUIDE] Label/value pairs: notefacts. Use it for an experiment's set-up,
 % [GUIDE] a person's dates, a definition list, settings and quantities.
-\notehead{实验：光照强度的影响}
+\notehead{实验：光照强度的影响}\src{6}
 \begin{notefacts}
     \fact{材料：}{金鱼藻，放在盛清水的试管中}
     \fact{自变量：}{台灯与试管的距离（10、20、30、40\,cm）}
@@ -163,7 +172,7 @@
 % [GUIDE] The one allowed table: 2 things on 3 attributes, every cell short.
 % [GUIDE] Adding a row such as "能量变化" whose cells need a sentence would
 % [GUIDE] break rule 7 -- then drop the table and use one \notesub per thing.
-\notehead{光反应与暗反应对比}
+\notehead{光反应与暗反应对比}\src{2-3}
 \begin{center}
 \begin{tabular}{lll}
 \toprule
@@ -177,7 +186,7 @@
 \end{center}
 
 % [GUIDE] A key formula: display it, then say what the symbols mean.
-\notehead{总反应式}
+\notehead{总反应式}\src{1}
 \notelead{在叶绿体中、有光的条件下：}
 \[
 6\,\mathrm{CO_2} + 12\,\mathrm{H_2O} \xrightarrow[\text{叶绿体}]{\text{光}}

@@ -75,3 +75,7 @@ p { line-height: 1.7; }
   background: rgb(54 101 193 / 0.14);
   border-radius: 2px;
 }
+
+/* Notebook: the band that marks where a double-click jumped to. */
+@keyframes notebook-flash { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+.notebook-flash { animation: notebook-flash 1.6s ease-out forwards; }

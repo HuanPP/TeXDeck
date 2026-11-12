@@ -135,3 +135,54 @@ def test_notes_template_compiles_and_sheets_map_to_page_ranges(tmp_path: Path) -
     assert sheets and all(s.page for s in sheets)
     assert all(1 <= s.first_page <= s.page for s in sheets)
     assert sheets[0].first_page == 1
+
+
+def test_src_marks_parse_with_their_headings() -> None:
+    from app.notes_map import parse_anchors
+
+    tex = "\n".join([
+        r"\begin{notesheet}{结构 \key{残差}}\src{3}",
+        r"\notehead{训练}\src{2:4-6}",
+        r"\notesub{细节}\src{ 7 }  % \src{99} in a comment",
+        r"% \notehead{注释}\src{8}",
+        r"\item 一句话 \src{9}",
+    ])
+    got = [(a.line, a.doc, a.page, a.to, a.level, a.title) for a in parse_anchors(tex)]
+    assert got == [
+        (1, 1, 3, 3, 0, "结构 残差"),
+        (2, 2, 4, 6, 1, "训练"),
+        (3, 1, 7, 7, 2, "细节"),
+        (5, 1, 9, 9, 3, ""),
+    ]
+
+
+def test_notes_prompt_asks_for_source_pages_only_with_page_images() -> None:
+    template = get_template("boxed")
+    text_request = DeckRequest(template_key="boxed", title="", source_text="正文", language="zh")
+    messages = build_generation_messages(template, text_request, [], None)
+    assert deck.NOTES_NO_PAGES_RULE in messages[2]["content"]
+    assert deck.NOTES_SOURCE_PAGES_RULE not in messages[2]["content"]
+
+
+@pytest.mark.slow
+def test_src_marks_land_on_their_headings(tmp_path: Path) -> None:
+    from app.notes_map import parse_anchors, place_anchors
+
+    template = get_template("boxed")
+    deck.copy_template_bundle(template, tmp_path)
+    tex_path = tmp_path / "main.tex"
+    tex_path.write_text(template.main_tex, encoding="utf-8")
+    try:
+        deck.compile_tex(tex_path)
+    except deck.CompileError as exc:
+        pytest.skip(str(exc))
+    import fitz
+
+    anchors = place_anchors(parse_anchors(template.main_tex), tex_path, tex_path.with_suffix(".pdf"))
+    assert anchors and all(a.notes_page for a in anchors)
+    with fitz.open(tex_path.with_suffix(".pdf")) as pdf:
+        for a in anchors:
+            page = pdf.load_page(a.notes_page - 1)
+            hits = page.search_for(a.title[:12])
+            # The anchor sits on its heading's own line, not merely near it.
+            assert any(abs(r.y0 - a.y * page.rect.height) < 2 for r in hits), a.title

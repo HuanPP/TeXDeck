@@ -41,7 +41,8 @@ NOTES_EDIT_RULE = (
     "Keep to the writing rules in the notes template's instruction block: headings that "
     "name their content, one checkable fact per bullet, tables only where its table rule "
     "allows. Do not invent facts; add new content only when the request supplies it or "
-    "asks for it."
+    "asks for it. Keep every \\src{...} source-page mark on its heading line; a new "
+    "sheet or heading gets the \\src of the source page its content comes from."
 )
 
 
@@ -169,7 +170,13 @@ def resolve_frame_pages(frames: list[Frame], tex_path: Path) -> list[Frame]:
 
 
 def read_synctex_lines(tex_path: Path) -> dict[int, int]:
-    """Map each line of tex_path that produced output to its first PDF page.
+    """Map each line of tex_path that produced output to its first PDF page."""
+    return {line: page for line, (page, _) in read_synctex_points(tex_path).items()}
+
+
+def read_synctex_points(tex_path: Path) -> dict[int, tuple[int, float]]:
+    """Map each line of tex_path that produced output to where it first lands:
+    (PDF page, baseline in PDF points from the page top).
 
     Reads <stem>.synctex.gz directly, so neither TeX Live's synctex binary nor
     a full TeX install is needed (Tectonic writes the same format).
@@ -186,21 +193,29 @@ def read_synctex_lines(tex_path: Path) -> dict[int, int]:
 
     target = tex_path.name
     tags: set[str] = set()
-    first_page: dict[int, int] = {}
+    first: dict[int, tuple[int, float]] = {}
     page = 0
+    to_bp = _SP_TO_BP
     for raw in text.splitlines():
         if raw.startswith("Input:"):
             _, tag, name = raw.split(":", 2)
             if name and Path(name).name == target:
                 tags.add(tag)
+        elif raw.startswith("Unit:") and raw[5:].isdigit():
+            to_bp = _SP_TO_BP * int(raw[5:])
         elif raw.startswith("{"):
             page = int(raw[1:]) if raw[1:].isdigit() else page
         elif page and raw[:1] in _SYNCTEX_NODES:
-            head = raw[1:].split(":", 1)[0]
+            head, _, coords = raw[1:].partition(":")
             tag, _, line = head.partition(",")
-            if tag in tags and line.isdigit():
-                first_page.setdefault(int(line), page)
-    return first_page
+            if tag in tags and line.isdigit() and int(line) not in first:
+                v = coords.split(":", 1)[0].partition(",")[2]
+                first[int(line)] = (page, int(v) * to_bp if v.lstrip("-").isdigit() else 0.0)
+    return first
+
+
+# Synctex coordinates are scaled points (Unit:1); PDF points are 1/72 in.
+_SP_TO_BP = 72 / 72.27 / 65536
 
 
 # Record kinds that carry "tag,line:" — boxes, glue, kerns, math, current point.
