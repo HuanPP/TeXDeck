@@ -3,8 +3,10 @@ TeXDeck — Third-Party Notices
 
 1. TeXDeck application code
 ---------------------------
-The TeXDeck application code under server/ and web/ is licensed under the MIT
-License. See the LICENSE file in this repository.
+The TeXDeck application code (server/, web/, desktop/ and everything else not
+listed below as a third-party work) is licensed under the PolyForm
+Noncommercial License 1.0.0. Commercial use requires a separate license from
+the copyright holder. See the LICENSE file in this repository.
 
 
 2. Presentation templates (collegebeamer.sty and derivatives)

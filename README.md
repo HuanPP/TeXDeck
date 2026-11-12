@@ -78,4 +78,4 @@ python desktop/build.py                         # build the desktop app for this
 
 ## License
 
-The application code is MIT. Bundled themes keep their own licenses; see [NOTICE](NOTICE).
+TeXDeck is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Personal, educational and other noncommercial use is free. Commercial use requires a separate license from the author; contact [HuanPP](https://github.com/HuanPP). Bundled themes keep their own licenses; see [NOTICE](NOTICE).

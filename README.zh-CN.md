@@ -78,4 +78,4 @@ python desktop/build.py                         # 为本机打包桌面版
 
 ## 许可证
 
-应用代码采用 MIT。内置主题各自保留原许可证，见 [NOTICE](NOTICE)。
+TeXDeck 采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，源码公开。个人、教学及其他非商业用途免费；商业用途须另行取得作者授权，请联系 [HuanPP](https://github.com/HuanPP)。内置主题各自保留原许可证，见 [NOTICE](NOTICE)。
