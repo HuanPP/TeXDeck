@@ -216,7 +216,10 @@ export const pdfUrl = (id: string, bust = 0) =>
   `/api/generations/${id}/pdf${bust ? `?t=${bust}` : ""}`;
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;
-export const pptxUrl = (id: string) => `/api/generations/${id}/deck.pptx`;
+// Font names differ between Windows and macOS (Palatino Linotype vs Palatino),
+// so the file is made for the platform it is downloaded on.
+const onMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+export const pptxUrl = (id: string) => `/api/generations/${id}/deck.pptx${onMac ? "?platform=mac" : ""}`;
 export const logUrl = (id: string) => `/api/generations/${id}/log`;
 
 export const getModelStatus = () => requestJson<ModelStatus>("/api/model");

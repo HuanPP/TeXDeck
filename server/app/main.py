@@ -58,6 +58,7 @@ from .llm import (
     set_model,
 )
 from .pptx_export import EXPORT_VERSION as PPTX_EXPORT_VERSION
+from .pptx_export import PLATFORMS as PPTX_PLATFORMS
 from .pptx_export import PptxExportError, pdf_to_pptx
 from .store import GenerationMeta
 
@@ -1291,20 +1292,26 @@ def _page_notes(gen_id: str) -> dict[int, str]:
 
 
 @app.get("/api/generations/{gen_id}/deck.pptx")
-def api_get_pptx(gen_id: str) -> FileResponse:
+def api_get_pptx(gen_id: str, platform: str = "windows") -> FileResponse:
+    """platform: where the file will be opened ("windows" or "mac"); font names differ."""
     meta = _load(gen_id)
+    if platform not in PPTX_PLATFORMS:
+        raise HTTPException(400, detail=f"platform must be one of {', '.join(PPTX_PLATFORMS)}")
     pdf_path = _file(gen_id, "main.pdf", "PDF not generated yet")
     # Versioned name: an improved exporter must not serve decks cached by the old one.
-    out = pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}.pptx")
+    suffix = "" if platform == "windows" else f".{platform}"
+    out = pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}{suffix}.pptx")
+    current = {pdf_path.with_name(f"main.v{PPTX_EXPORT_VERSION}{'' if p == 'windows' else '.' + p}.pptx")
+               for p in PPTX_PLATFORMS}
     # Built on first download and rebuilt whenever an edit recompiles the PDF.
     with _pptx_lock:
         if not out.is_file() or out.stat().st_mtime < pdf_path.stat().st_mtime:
             try:
-                pdf_to_pptx(pdf_path, out, notes=_page_notes(gen_id))
+                pdf_to_pptx(pdf_path, out, notes=_page_notes(gen_id), platform=platform)
             except PptxExportError as e:
                 raise HTTPException(422, detail=str(e)) from e
             for old in pdf_path.parent.glob("main*.pptx"):
-                if old != out:
+                if old not in current:
                     old.unlink(missing_ok=True)
     return FileResponse(
         out,

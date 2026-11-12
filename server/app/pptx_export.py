@@ -134,6 +134,28 @@ _CJK_FAMILIES: list[tuple[tuple[str, ...], str]] = [
 ]
 DEFAULT_LATIN = "Calibri"
 DEFAULT_CJK = "Microsoft YaHei"
+# The names above are Windows / Office names. macOS ships several of the same
+# designs under other names (Palatino Linotype is "Palatino" there), and WPS
+# or Keynote on a Mac only find a font by its exact name, so a Mac download
+# gets the macOS system font of the same design. Fonts with the same name on
+# both (Times New Roman, Arial, Georgia, Courier New...) are not listed; CJK
+# names are kept because Office and WPS for Mac bring SimSun and YaHei along.
+MAC_FONTS = {
+    "Palatino Linotype": "Palatino",
+    "Garamond": "Hoefler Text",
+    "Century Schoolbook": "Georgia",
+    "Bookman Old Style": "Georgia",
+    "Baskerville Old Face": "Baskerville",
+    "Bodoni MT": "Didot",
+    "Cambria": "Georgia",
+    "Century Gothic": "Futura",
+    "Monotype Corsiva": "Apple Chancery",
+    "Gill Sans MT": "Gill Sans",
+    "Segoe UI": "Helvetica Neue",
+    "Calibri": "Helvetica Neue",
+    "Consolas": "Menlo",
+}
+PLATFORMS = ("windows", "mac")
 _CJK_SERIF_HINTS = ("serif", "roman", "book")
 # Names that mark a CJK font even when a span holds only Latin characters.
 # Style words alone (ming, gothic, kai) are not enough: Latin fonts use them.
@@ -774,8 +796,20 @@ def _dominant_fonts(doc: fitz.Document) -> tuple[str, str, float]:
     return pick(latin, DEFAULT_LATIN), pick(cjk, DEFAULT_CJK), pick(sizes, 10.0)
 
 
-def pdf_to_pptx(pdf_path: Path, out_path: Path, notes: dict[int, str] | None = None) -> None:
-    """notes: 1-based PDF page -> speaker notes for that slide."""
+def _retarget_fonts(prs, names: dict[str, str]) -> None:
+    """Rename Latin typefaces (runs and bullets) for the platform the file is for."""
+    for slide in prs.slides:
+        for el in slide._element.iter(qn("a:latin"), qn("a:buFont")):
+            face = el.get("typeface")
+            if face in names:
+                el.set("typeface", names[face])
+
+
+def pdf_to_pptx(
+    pdf_path: Path, out_path: Path, notes: dict[int, str] | None = None, platform: str = "windows"
+) -> None:
+    """notes: 1-based PDF page -> speaker notes for that slide.
+    platform: "windows" (Office names) or "mac" (MAC_FONTS applied)."""
     try:
         doc = fitz.open("pdf", Path(pdf_path).read_bytes())
     except Exception as e:
@@ -827,6 +861,8 @@ def pdf_to_pptx(pdf_path: Path, out_path: Path, notes: dict[int, str] | None = N
     fd, tmp = tempfile.mkstemp(prefix=".pptx-", suffix=".tmp", dir=out_path.parent)
     os.close(fd)
     try:
+        if platform == "mac":
+            _retarget_fonts(prs, MAC_FONTS)
         prs.save(tmp)
         os.replace(tmp, out_path)
     except BaseException:

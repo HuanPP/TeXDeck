@@ -132,3 +132,19 @@ def test_speaker_notes_go_to_the_matching_slide(tmp_path: Path) -> None:
     prs = Presentation(str(out))
     assert not prs.slides[0].has_notes_slide
     assert prs.slides[1].notes_slide.notes_text_frame.text == "Explain the result.\nThen pause."
+
+
+def test_mac_download_uses_macos_names_for_the_same_designs() -> None:
+    from pptx.oxml.ns import qn
+
+    from app.pptx_export import MAC_FONTS, _retarget_fonts, _set_fonts
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    run = slide.shapes.add_textbox(0, 0, 100, 100).text_frame.paragraphs[0].add_run()
+    run.text = "x"
+    _set_fonts(run._r.get_or_add_rPr(), "Palatino Linotype", "SimSun")
+    _retarget_fonts(prs, MAC_FONTS)
+    rpr = run._r.get_or_add_rPr()
+    assert rpr.find(qn("a:latin")).get("typeface") == "Palatino"
+    assert rpr.find(qn("a:ea")).get("typeface") == "SimSun"  # CJK names are kept
