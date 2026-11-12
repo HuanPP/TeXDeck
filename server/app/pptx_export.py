@@ -33,7 +33,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Pt
 
 # Bump when the output changes so cached exports are rebuilt.
-EXPORT_VERSION = 2  # 2: speaker notes
+EXPORT_VERSION = 3  # 2: speaker notes; 3: font families
 
 # Slides are scaled to PowerPoint's standard 13.333 in width so font sizes
 # read like normal slide sizes (a 9 pt beamer body becomes ~19 pt).
@@ -52,39 +52,99 @@ BULLET_CHARS = "•‣▸▶►▪■□◦○●–—✓✔➤"
 _MATH_FONT = re.compile(
     r"^(CM(?!U)[A-Z]*\d|cm[a-z]+\d|NewPX|newpx|px|tx|zplm|zpl|MSAM|MSBM|eufm|eusm|rsfs|"
     r"stmary|wasy|esint|LMMath|LatinModernMath|lmmath|STIXMath|Asana|TeXGyre\w*Math|"
-    r"FiraMath|Cambria-?Math|Symbol|Dingbats|ZapfDingbats|msam|msbm|NewTXMI|ntx|mt2|mtp)",
+    r"FiraMath|Cambria-?Math|Symbol|Dingbats|ZapfDingbats|msam|msbm|NewTXMI|ntx|rtx|mt2|MT2|mtp)",
 )
 
-# PDF font family (substring, case-insensitive) -> font that ships with Office.
-_LATIN_FONTS = [
-    ("garamond", "Garamond"),
-    ("pagella", "Palatino Linotype"),
-    ("palatino", "Palatino Linotype"),
-    ("termes", "Times New Roman"),
-    ("times", "Times New Roman"),
-    ("heros", "Arial"),
-    ("helvet", "Arial"),
-    ("cursor", "Courier New"),
-    ("lmsans", "Arial"),
-    ("lmroman", "Cambria"),
-    ("lmmono", "Consolas"),
-    ("sourcesans", "Calibri"),
-    ("sourceserif", "Cambria"),
-    ("sourcecode", "Consolas"),
-    ("fira", "Calibri"),
+# Font families, each mapped to the Office font of the same design. A PDF font
+# belongs to the first family with a key contained in its normalised name
+# (lower case, no spaces, dashes or underscores), so more specific keys come
+# first: "dejavusansmono" before "sans", "xingkai" before "kai".
+_LATIN_FAMILIES: list[tuple[tuple[str, ...], str]] = [
+    # Monospaced
+    (("courier", "cursor", "nimbusmon", "freemono"), "Courier New"),
+    (("mono", "code", "consol", "menlo", "inconsolata", "typewriter", "lmtt", "cmtt"), "Consolas"),
+    # Serif, by design
+    (("garamond", "garamon"), "Garamond"),
+    (("pagella", "palatino", "palladio", "pplr", "pplb", "zpl", "asanatext"), "Palatino Linotype"),
+    (("schola", "schoolbook", "centuryschl", "ncnr", "c059"), "Century Schoolbook"),
+    (("bonum", "bookman", "urwbookman"), "Bookman Old Style"),
+    (("baskerv", "librebask"), "Baskerville Old Face"),
+    (("didot", "bodoni"), "Bodoni MT"),
+    (("georgia", "gelasio"), "Georgia"),
+    (("cambria", "caladea"), "Cambria"),
+    (
+        ("termes", "times", "nimbusrom", "tinos", "liberationserif", "stixtwo", "stixgeneral", "freeserif",
+         "ntxtlf", "ntxr", "txr", "ptmr"),
+        "Times New Roman",
+    ),
+    (("lmroman", "lmr", "cmuserif", "cmunrm", "cmroman", "newcm", "latinmodernroman"), "Cambria"),
+    # Sans serif, by design
+    (("adventor", "avant", "avantgarde", "urwgothic", "centurygothic", "futura"), "Century Gothic"),
+    (("chancery", "zapfchancery", "zcmi"), "Monotype Corsiva"),
+    (("verdana", "dejavusans", "bitstreamvera", "verasans"), "Verdana"),
+    (("tahoma",), "Tahoma"),
+    (("trebuchet",), "Trebuchet MS"),
+    (("heros", "helvet", "nimbussan", "arial", "liberationsans", "arimo", "freesans", "phvr", "roboto"), "Arial"),
+    (("gillsans", "gill"), "Gill Sans MT"),
+    (("segoe", "selawik"), "Segoe UI"),
+    (("lmsans", "cmuss", "cmunss", "latinmodernsans"), "Calibri"),
+    (
+        ("calibri", "carlito", "sourcesans", "fira", "opensans", "lato", "notosans", "ptsans", "ubuntu",
+         "cabin", "myriad", "frutiger", "candara", "ibmplexsans"),
+        "Calibri",
+    ),
+    # Other serif text faces
+    (
+        ("sourceserif", "notoserif", "dejavuserif", "merriweather", "crimson", "charter", "libertin",
+         "linuxlibertine", "minion", "ibmplexserif", "ptserif", "alegreya", "lora", "cochineal", "utopia"),
+        "Cambria",
+    ),
 ]
-_CJK_FONTS = [
-    ("serifcjk", "SimSun"),
-    ("hanserif", "SimSun"),
-    ("fandolsong", "SimSun"),
-    ("sanscjk", "Microsoft YaHei"),
-    ("hansans", "Microsoft YaHei"),
-    ("fandolhei", "Microsoft YaHei"),
-    ("fandolkai", "KaiTi"),
-    ("fandolfang", "FangSong"),
+# When no family matches, the words in the name still tell the style.
+_LATIN_HINTS: list[tuple[tuple[str, ...], str]] = [
+    (("mono", "code", "type"), "Consolas"),
+    (("sans", "grotesk", "grotesque", "gothic", "grot", "neue", "ui"), "Calibri"),
+    (("serif", "roman", "book", "antiqua", "text", "old", "slab", "rm"), "Cambria"),
+    (("script", "hand", "brush", "callig"), "Monotype Corsiva"),
+]
+_CJK_FAMILIES: list[tuple[tuple[str, ...], str]] = [
+    # Calligraphic and display styles first: their names also contain kai/hei.
+    (("xingkai", "行楷"), "STXingkai"),
+    (("xinwei", "新魏"), "STXinwei"),
+    (("lishu", "lisu", "隶书", "隸書"), "LiSu"),
+    (("youyuan", "yuanti", "幼圆", "圆体", "圓體", "rounded"), "YouYuan"),
+    (("caiyun", "彩云"), "STCaiyun"),
+    (("huwen", "hupo", "琥珀"), "STHupo"),
+    # Fangsong and kai (regular script)
+    (("fangsong", "fandolfang", "仿宋", "倣宋"), "FangSong"),
+    (("kaiti", "kai", "wenkai", "楷"), "KaiTi"),
+    # Song / Ming (serif)
+    (
+        ("serifcjk", "hanserif", "sourcehanserif", "notoserifcjk", "songti", "simsun", "nsimsun", "stsong", "song",
+         "mincho", "ming", "batang", "myeongjo", "宋", "明朝", "明體"),
+        "SimSun",
+    ),
+    # Hei (sans)
+    (
+        ("sanscjk", "hansans", "sourcehansans", "notosanscjk", "heiti", "simhei", "stheiti", "yahei", "hei",
+         "pingfang", "dengxian", "wqy", "wenquanyi", "droidsansfallback", "gothic", "dotum", "gulim",
+         "黑", "雅黑", "等线", "苹方"),
+        "Microsoft YaHei",
+    ),
 ]
 DEFAULT_LATIN = "Calibri"
 DEFAULT_CJK = "Microsoft YaHei"
+_CJK_SERIF_HINTS = ("serif", "roman", "book")
+# Names that mark a CJK font even when a span holds only Latin characters.
+# Style words alone (ming, gothic, kai) are not enough: Latin fonts use them.
+_CJK_NAME = re.compile(
+    r"cjk|sourcehan|notoserif(sc|tc|jp|kr|hk)|notosans(sc|tc|jp|kr|hk)|fandol|simsun|simhei|yahei|songti|heiti|"
+    r"kaiti|fangsong|^st(song|kaiti|fangsong|heiti|xihei|xingkai|xinwei|caiyun|hupo|liti|zhongsong)|pingfang|"
+    r"wqy|wenquanyi|lxgw|dengxian|mincho|batang|dotum|gulim|droidsansfallback|[^\x00-\x7f]"
+)
+
+# Han, kana, hangul, CJK punctuation and full-width forms.
+_CJK_CHAR = re.compile(r"[⺀-鿿가-힯豈-﫿︰-﹏＀-￯\U00020000-\U0003134f]")
 
 
 class PptxExportError(RuntimeError):
@@ -93,26 +153,55 @@ class PptxExportError(RuntimeError):
 
 def _family(pdf_font: str) -> str:
     name = pdf_font.split("+", 1)[-1]
-    return re.sub(r"[-_ ]", "", name).lower()
+    if "#" in name:  # PDF name escapes, e.g. #E6#A5#B7 for a Chinese font name
+        try:
+            name = re.sub(r"(?:#[0-9A-Fa-f]{2})+", lambda m: bytes.fromhex(m[0].replace("#", "")).decode(), name)
+        except UnicodeDecodeError:
+            pass
+    return re.sub(r"[-_ ,]", "", name).lower()
+
+
+def _words(pdf_font: str) -> set[str]:
+    """Lower-case words of the name, split at separators and case changes."""
+    name = pdf_font.split("+", 1)[-1]
+    return {w.lower() for w in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+", name)}
 
 
 def _is_math_font(pdf_font: str) -> bool:
     return bool(_MATH_FONT.match(pdf_font.split("+", 1)[-1]))
 
 
-def _cjk_office_font(pdf_font: str) -> str | None:
-    fam = _family(pdf_font)
-    for key, office in _CJK_FONTS:
-        if key in fam:
+def _lookup(fam: str, table: list[tuple[tuple[str, ...], str]]) -> str | None:
+    for keys, office in table:
+        if any(k in fam for k in keys):
             return office
     return None
 
 
+def _cjk_office_font(pdf_font: str, text: str = "") -> str | None:
+    """Office font for a CJK font; None when the font is not a CJK font.
+
+    A font is CJK when its name says so or when the text set in it has CJK
+    characters (xeCJK sets only CJK characters in the CJK font)."""
+    fam = _family(pdf_font)
+    if not (_CJK_CHAR.search(text) or _CJK_NAME.search(fam)):
+        return None
+    office = _lookup(fam, _CJK_FAMILIES)
+    if office:
+        return office
+    return "SimSun" if _words(pdf_font) & set(_CJK_SERIF_HINTS) else DEFAULT_CJK
+
+
 def _latin_office_font(pdf_font: str) -> str:
     fam = _family(pdf_font)
-    for key, office in _LATIN_FONTS:
-        if key in fam:
+    office = _lookup(fam, _LATIN_FAMILIES)
+    if office:
+        return office
+    words = _words(pdf_font)
+    for keys, office in _LATIN_HINTS:
+        if words & set(keys):
             return office
+    # Unknown design: keep the name, which works where the font is installed.
     return pdf_font.split("+", 1)[-1].split("-", 1)[0] or DEFAULT_LATIN
 
 
@@ -296,7 +385,7 @@ def _spans_from_raw(s: dict, probe: _InkProbe) -> list[_Span]:
     low = font.lower()
     latin = any(c["c"].isascii() and c["c"].isalpha() for c in chars)
     italic = bool(s["flags"] & 2) or "italic" in low or low.endswith("-it")
-    if latin and _cjk_office_font(font) is None:
+    if latin and _cjk_office_font(font, "".join(c["c"] for c in chars)) is None:
         sc_flags = _small_caps_flags(chars, s["size"], s["color"], probe, italic)
     else:
         sc_flags = [False] * len(chars)
@@ -644,7 +733,7 @@ def _add_text_block(slide, block: _Block, scale: float, default_latin: str, defa
                 run._r.get_or_add_rPr().set("cap", "small")
             if s.tracking:
                 run._r.get_or_add_rPr().set("spc", str(int(round(s.tracking * scale * 100))))
-            cjk = _cjk_office_font(s.font)
+            cjk = _cjk_office_font(s.font, s.text)
             if cjk:
                 _set_fonts(run._r.get_or_add_rPr(), default_latin, cjk)
             else:
@@ -675,7 +764,7 @@ def _dominant_fonts(doc: fitz.Document) -> tuple[str, str, float]:
                 for s in ln["spans"]:
                     if _is_math_font(s["font"]):
                         continue
-                    office = _cjk_office_font(s["font"])
+                    office = _cjk_office_font(s["font"], s["text"])
                     target = cjk if office else latin
                     name = office or _latin_office_font(s["font"])
                     target[name] = target.get(name, 0) + len(s["text"])

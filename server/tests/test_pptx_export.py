@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz
 from pptx import Presentation
 
-from app.pptx_export import _is_math_font, pdf_to_pptx
+from app.pptx_export import _cjk_office_font, _is_math_font, _latin_office_font, pdf_to_pptx
 
 
 def _make_pdf(path: Path) -> None:
@@ -53,6 +53,39 @@ def test_math_fonts_are_recognised() -> None:
         assert _is_math_font(font), font
     for font in ("TeXGyrePagella-Regular", "NotoSerifCJKjp-Bold", "LMSans10-Regular", "Helvetica", "CMUSerif"):
         assert not _is_math_font(font), font
+    for font in ("rtxmi", "rtxr", "MT2EXA"):
+        assert _is_math_font(font), font
+
+
+def test_fonts_map_to_office_fonts_of_the_same_design() -> None:
+    latin = {
+        "NimbusRomNo9L-Regu": "Times New Roman",
+        "TeXGyreSchola-Regular": "Century Schoolbook",
+        "Merriweather-Regular": "Cambria",
+        "FiraMono-Regular": "Consolas",
+        "FiraSans-Book": "Calibri",
+        "URWGothic-Book": "Century Gothic",
+        "SomeSlabSerif-Regular": "Cambria",
+    }
+    for font, office in latin.items():
+        assert _cjk_office_font(font, "Text") is None, font
+        assert _latin_office_font(font) == office, font
+    # Style words inside Latin names do not make a font CJK.
+    assert _cjk_office_font("Flamingo-Regular", "Text") is None
+    cjk = {
+        ("STKaiti", "楷书"): "KaiTi",
+        ("KaitiSC-Regular", "楷书"): "KaiTi",
+        ("LXGWWenKai-Regular", "文楷"): "KaiTi",
+        ("STXingkai", "行楷"): "STXingkai",
+        ("FandolFang-Regular", "仿宋"): "FangSong",
+        ("SongtiSC-Regular", "宋体"): "SimSun",
+        ("PingFangSC-Regular", "苹方"): "Microsoft YaHei",
+        ("NotoSerifCJKjp-Regular", "2024"): "SimSun",
+        ("#E6#A5#B7#E4#BD#93", "楷体"): "KaiTi",
+        ("UnknownSerifCN", "中文"): "SimSun",
+    }
+    for (font, text), office in cjk.items():
+        assert _cjk_office_font(font, text) == office, font
 
 
 def _chars(spec: list[tuple[str, float, float]]) -> list[dict]:
