@@ -228,6 +228,7 @@ export type QuoteBox = { x: number; y: number; w: number; h: number };
 export type ChatAnchor = {
   where: "source" | "notes"; doc: number; page: number; text: string; rects: QuoteBox[];
   msg?: string; gone?: boolean;
+  area?: boolean; image?: string; // a dragged box, sent to the model as a crop
 };
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; content: string; status: "pending" | "done" | "error"; at: number;
@@ -241,6 +242,7 @@ export const askQuestion = (id: string, question: string, thread: string | null,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, thread, anchors }),
   });
+export const threadImageUrl = (id: string, name: string) => `/api/generations/${id}/threads/images/${name}`;
 export const deleteThread = (id: string, thread: string) =>
   requestJson<void>(`/api/generations/${id}/threads/${thread}`, { method: "DELETE" });
 

@@ -97,9 +97,14 @@ def clean_anchor(raw: dict[str, Any], sources: int, notes_stamp: int) -> dict[st
     doc = int(raw.get("doc") or 1) if where == "source" else 0
     if page < 1 or (where == "source" and not 1 <= doc <= sources):
         raise ChatError("The quote's page is not in this notebook")
-    if not text and not rects:
+    area = bool(raw.get("area"))
+    if area and len(rects) != 1:
+        raise ChatError("An area quote is one box")
+    if not area and not text:
         raise ChatError("The quote is empty")
-    anchor = {"where": where, "doc": doc, "page": page, "text": text, "rects": rects}
+    anchor = {"where": where, "doc": doc, "page": page, "text": "" if area else text, "rects": rects}
+    if area:
+        anchor["area"] = True
     if where == "notes":
         anchor["stamp"] = notes_stamp
     return anchor
@@ -114,6 +119,10 @@ def ask(gdir: Path, question: str, thread_id: str | None, anchors: list[dict[str
     stamp = _notes_stamp(gdir)
     question_id = uuid.uuid4().hex[:10]
     quotes = [{**clean_anchor(a, sources, stamp), "msg": question_id} for a in anchors]
+    for quote in quotes:
+        if quote.get("area"):
+            # Cut now: the notes may be recompiled before the answer is asked for.
+            quote["image"] = _crop(gdir, quote)
     with _lock:
         data = load(gdir)
         threads = data["threads"]
@@ -158,8 +167,9 @@ def threads_for_view(gdir: Path) -> list[dict[str, Any]]:
     stamp = _notes_stamp(gdir)
     with _lock:
         data = load(gdir)
+        # Area quotes keep their box: there is no text to look for.
         stale = [a for t in data["threads"] for a in t["anchors"]
-                 if a["where"] == "notes" and a.get("stamp") != stamp]
+                 if a["where"] == "notes" and a.get("stamp") != stamp and not a.get("area")]
         if stale and stamp:
             with fitz.open(gdir / "main.pdf") as pdf:
                 for anchor in stale:
@@ -241,7 +251,12 @@ def build_messages(gdir: Path, thread: dict[str, Any]) -> list[dict[str, Any]]:
     for m in thread["messages"]:
         if m["role"] == "user":
             quotes = [a for a in thread["anchors"] if a.get("msg") == m["id"]]
-            messages.append({"role": "user", "content": _with_quotes(m["content"], quotes)})
+            content: str | list[dict[str, Any]] = _with_quotes(m["content"], quotes)
+            crops = [gdir / CACHE_DIR / a["image"] for a in quotes if a.get("image")]
+            crops = [p for p in crops if p.is_file()]
+            if crops:
+                content = [text_block(content)] + [image_block(p) for p in crops]
+            messages.append({"role": "user", "content": content})
         elif m["status"] == "done" and m["content"]:
             messages.append({"role": "assistant", "content": m["content"]})
     return messages
@@ -251,10 +266,15 @@ def _with_quotes(question: str, quotes: list[dict[str, Any]]) -> str:
     if not quotes:
         return question
     parts = []
+    images = 0
     for q in quotes:
         where = (f"the source, page {q['page']}" + (f" of document {q['doc']}" if q["doc"] > 1 else "")
                  if q["where"] == "source" else f"the notes, page {q['page']}")
-        parts.append(f"Quoted from {where}:\n> {q['text']}")
+        if q.get("area"):
+            images += 1
+            parts.append(f"Quoted an area of {where}: see attached image {images} (a crop of that page).")
+        else:
+            parts.append(f"Quoted from {where}:\n> {q['text']}")
     return "\n\n".join(parts) + f"\n\nQuestion: {question}"
 
 
@@ -300,6 +320,37 @@ def _source_text(gdir: Path, quoted: list[tuple[int, int]]) -> str:
     blocks = [f"[{'document %d, ' % d if multi else ''}page {n}]\n{t or '(no text layer: scanned page)'}"
               for d, n, t in pages]
     return head + "\n" + "\n\n".join(blocks)
+
+
+IMAGE_NAME_RE = re.compile(r"^crop_[0-9a-f]{12}\.png$")
+
+
+def _crop(gdir: Path, quote: dict[str, Any]) -> str:
+    """Cut the quoted box out of its page at a readable resolution."""
+    path = gdir / (f"source_{quote['doc']:02d}.pdf" if quote["where"] == "source" else "main.pdf")
+    if not path.is_file():
+        raise ChatError("The quoted document is missing")
+    box = quote["rects"][0]
+    with fitz.open(path) as pdf:
+        if not 1 <= quote["page"] <= pdf.page_count:
+            raise ChatError("The quote's page is not in this notebook")
+        page = pdf.load_page(quote["page"] - 1)
+        r = page.rect
+        clip = fitz.Rect(r.x0 + box["x"] * r.width, r.y0 + box["y"] * r.height,
+                         r.x0 + (box["x"] + box["w"]) * r.width, r.y0 + (box["y"] + box["h"]) * r.height)
+        if clip.width < 4 or clip.height < 4:
+            raise ChatError("The selected area is too small")
+        # About 1600 px on the long side, between 100 and 300 dpi.
+        dpi = max(100, min(300, int(1600 * 72 / max(clip.width, clip.height))))
+        name = f"crop_{uuid.uuid4().hex[:12]}.png"
+        (gdir / CACHE_DIR).mkdir(exist_ok=True)
+        page.get_pixmap(dpi=dpi, clip=clip).save(gdir / CACHE_DIR / name)
+    return name
+
+
+def crop_path(gdir: Path, name: str) -> Path | None:
+    path = gdir / CACHE_DIR / name
+    return path if IMAGE_NAME_RE.match(name) and path.is_file() else None
 
 
 def _page_image(gdir: Path, doc: int, page: int) -> Path | None:

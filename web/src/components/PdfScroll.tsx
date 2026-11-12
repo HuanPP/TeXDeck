@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Document, Page } from "react-pdf";
+import { SquareDashed } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { lineAround, type PageBox, type PageMark, type TextClick } from "./PdfViewer";
 
@@ -13,9 +14,14 @@ const GAP = 12;
 const RENDER_MARGIN = 1200; // px above and below the viewport that get rendered
 
 // Text selected on one page: its words and the line boxes it covers.
-export type PageSelection = { page: number; text: string; rects: PageBox[]; at: { x: number; y: number } };
+export type PageSelection = {
+  page: number; text: string; rects: PageBox[]; at: { x: number; y: number };
+  area?: boolean; // a box dragged over the page (no text layer needed), not a text selection
+};
 // A quote asked about: underlined, with its thread's number at the top left.
-export type Underline = { key: string; page: number; rects: PageBox[]; number: number; active: boolean; title: string };
+export type Underline = {
+  key: string; page: number; rects: PageBox[]; number: number; active: boolean; title: string; area?: boolean;
+};
 
 // The selection's boxes on one page, one per line, as fractions of the page.
 function lineBoxes(rects: DOMRect[], page: DOMRect): PageBox[] {
@@ -55,11 +61,19 @@ type Props = {
   onSelect?: (selection: PageSelection | null) => void;
   underlines?: Underline[];
   onUnderlineClick?: (key: string) => void;
+  // The dragged box stays drawn while the parent still holds that selection.
+  showArea?: boolean;
 };
 
 export default function PdfScroll({
   file, label, ref, onDoubleClick, onTextClick, marks = [], onPageChange, hint, onSelect, underlines = [], onUnderlineClick,
+  showArea = false,
 }: Props) {
+  // Area mode: the next drag draws a box (scanned pages, figures, formulas).
+  const [areaMode, setAreaMode] = useState(false);
+  const [drag, setDrag] = useState<{ page: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [area, setArea] = useState<{ page: number; box: PageBox } | null>(null);
+  const areaMade = useRef(false); // the mouseup after an area drag is not a text selection
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -153,6 +167,10 @@ export default function PdfScroll({
   // if it lies in this viewer, clipped to the page it starts on.
   function handleMouseUp() {
     if (!onSelect) return;
+    if (areaMade.current) {
+      areaMade.current = false;
+      return;
+    }
     window.setTimeout(() => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) return onSelect(null);
@@ -200,6 +218,14 @@ export default function PdfScroll({
         <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-heading)]" title={label}>{label}</span>
         {total > 0 && <span className="font-mono">{current} / {total}</span>}
         <span className="h-3 w-px bg-[var(--color-border)]" aria-hidden="true" />
+        {onSelect && (
+          <button type="button" aria-pressed={areaMode}
+            title="Select an area: for scanned pages, figures and formulas"
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 ${areaMode ? "bg-indigo-600 text-white" : "hover:text-slate-900"}`}
+            onClick={() => setAreaMode((m) => !m)}>
+            <SquareDashed className="h-3.5 w-3.5" /> Area
+          </button>
+        )}
         <button type="button" className="px-1.5 hover:text-slate-900 disabled:opacity-30" aria-label="Zoom out"
           disabled={zoom <= MIN_ZOOM}
           onClick={() => setZoom((z) => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)))}>−</button>
@@ -214,7 +240,7 @@ export default function PdfScroll({
         onLoadError={(err) => setLoadError(err.message)}
         loading={<div className="p-12 text-center text-sm text-slate-500">Rendering PDF…</div>}>
         <div ref={scrollRef} onScroll={onScroll} onMouseUp={handleMouseUp}
-          onMouseDown={() => onSelect?.(null)} className="h-full overflow-auto bg-slate-100">
+          onMouseDown={() => { setArea(null); onSelect?.(null); }} className="h-full overflow-auto bg-slate-100">
           <div className="relative mx-auto" style={{ width: pageWidth, height: (tops[total - 1] ?? 0) + (heights[total - 1] ?? 0) + GAP }}>
             {sizes.map((_, i) => {
               const n = i + 1;
@@ -259,14 +285,58 @@ export default function PdfScroll({
                       className="pointer-events-none absolute z-10 rounded-sm bg-amber-300/40 outline outline-2 outline-amber-500"
                       style={{ left: `${m.box.x * 100}%`, top: `${m.box.y * 100}%`, width: `${m.box.w * 100}%`, height: `${m.box.h * 100}%` }} />
                   ))}
+                  {areaMode && (
+                    <div className="absolute inset-0 z-30 cursor-crosshair touch-none"
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        const b = e.currentTarget.getBoundingClientRect();
+                        const x = (e.clientX - b.left) / b.width;
+                        const y = (e.clientY - b.top) / b.height;
+                        setDrag({ page: n, x0: x, y0: y, x1: x, y1: y });
+                      }}
+                      onPointerMove={(e) => {
+                        if (!drag || drag.page !== n) return;
+                        const b = e.currentTarget.getBoundingClientRect();
+                        setDrag({ ...drag, x1: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)),
+                          y1: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) });
+                      }}
+                      onPointerUp={(e) => {
+                        if (!drag || drag.page !== n) return;
+                        const box = {
+                          x: Math.min(drag.x0, drag.x1), y: Math.min(drag.y0, drag.y1),
+                          w: Math.abs(drag.x1 - drag.x0), h: Math.abs(drag.y1 - drag.y0),
+                        };
+                        setDrag(null);
+                        if (box.w < 0.02 || box.h < 0.01) return;
+                        setAreaMode(false);
+                        areaMade.current = true;
+                        window.setTimeout(() => { areaMade.current = false; }, 50);
+                        setArea({ page: n, box });
+                        onSelect?.({ page: n, text: "", rects: [box], at: { x: e.clientX, y: e.clientY }, area: true });
+                      }} />
+                  )}
+                  {(drag?.page === n || (showArea && area?.page === n)) && (() => {
+                    const b = drag?.page === n
+                      ? { x: Math.min(drag.x0, drag.x1), y: Math.min(drag.y0, drag.y1), w: Math.abs(drag.x1 - drag.x0), h: Math.abs(drag.y1 - drag.y0) }
+                      : area!.box;
+                    return (
+                      <div aria-hidden="true" className="pointer-events-none absolute z-30 border-2 border-dashed border-indigo-600 bg-indigo-400/10"
+                        style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }} />
+                    );
+                  })()}
                   {underlines.filter((u) => u.page === n).map((u) => (
                     <div key={u.key}>
                       {u.rects.map((r, k) => (
                         <div key={k} aria-hidden="true"
                           className={`pointer-events-none absolute z-10 ${u.active ? "bg-indigo-400/15" : ""}`}
                           style={{
-                            left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%`,
-                            borderBottom: `2px solid ${u.active ? "rgb(79 70 229)" : "rgb(129 140 248 / 0.8)"}`,
+                            left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`,
+                            // a little below the glyphs: boxes found in the PDF end at their bottom edge
+                            height: u.area ? `${r.h * 100}%` : `calc(${r.h * 100}% + 2px)`,
+                            ...(u.area
+                              ? { border: `1.5px dashed ${u.active ? "rgb(79 70 229)" : "rgb(129 140 248 / 0.8)"}` }
+                              : { borderBottom: `2px solid ${u.active ? "rgb(79 70 229)" : "rgb(129 140 248 / 0.8)"}` }),
                           }} />
                       ))}
                       {u.number > 0 && u.rects[0] && (

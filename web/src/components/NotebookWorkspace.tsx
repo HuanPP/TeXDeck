@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, MessageSquareText } from "lucide-react";
 import {
-  askQuestion, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl,
+  askQuestion, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl, threadImageUrl,
   type ChatAnchor, type ChatThread, type SourceAnchor, type SourceMap,
 } from "../api";
 import NotebookChat from "./NotebookChat";
@@ -63,10 +63,13 @@ type Props = {
   onNotesTextClick?: (click: TextClick) => void; // click-to-edit, while the Edit tab is open
   notesMarks?: PageMark[];
   onNotesPageChange?: (page: number) => void;
+  // Queue a change to the notes (the sheet on that notes page, or all the
+  // notes when null); returns what was queued, for the status line.
+  onQueueNote?: (notesPage: number | null, instruction: string) => string;
 };
 
 export default function NotebookWorkspace({
-  id, pdfBust, sourceKind, sourceNames, title, editPanel, onNotesTextClick, notesMarks, onNotesPageChange,
+  id, pdfBust, sourceKind, sourceNames, title, editPanel, onNotesTextClick, notesMarks, onNotesPageChange, onQueueNote,
 }: Props) {
   const [sideTab, setSideTab] = useState<"ai" | "edit">("ai");
   const [threads, setThreads] = useState<ChatThread[]>([]);
@@ -130,7 +133,10 @@ export default function NotebookWorkspace({
 
   function select(where: "source" | "notes") {
     return (s: PageSelection | null) =>
-      setSelection(s && { where, doc: where === "source" ? doc : 0, page: s.page, text: s.text, rects: s.rects, at: s.at });
+      setSelection(s && {
+        where, doc: where === "source" ? doc : 0, page: s.page, text: s.text, rects: s.rects, at: s.at,
+        ...(s.area ? { area: true } : {}),
+      });
   }
 
   function quoteSelection() {
@@ -168,6 +174,31 @@ export default function NotebookWorkspace({
     }
   }
 
+  // "Add to notes": a change request for the sheet the question is about --
+  // the quoted sheet, or the sheet that cites the quoted source page.
+  function addToNotes(thread: ChatThread, answerId: string) {
+    if (!onQueueNote) return;
+    const at = thread.messages.findIndex((m) => m.id === answerId);
+    const answer = thread.messages[at];
+    const question = [...thread.messages.slice(0, at)].reverse().find((m) => m.role === "user");
+    if (!answer || !question) return;
+    const fromNotes = thread.anchors.find((a) => a.where === "notes" && !a.gone);
+    const fromSource = thread.anchors.find((a) => a.where === "source");
+    const cited = fromSource ? anchorsFor(anchors, fromSource.doc, fromSource.page)[0] : undefined;
+    const notesPage = fromNotes?.page ?? cited?.notes_page ?? null;
+    const quoted = thread.anchors.filter((a) => a.text).map((a) => `"${a.text.slice(0, 400)}"`).join(" ");
+    const lines = [
+      "Work this question and answer into the notes. Add only what it contributes that the notes do not "
+        + "already say, as bullets under the heading it fits best (a new \\notehead only when none fits), "
+        + "in the notes' own style: one checkable fact per bullet, no Q&A format.",
+      fromSource ? `Source page: ${fromSource.page}${fromSource.doc > 1 ? ` of document ${fromSource.doc}` : ""}.` : "",
+      quoted ? `Quoted: ${quoted}` : "",
+      `Q: ${question.content}`,
+      `A: ${answer.content.slice(0, 4000)}`,
+    ];
+    setStatus(onQueueNote(notesPage, lines.filter(Boolean).join("\n")));
+  }
+
   function openFromText(threadId: string) {
     setOpenThread(threadId);
     setSideTab("ai");
@@ -177,7 +208,7 @@ export default function NotebookWorkspace({
   const underlines = (where: "source" | "notes"): Underline[] => threads.flatMap((t) => t.anchors
     .filter((a) => a.where === where && !a.gone && (where === "notes" || a.doc === doc))
     .map((a) => ({
-      key: t.id, page: a.page, rects: a.rects, number: t.number,
+      key: t.id, page: a.page, rects: a.rects, number: t.number, area: a.area,
       active: t.id === openThread, title: t.messages[0]?.content ?? "",
     })));
 
@@ -271,7 +302,8 @@ export default function NotebookWorkspace({
               label={current?.name ?? "Source"}
               hint={linked ? "Double-click a page to find its notes" : undefined}
               onDoubleClick={linked ? (page) => sourceToNotes(page) : undefined}
-              onSelect={select("source")} underlines={underlines("source")} onUnderlineClick={openFromText} />
+              onSelect={select("source")} underlines={underlines("source")} onUnderlineClick={openFromText}
+              showArea={selection?.where === "source" && Boolean(selection.area)} />
           )}
         </div>
       </section>
@@ -286,7 +318,8 @@ export default function NotebookWorkspace({
           onDoubleClick={linked ? notesToSource : undefined}
           onTextClick={sideTab === "edit" ? onNotesTextClick : undefined}
           marks={sideTab === "edit" ? notesMarks : undefined} onPageChange={onNotesPageChange}
-          onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={openFromText} />
+          onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={openFromText}
+          showArea={selection?.where === "notes" && Boolean(selection.area)} />
       </section>
       {cols.rightOpen ? (
         <>
@@ -308,6 +341,8 @@ export default function NotebookWorkspace({
             <div className={`min-h-0 flex-1 ${sideTab === "edit" ? "overflow-auto" : ""}`}>
               {sideTab === "edit" ? editPanel : (
                 <NotebookChat threads={threads} quotes={quotes} focusKey={focusKey} error={chatError}
+                  imageUrl={(name) => threadImageUrl(id, name)}
+                  onAddToNotes={onQueueNote ? addToNotes : undefined}
                   onRemoveQuote={(i) => setQuotes((q) => q.filter((_, j) => j !== i))}
                   onAsk={ask} openThread={openThread} onOpenThread={setOpenThread} onGoTo={goTo}
                   onDelete={(t) => {

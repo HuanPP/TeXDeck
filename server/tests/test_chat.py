@@ -116,3 +116,26 @@ def test_quotes_from_the_notes_follow_their_text_after_a_recompile(gdir: Path, m
     moved, gone = (t["anchors"][0] for t in chat.threads_for_view(gdir))
     assert moved["page"] == 1 and not moved.get("gone") and moved["rects"]
     assert gone["gone"] is True and gone["rects"] == []
+
+
+def test_an_area_quote_sends_a_crop_of_its_page(gdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(chat, "create_client", lambda: client)
+    box = {"x": 0.05, "y": 0.3, "w": 0.6, "h": 0.1}
+    chat.ask(gdir, "What does this figure show?", None,
+             [{"where": "source", "doc": 1, "page": 2, "text": "ignored", "rects": [box], "area": True}], sources=1)
+    anchor = chat.threads_for_view(gdir)[0]["anchors"][0]
+    assert anchor["area"] and anchor["text"] == ""
+    crop = chat.crop_path(gdir, anchor["image"])
+    assert crop is not None
+    with fitz.open(crop) as img:
+        assert img[0].rect.width > img[0].rect.height  # the wide box, not the page
+    question = client.seen[0][-1]["content"]
+    assert question[0]["text"].startswith("Quoted an area of the source, page 2")
+    assert question[1]["type"] == "image_url"
+    assert chat.crop_path(gdir, "../threads.json") is None
+
+
+def test_an_area_quote_is_one_box(gdir: Path) -> None:
+    with pytest.raises(chat.ChatError):
+        chat.ask(gdir, "Why?", None, [{**_quote(), "area": True, "rects": []}], sources=1)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, MessageSquarePlus, Trash2, X } from "lucide-react";
+import { ArrowUp, MessageSquarePlus, NotebookPen, Trash2, X } from "lucide-react";
 import type { ChatAnchor, ChatThread } from "../api";
 import ChatMarkdown from "./ChatMarkdown";
 
@@ -18,10 +18,16 @@ type Props = {
   onDelete: (id: string) => void;
   error: string | null;
   focusKey: number; // bumps when a quote is added, to focus the box
+  imageUrl: (name: string) => string; // an area quote's crop
+  onAddToNotes?: (thread: ChatThread, answerId: string) => void;
 };
 
+type View = { multiDoc: boolean; onGoTo: (a: ChatAnchor) => void; imageUrl: (name: string) => string;
+  onAddToNotes?: (thread: ChatThread, answerId: string) => void };
+
 const where = (a: ChatAnchor, multiDoc: boolean) =>
-  a.where === "notes" ? `Notes p. ${a.page}` : `Source${multiDoc ? ` ${a.doc}` : ""} p. ${a.page}`;
+  (a.area ? "Area, " : "")
+  + (a.where === "notes" ? `Notes p. ${a.page}` : `Source${multiDoc ? ` ${a.doc}` : ""} p. ${a.page}`);
 
 function Badge({ n, onClick }: { n: number; onClick?: () => void }) {
   const cls = "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500 px-1 font-sans text-[11px] leading-none text-white";
@@ -30,7 +36,7 @@ function Badge({ n, onClick }: { n: number; onClick?: () => void }) {
     : <span className={cls}>{n}</span>;
 }
 
-function Quotes({ anchors, multiDoc, onGoTo }: { anchors: ChatAnchor[]; multiDoc: boolean; onGoTo: (a: ChatAnchor) => void }) {
+function Quotes({ anchors, multiDoc, onGoTo, imageUrl }: { anchors: ChatAnchor[] } & View) {
   return (
     <>
       {anchors.map((a, i) => (
@@ -39,19 +45,21 @@ function Quotes({ anchors, multiDoc, onGoTo }: { anchors: ChatAnchor[]; multiDoc
             disabled={a.gone} onClick={() => onGoTo(a)}>
             {where(a, multiDoc)}{a.gone ? " (no longer in the notes)" : ""}
           </button>
-          <span className="line-clamp-3">{a.text}</span>
+          {a.image
+            ? <img src={imageUrl(a.image)} alt="Quoted area" className="mt-1 max-h-40 max-w-full border border-[var(--color-border)] bg-white" />
+            : <span className="line-clamp-3">{a.text}</span>}
         </blockquote>
       ))}
     </>
   );
 }
 
-function Messages({ thread, multiDoc, onGoTo }: { thread: ChatThread; multiDoc: boolean; onGoTo: (a: ChatAnchor) => void }) {
+function Messages({ thread, ...view }: { thread: ChatThread } & View) {
   return (
     <>
       {thread.messages.map((m) => m.role === "user" ? (
         <div key={m.id} className="space-y-1.5">
-          <Quotes anchors={thread.anchors.filter((a) => a.msg === m.id)} multiDoc={multiDoc} onGoTo={onGoTo} />
+          <Quotes anchors={thread.anchors.filter((a) => a.msg === m.id)} {...view} />
           <p className="whitespace-pre-wrap rounded bg-slate-100 px-2.5 py-1.5 text-[var(--color-heading)]">{m.content}</p>
         </div>
       ) : m.status === "pending" ? (
@@ -59,14 +67,23 @@ function Messages({ thread, multiDoc, onGoTo }: { thread: ChatThread; multiDoc: 
       ) : m.status === "error" ? (
         <p key={m.id} role="alert" className="text-red-600">{m.content}</p>
       ) : (
-        <ChatMarkdown key={m.id} text={m.content} />
+        <div key={m.id}>
+          <ChatMarkdown text={m.content} />
+          {view.onAddToNotes && (
+            <button type="button" className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"
+              title="Queue a change that works this answer into the notes"
+              onClick={() => view.onAddToNotes?.(thread, m.id)}>
+              <NotebookPen className="h-3.5 w-3.5" /> Add to notes
+            </button>
+          )}
+        </div>
       ))}
     </>
   );
 }
 
 export default function NotebookChat({
-  threads, quotes, onRemoveQuote, onAsk, openThread, onOpenThread, onGoTo, onDelete, error, focusKey,
+  threads, quotes, onRemoveQuote, onAsk, openThread, onOpenThread, onGoTo, onDelete, error, focusKey, imageUrl, onAddToNotes,
 }: Props) {
   const [text, setText] = useState("");
   const [fresh, setFresh] = useState(false); // "New topic": the next question starts a thread
@@ -78,6 +95,7 @@ export default function NotebookChat({
   const last = threads[threads.length - 1] ?? null;
   const multiDoc = threads.some((t) => t.anchors.some((a) => a.doc > 1));
   const compact = open !== null;
+  const view: View = { multiDoc, onGoTo, imageUrl, onAddToNotes };
   // Where the next question goes: quotes start a thread; otherwise it follows
   // up the open thread, or the latest one.
   const target = quotes.length || fresh ? null : (open ?? last);
@@ -121,7 +139,7 @@ export default function NotebookChat({
             </button>
           </div>
           <div ref={topRef} className={`min-h-0 flex-1 space-y-3 overflow-auto px-3 pb-3 ${size}`}>
-            <Messages thread={open} multiDoc={multiDoc} onGoTo={onGoTo} />
+            <Messages thread={open} {...view} />
           </div>
         </section>
       )}
@@ -142,7 +160,7 @@ export default function NotebookChat({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
-            <Messages thread={t} multiDoc={multiDoc} onGoTo={onGoTo} />
+            <Messages thread={t} {...view} />
           </article>
         ))}
       </div>
@@ -153,7 +171,7 @@ export default function NotebookChat({
             {quotes.map((q, i) => (
               <li key={i} className="flex items-start gap-1.5 bg-indigo-50 px-2 py-1 text-xs text-slate-600">
                 <span className="shrink-0 font-sans text-indigo-600">{where(q, q.doc > 1 || multiDoc)}</span>
-                <span className="line-clamp-2 min-w-0 flex-1">{q.text}</span>
+                <span className="line-clamp-2 min-w-0 flex-1">{q.area ? "The selected box goes to the model as an image" : q.text}</span>
                 <button type="button" className="shrink-0 text-slate-400 hover:text-red-600" aria-label="Remove quote"
                   onClick={() => onRemoveQuote(i)}>
                   <X className="h-3.5 w-3.5" />

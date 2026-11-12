@@ -1452,6 +1452,16 @@ def api_ask(gen_id: str, body: AskBody) -> dict[str, Any]:
     return thread
 
 
+@app.get("/api/generations/{gen_id}/threads/images/{name}")
+def api_thread_image(gen_id: str, name: str) -> FileResponse:
+    """The crop an area quote sent to the model."""
+    _load(gen_id)
+    path = chat.crop_path(store.generation_dir(gen_id), name)
+    if path is None:
+        raise HTTPException(404, detail="No such image")
+    return FileResponse(path, media_type="image/png")
+
+
 @app.delete("/api/generations/{gen_id}/threads/{thread_id}", status_code=204)
 def api_delete_thread(gen_id: str, thread_id: str) -> Response:
     _load(gen_id)

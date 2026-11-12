@@ -378,6 +378,28 @@ export default function Generation() {
     setEditText("");
   }
 
+  // From the notebook chat: a request for one sheet (or all the notes), added
+  // to the same queue as requests typed under Edit.
+  function queueNote(notesPage: number | null, instruction: string): string {
+    const target = notesPage === null
+      ? undefined
+      : frames.find((f) => (f.first_page ?? f.page) <= notesPage && notesPage <= f.page);
+    setPending((p) => {
+      if (!target) {
+        const old = p.deck;
+        return { ...p, deck: { instruction: old ? `${old.instruction}\n${instruction}` : instruction, figures: old?.figures ?? [] } };
+      }
+      const old = p.pages.find((r) => r.index === target.index);
+      const entry: PendingPage = {
+        index: target.index, page: notesPage ?? target.page, title: target.title,
+        instruction: old ? `${old.instruction}\n${instruction}` : instruction,
+        figures: old?.figures ?? [],
+      };
+      return { ...p, pages: [...p.pages.filter((r) => r.index !== target.index), entry] };
+    });
+    return `Queued for ${target ? `"${target.title || "this sheet"}"` : "all the notes"}: press Apply above to work it in`;
+  }
+
   function figureStrip(list: DeckFigure[]) {
     if (!list.length) return null;
     return (
@@ -756,7 +778,7 @@ export default function Generation() {
               </button>
             </div>
           </div>
-          <ul className="space-y-1 text-sm">
+          <ul className={`space-y-1 text-sm ${notes ? "max-h-28 overflow-auto" : ""}`}>
             {[...pending.texts].sort((a, b) => a.page - b.page).map((t) => (
               <li key={`t${t.line}:${t.start}`} className="flex items-start gap-2">
                 <span className="shrink-0 font-mono text-xs text-amber-800">p.{t.page}</span>
@@ -826,6 +848,7 @@ export default function Generation() {
             editPanel={editPanel}
             onNotesTextClick={busy ? undefined : handleTextClick}
             notesMarks={textMarks}
+            onQueueNote={busy ? undefined : queueNote}
             onNotesPageChange={setPage} />
         </div>
       )}
