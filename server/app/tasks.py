@@ -25,7 +25,7 @@ class TaskState:
     error: str
 
 
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="texdeck-task")
+_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="texdeck-task")
 _lock = threading.Lock()
 _states: dict[str, TaskState] = {}
 _running: set[str] = set()  # gen_ids with a queued or running job

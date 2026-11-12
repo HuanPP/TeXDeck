@@ -20,6 +20,9 @@ from .pdf import PdfDocument
 # Hard cap on actual repair API calls (including no-ops that echo the input).
 # Effective write-back repairs are still limited by settings.max_compile_repairs.
 _MAX_REPAIR_CALLS = settings.max_compile_repairs * 3
+# Jobs mostly wait on the model; the TeX engine is the CPU-bound part, so cap
+# concurrent engine runs separately from the task pool.
+_engine_runs = threading.BoundedSemaphore(2)
 
 
 class DeckError(RuntimeError):
@@ -695,16 +698,17 @@ def _run_xelatex(tex_path: Path, work_dir: Path) -> tuple[bool, str]:
         ]
         timeout = settings.xelatex_timeout_seconds
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            # The Windows desktop build has no console; keep TeX from flashing one.
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        with _engine_runs:
+            proc = subprocess.run(
+                cmd,
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                # The Windows desktop build has no console; keep TeX from flashing one.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
     except subprocess.TimeoutExpired as exc:
         partial = ""
         if exc.stdout:
