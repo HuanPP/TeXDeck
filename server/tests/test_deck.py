@@ -663,3 +663,23 @@ def test_tex_engine_auto_prefers_xelatex_then_tectonic(monkeypatch: pytest.Monke
     monkeypatch.setattr(settings, "tex_engine", "tectonic")
     with pytest.raises(CompileError, match="tectonic not found"):
         tex_engine()
+
+
+def test_second_xelatex_pass_only_when_aux_files_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tex_path = tmp_path / "main.tex"
+    tex_path.write_text("\\documentclass{beamer}\\begin{document}\\end{document}\n", encoding="utf-8")
+    nav = {"text": "pages 3"}
+    runs: list[int] = []
+
+    def fake_run(tex: Path, work_dir: Path) -> tuple[bool, str]:
+        runs.append(1)
+        (work_dir / "main.nav").write_text(nav["text"], encoding="utf-8")
+        (work_dir / "main.pdf").write_bytes(b"%PDF-fake")
+        return True, "ok"
+
+    monkeypatch.setattr("app.deck._run_xelatex", fake_run)
+    monkeypatch.setattr("app.deck.shutil.which", lambda _cmd: "/usr/bin/xelatex")
+    assert compile_tex(tex_path).attempts == 2  # no .nav yet
+    assert compile_tex(tex_path).attempts == 1  # same .nav as last time
+    nav["text"] = "pages 4"
+    assert compile_tex(tex_path).attempts == 2

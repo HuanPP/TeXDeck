@@ -614,14 +614,20 @@ def compile_tex(
         if progress is not None:
             progress("Compiling LaTeX (pass 1)", min(20 + attempts * 10, 80))
 
+        before = _aux_state(work_dir, tex_path.stem)
         ok, last_log = _run_xelatex(tex_path, work_dir)
         attempts += 1
         if not ok:
             _try_repair(progress_pct=50)
             continue
 
-        # Tectonic reruns to a fixed point by itself; xelatex needs a second pass.
-        if engine == "xelatex":
+        # Tectonic reruns to a fixed point by itself. xelatex needs a second
+        # pass only when the first one changed what it reads back (page
+        # labels, navigation, outline); after an edit that keeps the slide
+        # structure, the files from the previous compile are already right.
+        if engine == "xelatex" and (
+            _aux_state(work_dir, tex_path.stem) != before or _RERUN_HINT.search(last_log)
+        ):
             if progress is not None:
                 progress("Compiling LaTeX (pass 2)", min(40 + attempts * 10, 90))
 
@@ -637,6 +643,19 @@ def compile_tex(
         if progress is not None:
             progress("Compilation complete", 100)
         return CompileResult(pdf_path=pdf_path, log=last_log, attempts=attempts)
+
+
+# Files a LaTeX run writes and the next run reads back.
+_AUX_SUFFIXES = (".aux", ".nav", ".toc", ".snm", ".out", ".vrb")
+_RERUN_HINT = re.compile(r"Rerun to get|Label\(s\) may have changed|Please rerun", re.I)
+
+
+def _aux_state(work_dir: Path, stem: str) -> dict[str, bytes | None]:
+    state: dict[str, bytes | None] = {}
+    for suffix in _AUX_SUFFIXES:
+        path = work_dir / f"{stem}{suffix}"
+        state[suffix] = path.read_bytes() if path.is_file() else None
+    return state
 
 
 def tex_engine() -> str:

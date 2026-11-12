@@ -88,7 +88,7 @@ def test_text_only_batch_compiles_once_without_the_model(
     _run_batch(meta.id, [TextChange(6, _L6, *a, "先学专家")], [], lambda *_: None)
     out = (store.generation_dir(meta.id) / "main.tex").read_text(encoding="utf-8")
     assert "先学专家" in out
-    assert fake_xelatex_ok["runs"] == 2  # one compile = two xelatex passes
+    assert fake_xelatex_ok["runs"] == 1  # one compile; the aux files did not change, so one pass
     loaded = store.load_meta(meta.id)
     assert loaded.edit_count == 1 and loaded.error == ""
     record = json.loads((store.generation_dir(meta.id) / "edits" / "001" / "batch.json").read_text())
@@ -113,7 +113,7 @@ def test_slide_requests_go_out_in_one_call_after_the_text_fixes(
     assert "合并成一句" in sent and "改写结论" in sent
     out = (store.generation_dir(meta.id) / "main.tex").read_text(encoding="utf-8")
     assert "新结论" in out and "先学专家，再微调" in out
-    assert fake_xelatex_ok["runs"] == 2
+    assert fake_xelatex_ok["runs"] == 1  # one compile, one pass (aux unchanged)
 
 
 def test_failed_batch_leaves_the_deck_alone(
