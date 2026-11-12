@@ -122,11 +122,11 @@ export default function Home({ kind }: { kind: Kind }) {
 
   useEffect(() => () => window.clearTimeout(confirmTimerRef.current), []);
   useEffect(() => {
-    if (!newOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNewOpen(false); };
+    if (!newOpen && !menuId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setNewOpen(false); setMenuId(null); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newOpen]);
+  }, [newOpen, menuId]);
   useEffect(() => () => imagesRef.current.forEach((img) => URL.revokeObjectURL(img.url)), []);
 
   async function addImages(list: FileList | File[] | null) {

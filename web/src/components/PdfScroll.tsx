@@ -74,6 +74,19 @@ export default function PdfScroll({
   const [drag, setDrag] = useState<{ page: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [area, setArea] = useState<{ page: number; box: PageBox } | null>(null);
   const areaMade = useRef(false); // the mouseup after an area drag is not a text selection
+  // A drag that starts here may end anywhere (another column, outside the
+  // window), so the release is heard on the window.
+  const pressed = useRef(false);
+  const mouseUp = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const up = () => {
+      if (!pressed.current) return;
+      pressed.current = false;
+      mouseUp.current();
+    };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -179,16 +192,22 @@ export default function PdfScroll({
       const start = node instanceof Element ? node : node.parentElement;
       const pageEl = start?.closest<HTMLElement>("[data-page]");
       if (!pageEl || !scrollRef.current?.contains(pageEl)) return onSelect(null);
-      const text = sel.toString().replace(/\s+/g, " ").trim();
+      // A drag over several pages keeps the part on the page it started on.
+      const layer = pageEl.querySelector(".textLayer");
+      const clipped = range.cloneRange();
+      if (layer && !pageEl.contains(range.endContainer)) clipped.setEnd(layer, layer.childNodes.length);
+      const text = clipped.toString().replace(/\s+/g, " ").trim();
       if (!text) return onSelect(null);
       const box = pageEl.getBoundingClientRect();
-      const rects = [...range.getClientRects()].filter((r) =>
+      const rects = [...clipped.getClientRects()].filter((r) =>
         r.width > 1 && r.height > 1 && r.top < box.bottom && r.bottom > box.top && r.left < box.right && r.right > box.left);
       if (!rects.length) return onSelect(null);
       const last = rects.reduce((a, b) => (b.bottom > a.bottom || (b.bottom === a.bottom && b.right > a.right) ? b : a));
       onSelect({ page: Number(pageEl.dataset.page), text, rects: lineBoxes(rects, box), at: { x: last.right, y: last.bottom } });
     }, 0);
   }
+
+  mouseUp.current = handleMouseUp;
 
   async function handleLoad(pdf: PDFDocumentProxy) {
     const out: { w: number; h: number }[] = [];
@@ -239,8 +258,9 @@ export default function PdfScroll({
       <Document file={file} onLoadSuccess={(pdf) => void handleLoad(pdf)} className="min-h-0 flex-1"
         onLoadError={(err) => setLoadError(err.message)}
         loading={<div className="p-12 text-center text-sm text-slate-500">Rendering PDF…</div>}>
-        <div ref={scrollRef} onScroll={onScroll} onMouseUp={handleMouseUp}
-          onMouseDown={() => { setArea(null); onSelect?.(null); }} className="h-full overflow-auto bg-slate-100">
+        <div ref={scrollRef} onScroll={onScroll}
+          onMouseDown={() => { pressed.current = true; setArea(null); onSelect?.(null); }}
+          className="h-full overflow-auto bg-slate-100">
           <div className="relative mx-auto" style={{ width: pageWidth, height: (tops[total - 1] ?? 0) + (heights[total - 1] ?? 0) + GAP }}>
             {sizes.map((_, i) => {
               const n = i + 1;

@@ -22,6 +22,7 @@ type Props = {
   onChange: (value: string) => void;
   onSave: () => void;
   onClose: () => void;
+  surface?: string; // "slide" or "page"
 };
 
 const WIDTH = 460;
@@ -29,7 +30,7 @@ const WIDTH = 460;
 // Small editor anchored under text clicked on the preview. It shows the words
 // as on the slide (LaTeX only when the sentence has math or other commands);
 // saving queues the change, applied with the others in one compile.
-export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
+export default function QuickEdit({ state, onChange, onSave, onClose, surface = "slide" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -71,7 +72,7 @@ export default function QuickEdit({ state, onChange, onSave, onClose }: Props) {
       {hit && (
         <>
           <label htmlFor="quick-edit" className="text-xs text-slate-500">
-            {hit.raw ? `LaTeX source, line ${hit.line}` : "Text on the slide"}
+            {hit.raw ? `LaTeX source, line ${hit.line}` : `Text on the ${surface}`}
           </label>
           <textarea id="quick-edit" ref={areaRef} rows={3} value={state.value}
             disabled={state.status === "saving"}

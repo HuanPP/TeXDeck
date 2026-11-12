@@ -14,6 +14,7 @@ import Segmented from "./Segmented";
 // the matching place, through the notes' \src marks.
 
 const COLS_KEY = "texdeck.notebook.cols";
+const MAX_QUOTE = 4000;
 const MIN_COL = 0.18;
 
 type Cols = { left: number; right: number; rightOpen: boolean };
@@ -65,7 +66,7 @@ type Props = {
   onNotesPageChange?: (page: number) => void;
   // Queue a change to the notes (the sheet on that notes page, or all the
   // notes when null); returns what was queued, for the status line.
-  onQueueNote?: (notesPage: number | null, instruction: string) => string;
+  onQueueNote?: (notesPage: number | null, instruction: string, shown: string) => string;
 };
 
 export default function NotebookWorkspace({
@@ -142,6 +143,11 @@ export default function NotebookWorkspace({
   function quoteSelection() {
     if (!selection) return;
     const { at: _at, ...anchor } = selection;
+    // The server keeps 4000 characters of a quote; say so instead of cutting silently.
+    if (anchor.text.length > MAX_QUOTE) {
+      anchor.text = anchor.text.slice(0, MAX_QUOTE);
+      setStatus(`Long selection: the first ${MAX_QUOTE} characters are quoted`);
+    }
     setQuotes((q) => [...q, anchor]);
     setSelection(null);
     window.getSelection()?.removeAllRanges();
@@ -196,7 +202,7 @@ export default function NotebookWorkspace({
       `Q: ${question.content}`,
       `A: ${answer.content.slice(0, 4000)}`,
     ];
-    setStatus(onQueueNote(notesPage, lines.filter(Boolean).join("\n")));
+    setStatus(onQueueNote(notesPage, lines.filter(Boolean).join("\n"), `Add to notes: ${question.content.slice(0, 120)}`));
   }
 
   function openFromText(threadId: string) {
@@ -235,9 +241,8 @@ export default function NotebookWorkspace({
     const i = cycle.current.key === key ? (cycle.current.i + 1) % found.length : 0;
     cycle.current = { key, i };
     const a = found[i];
-    setStatus(found.length > 1
-      ? `${a.title || "Notes"} (${i + 1} of ${found.length}; double-click again for the next)`
-      : `${a.title || "Notes"}`);
+    const here = `Source ${multi ? `${doc}, ` : ""}p. ${page} → ${a.title || "notes"} (notes p. ${a.notes_page})`;
+    setStatus(found.length > 1 ? `${here}, ${i + 1} of ${found.length}: double-click again for the next` : here);
     notesRef.current?.scrollTo(a.notes_page, a.y);
   }
 
@@ -363,7 +368,10 @@ export default function NotebookWorkspace({
       {selection && (
         <button type="button" aria-label="Ask AI about the selection" onMouseDown={(e) => e.preventDefault()} onClick={quoteSelection}
           className="fixed z-40 inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1.5 font-sans text-xs text-white shadow-lg hover:bg-indigo-700"
-          style={{ left: Math.min(selection.at.x + 6, window.innerWidth - 120), top: selection.at.y + 6 }}>
+          style={{
+            left: Math.min(Math.max(8, selection.at.x + 6), window.innerWidth - 120),
+            top: Math.min(Math.max(8, selection.at.y + 6), window.innerHeight - 40),
+          }}>
           <MessageSquareText className="h-3.5 w-3.5" /> Ask AI
         </button>
       )}

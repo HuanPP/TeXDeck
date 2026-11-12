@@ -60,7 +60,7 @@ function Messages({ thread, ...view }: { thread: ChatThread } & View) {
       {thread.messages.map((m) => m.role === "user" ? (
         <div key={m.id} className="space-y-1.5">
           <Quotes anchors={thread.anchors.filter((a) => a.msg === m.id)} {...view} />
-          <p className="whitespace-pre-wrap rounded bg-slate-100 px-2.5 py-1.5 text-[var(--color-heading)]">{m.content}</p>
+          <div className="rounded bg-slate-100 px-2.5 py-1.5 text-[var(--color-heading)]"><ChatMarkdown text={m.content} /></div>
         </div>
       ) : m.status === "pending" ? (
         <p key={m.id} className="animate-pulse text-slate-400">Thinking…</p>
@@ -88,6 +88,7 @@ export default function NotebookChat({
   const [text, setText] = useState("");
   const [fresh, setFresh] = useState(false); // "New topic": the next question starts a thread
   const [sending, setSending] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const topRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLTextAreaElement | null>(null);
@@ -131,7 +132,7 @@ export default function NotebookChat({
           <div className="flex shrink-0 items-center gap-2 px-3 py-1.5">
             {open.number > 0 && <Badge n={open.number} />}
             <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-              {open.messages.filter((m) => m.role === "user").length} question(s) on this passage
+              {(() => { const n = open.messages.filter((m) => m.role === "user").length; return `${n} ${n === 1 ? "question" : "questions"} on this passage`; })()}
             </span>
             <button type="button" className="p-1 text-slate-400 hover:text-slate-700" aria-label="Close"
               onClick={() => onOpenThread(null)}>
@@ -155,10 +156,19 @@ export default function NotebookChat({
             <div className="flex items-center gap-2">
               {t.number > 0 && <Badge n={t.number} onClick={() => onOpenThread(t.id)} />}
               <span className="flex-1" />
-              <button type="button" className="p-0.5 text-slate-300 opacity-0 hover:text-red-600 group-hover:opacity-100 focus:opacity-100"
-                aria-label="Delete this conversation" title="Delete" onClick={() => onDelete(t.id)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {confirmDelete === t.id ? (
+                <span className="flex items-center gap-1.5 text-[11px]">
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => { setConfirmDelete(null); onDelete(t.id); }}>
+                    Delete conversation
+                  </button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setConfirmDelete(null)}>Keep</button>
+                </span>
+              ) : (
+                <button type="button" className="p-0.5 text-slate-300 hover:text-red-600"
+                  aria-label="Delete this conversation" title="Delete this conversation" onClick={() => setConfirmDelete(t.id)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
             <Messages thread={t} {...view} />
           </article>
@@ -182,7 +192,9 @@ export default function NotebookChat({
         )}
         <div className="flex items-center gap-2 text-[11px] text-slate-400">
           <span className="min-w-0 flex-1 truncate">
-            {quotes.length
+            {waiting
+              ? "Waiting for the answer; you can write the next question meanwhile"
+              : quotes.length
               ? "New question on the quoted text"
               : target
                 ? `Follow-up${target.number ? ` in ${target.number}` : " to the last question"}`

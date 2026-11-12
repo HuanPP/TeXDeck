@@ -425,7 +425,7 @@ def _run_edit(gen_id: str, index: int, instruction: str, progress: ProgressCallb
         template = deck.get_template(meta.template_key)
         context = _edit_context(meta)
         messages = build_frame_edit_messages(frame, instruction, template.main_tex, context)
-        progress("Editing one slide with the model", 30)
+        progress(f"Editing one {'sheet' if meta.kind == 'notes' else 'slide'} with the model", 30)
         client = create_client(on_usage=usage.add)
         response = client.complete(messages)
         _dump_llm(gdir, f"edit_{index}", messages, response)
@@ -600,7 +600,7 @@ def _run_batch(
                 messages = build_deck_edit_messages(
                     tex, template.main_tex, deck_instruction, pages, context, attachments
                 )
-                progress("Revising the deck with the model", 20)
+                progress(f"Revising {'the notes' if meta.kind == 'notes' else 'the deck'} with the model", 20)
                 base = tex
                 tex, learned = _ask_with_retry(
                     client, gdir, stem, messages,
@@ -616,7 +616,8 @@ def _run_batch(
                     raise EditError("This deck has no title commands to change")
                 title = (block.text, title_request) if block is not None and title_request else None
                 messages = build_frames_edit_messages(requests, template.main_tex, context, title, attachments)
-                label = "one slide" if len(pages) == 1 else f"{len(pages)} slides"
+                noun = "sheet" if meta.kind == "notes" else "slide"
+                label = f"one {noun}" if len(pages) == 1 else f"{len(pages)} {noun}s"
                 progress(f"Editing {label} with the model", 20)
                 base = tex
 
@@ -700,7 +701,7 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         template = deck.get_template(meta.template_key)
         stem = f"refine_{meta.refine_count + 1}"
         messages = build_deck_edit_messages(original, template.main_tex, instruction, (), _edit_context(meta))
-        progress("Revising the whole deck with the model", 30)
+        progress(f"Revising {'all the notes' if meta.kind == 'notes' else 'the whole deck'} with the model", 30)
         client = create_client(on_usage=usage.add)
         files = deck.figure_files(gdir)
         tex, learned = _ask_with_retry(

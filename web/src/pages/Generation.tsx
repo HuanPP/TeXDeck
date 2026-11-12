@@ -34,8 +34,10 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // Changes wait in the browser (per deck, across reloads) until applied together.
 // Images attached to a request are uploaded when it is queued (DeckFigure records).
 type PendingText = QueuedText & { page: number; box: PageBox; shown: string };
-type PendingPage = { index: number; instruction: string; figures: DeckFigure[]; page: number; title: string };
-type PendingDeck = { instruction: string; figures: DeckFigure[] };
+// `shown` replaces the instruction in the list when it was written for the
+// model (a chat answer to work in), not by the user.
+type PendingPage = { index: number; instruction: string; figures: DeckFigure[]; page: number; title: string; shown?: string };
+type PendingDeck = { instruction: string; figures: DeckFigure[]; shown?: string };
 type Pending = { texts: PendingText[]; pages: PendingPage[]; deck?: PendingDeck };
 const NOTHING: Pending = { texts: [], pages: [] };
 const MAX_ATTACHED = 6;
@@ -363,6 +365,7 @@ export default function Generation() {
           deck: {
             instruction: old ? `${old.instruction}\n${text}` : text,
             figures: [...(old?.figures ?? []), ...added],
+            ...(old?.shown ? { shown: `${old.shown}\n${text}` } : {}),
           },
         };
       }
@@ -372,6 +375,7 @@ export default function Generation() {
         index: target.index, page, title: target.title,
         instruction: old ? `${old.instruction}\n${text}` : text,
         figures: [...(old?.figures ?? []), ...added],
+        ...(old?.shown ? { shown: `${old.shown}\n${text}` } : {}),
       };
       return { ...p, pages: [...p.pages.filter((r) => r.index !== target.index), entry] };
     });
@@ -380,20 +384,25 @@ export default function Generation() {
 
   // From the notebook chat: a request for one sheet (or all the notes), added
   // to the same queue as requests typed under Edit.
-  function queueNote(notesPage: number | null, instruction: string): string {
+  function queueNote(notesPage: number | null, instruction: string, shown: string): string {
+    const join = (a: string | undefined, b: string) => (a ? `${a}\n${b}` : b);
     const target = notesPage === null
       ? undefined
       : frames.find((f) => (f.first_page ?? f.page) <= notesPage && notesPage <= f.page);
     setPending((p) => {
       if (!target) {
         const old = p.deck;
-        return { ...p, deck: { instruction: old ? `${old.instruction}\n${instruction}` : instruction, figures: old?.figures ?? [] } };
+        return { ...p, deck: {
+          instruction: join(old?.instruction, instruction), figures: old?.figures ?? [],
+          shown: join(old ? old.shown ?? old.instruction : undefined, shown),
+        } };
       }
       const old = p.pages.find((r) => r.index === target.index);
       const entry: PendingPage = {
         index: target.index, page: notesPage ?? target.page, title: target.title,
-        instruction: old ? `${old.instruction}\n${instruction}` : instruction,
+        instruction: join(old?.instruction, instruction),
         figures: old?.figures ?? [],
+        shown: join(old ? old.shown ?? old.instruction : undefined, shown),
       };
       return { ...p, pages: [...p.pages.filter((r) => r.index !== target.index), entry] };
     });
@@ -601,7 +610,8 @@ export default function Generation() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className={notes && succeeded ? "flex flex-col gap-4 [&>*]:shrink-0" : "space-y-6"}
+      style={notes && succeeded ? { height: "calc(100vh - 8.25rem)" } : undefined}>
       {notes ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -804,7 +814,7 @@ export default function Generation() {
               <li key={`p${r.index}`} className="flex items-start gap-2">
                 <span className="shrink-0 font-mono text-xs text-amber-800">p.{r.page}</span>
                 <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-slate-700">
-                  {r.title ? `${r.title}: ` : ""}{r.instruction}
+                  {r.title ? `${r.title}: ` : ""}{r.shown ?? r.instruction}
                   {figureStrip(r.figures)}
                 </span>
                 <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
@@ -816,7 +826,7 @@ export default function Generation() {
               <li className="flex items-start gap-2">
                 <span className="shrink-0 font-mono text-xs text-amber-800">all</span>
                 <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-slate-700">
-                  Whole deck: {pending.deck.instruction}
+                  {notes ? "All notes" : "Whole deck"}: {pending.deck.shown ?? pending.deck.instruction}
                   {figureStrip(pending.deck.figures)}
                 </span>
                 <button type="button" className="shrink-0 px-1 text-slate-500 hover:text-red-600" disabled={busy}
@@ -841,8 +851,7 @@ export default function Generation() {
       )}
 
       {succeeded && notes && (
-        <div className="relative left-1/2 w-[calc(100vw-2rem)] -translate-x-1/2"
-          style={{ height: "calc(100vh - 12.25rem)", minHeight: 520 }}>
+        <div className="relative left-1/2 min-h-[440px] w-[calc(100vw-2rem)] flex-1 -translate-x-1/2">
           <NotebookWorkspace id={id} pdfBust={pdfBust} sourceKind={meta.source_kind} sourceNames={meta.source_names}
             title={displayTitle(meta)}
             editPanel={editPanel}
@@ -854,7 +863,8 @@ export default function Generation() {
       )}
       {quick && (
         <QuickEdit state={quick} onClose={closeQuick} onSave={saveQuick}
-          onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })} />
+          onChange={(value) => setQuick((q) => q && { ...q, value, error: undefined })}
+          surface={notes ? "page" : "slide"} />
       )}
 
       {!notes && <Link to={home} className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>}
