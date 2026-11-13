@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import { Document, Page } from "react-pdf";
 import { SquareDashed } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { lineAround, type PageBox, type PageMark, type TextClick } from "./PdfViewer";
+import { PDF_OPTIONS, lineAround, type PageBox, type PageMark, type TextClick } from "./PdfViewer";
 
 // A continuous, scrolling PDF reader for the notebook columns: every page in
 // one column, rendered only near the viewport, with a text layer to select from.
@@ -259,7 +259,7 @@ export default function PdfScroll({
           onClick={() => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}>+</button>
       </div>
       {hint && <p className="shrink-0 bg-slate-50 px-3 py-1 text-[11px] text-slate-400">{hint}</p>}
-      <Document file={file} onLoadSuccess={(pdf) => void handleLoad(pdf)} className="min-h-0 flex-1"
+      <Document file={file} options={PDF_OPTIONS} onLoadSuccess={(pdf) => void handleLoad(pdf)} className="min-h-0 flex-1"
         onLoadError={(err) => setLoadError(err.message)}
         loading={<div className="p-12 text-center text-sm text-slate-500">Rendering PDF…</div>}>
         <div ref={scrollRef} onScroll={onScroll}

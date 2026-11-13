@@ -9,6 +9,10 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 
+// For every <Document>: CMaps for CID-keyed fonts (without them Chinese set in
+// Fandol renders blank), standard fonts for unembedded ones. See vite.config.ts.
+export const PDF_OPTIONS = { cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/pdfjs/standard_fonts/" };
+
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
@@ -217,7 +221,7 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
           disabled={zoom >= MAX_ZOOM}
           onClick={() => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}>+</button>
       </div>
-      <Document file={file} onLoadSuccess={handleDocumentLoad} className="flex min-h-0 flex-1 flex-col"
+      <Document file={file} options={PDF_OPTIONS} onLoadSuccess={handleDocumentLoad} className="flex min-h-0 flex-1 flex-col"
         onLoadError={(err) => setLoadError(err.message)}
         loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
