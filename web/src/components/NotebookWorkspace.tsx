@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, MessageSquareText } from "lucide-react";
 import {
-  askQuestion, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl, threadImageUrl,
+  askQuestion, clearThreads, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl, threadImageUrl,
   type ChatAnchor, type ChatThread, type SourceAnchor, type SourceMap,
 } from "../api";
-import NotebookChat from "./NotebookChat";
+import LearnRail from "./LearnRail";
+import NotebookChat, { OpenThread, type View } from "./NotebookChat";
 import PdfScroll, { type PageSelection, type PdfScrollHandle, type Underline } from "./PdfScroll";
 import type { PageMark, TextClick } from "./PdfViewer";
 import Segmented from "./Segmented";
@@ -14,10 +15,22 @@ import Segmented from "./Segmented";
 // the matching place, through the notes' \src marks.
 
 const COLS_KEY = "texdeck.notebook.cols";
+const DOCK_KEY = "texdeck.notebook.threadDock";
 const MAX_QUOTE = 4000;
 const MIN_COL = 0.18;
 
 type Cols = { left: number; right: number; rightOpen: boolean };
+type Box = { left: number; top: number; width: number; height: number };
+// Where an opened question can be put: each half of each column, left to right
+// (source 0-1, notes 2-3, side panel 4-5); null is its place in the side panel.
+type Dock = number | null;
+const UNIT_NAMES = ["source, left half", "source, right half", "notes, left half", "notes, right half",
+  "side panel, left half", "side panel, right half"];
+
+function loadDock(): Dock {
+  const n = Number(localStorage.getItem(DOCK_KEY));
+  return Number.isInteger(n) && n >= 1 && n <= 6 ? n - 1 : null;
+}
 
 function loadCols(): Cols {
   try {
@@ -84,6 +97,13 @@ export default function NotebookWorkspace({
   const [cols, setColsState] = useState<Cols>(loadCols);
   const [text, setText] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+  const [notesPage, setNotesPage] = useState(1);
+  const [dock, setDockState] = useState<Dock>(loadDock);
+  const [units, setUnits] = useState<Box[]>([]); // the six half-columns, in workspace coordinates
+  const [dragging, setDragging] = useState<{ x: number; y: number; over: number | null } | null>(null);
+  const sourceSec = useRef<HTMLElement | null>(null);
+  const notesSec = useRef<HTMLElement | null>(null);
+  const sideSec = useRef<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const sourceRef = useRef<PdfScrollHandle | null>(null);
   const notesRef = useRef<PdfScrollHandle | null>(null);
@@ -94,6 +114,32 @@ export default function NotebookWorkspace({
     setColsState(next);
     localStorage.setItem(COLS_KEY, JSON.stringify(next));
   }, []);
+
+  const setDock = useCallback((d: Dock) => {
+    setDockState(d);
+    localStorage.setItem(DOCK_KEY, d === null ? "" : String(d + 1));
+  }, []);
+
+  // The half-columns, measured whenever a column changes size.
+  const measure = useCallback(() => {
+    const root = rootRef.current?.getBoundingClientRect();
+    if (!root) return;
+    const boxes: Box[] = [];
+    for (const el of [sourceSec.current, notesSec.current, sideSec.current]) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      const half = r.width / 2;
+      boxes.push({ left: r.left - root.left, top: r.top - root.top, width: half, height: r.height });
+      boxes.push({ left: r.left - root.left + half, top: r.top - root.top, width: r.width - half, height: r.height });
+    }
+    setUnits(boxes);
+  }, []);
+  useLayoutEffect(() => {
+    measure();
+    const ro = new ResizeObserver(measure);
+    for (const el of [rootRef.current, sourceSec.current, notesSec.current, sideSec.current]) if (el) ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure, cols.rightOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,6 +215,45 @@ export default function NotebookWorkspace({
     }
   }
 
+  // Drag the opened question by its grip; drop it on a half-column to read it there.
+  function startThreadDrag(e: React.PointerEvent) {
+    e.preventDefault();
+    measure();
+    const root = rootRef.current?.getBoundingClientRect();
+    if (!root) return;
+    const at = (ev: { clientX: number; clientY: number }) => {
+      const x = ev.clientX - root.left;
+      const y = ev.clientY - root.top;
+      const i = unitsRef.current.findIndex((b) => x >= b.left && x < b.left + b.width && y >= b.top && y < b.top + b.height);
+      return { x, y, over: i < 0 ? null : i };
+    };
+    setDragging(at(e));
+    const move = (ev: PointerEvent) => setDragging(at(ev));
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+      const { over } = at(ev);
+      setDragging(null);
+      if (over !== null) setDock(over);
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  async function newSession() {
+    setOpenThread(null);
+    setThreads([]);
+    setQuotes([]);
+    try {
+      await clearThreads(id);
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : String(e));
+    }
+    void loadThreads();
+  }
+
   function goTo(a: ChatAnchor) {
     const y = a.rects[0]?.y ?? 0;
     if (a.where === "notes") return notesRef.current?.scrollTo(a.page, y);
@@ -219,6 +304,8 @@ export default function NotebookWorkspace({
     })));
 
   const anchors = map?.anchors ?? [];
+  const unitsRef = useRef<Box[]>([]);
+  unitsRef.current = units;
   const linked = anchors.length > 0;
 
   function notesToSource(page: number, y: number) {
@@ -277,10 +364,21 @@ export default function NotebookWorkspace({
   const sources = map?.sources ?? sourceNames.map((name, i) => ({ index: i + 1, name, pages: 0 }));
   const current = sources.find((s) => s.index === doc);
   const splitter = "w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-[var(--color-primary)]/30";
+  const opened = threads.find((t) => t.id === openThread) ?? null;
+  // A half of the side panel that is collapsed: use the notes' right half.
+  const floatAt = dock === null ? null : units[dock] ? dock : 3;
+  const view: View = {
+    multiDoc: threads.some((t) => t.anchors.some((a) => a.doc > 1)), onGoTo: goTo,
+    imageUrl: (name) => threadImageUrl(id, name), onAddToNotes: onQueueNote ? addToNotes : undefined,
+  };
 
   return (
     <div ref={rootRef} className="relative flex h-full min-h-0 w-full">
-      <section className="flex min-w-0 shrink-0 flex-col border border-[var(--color-border)] bg-white"
+      {linked && (
+        <LearnRail id={id} anchors={anchors} notesPage={notesPage}
+          onGo={(a) => notesRef.current?.scrollTo(a.notes_page, a.y)} />
+      )}
+      <section ref={sourceSec} className="flex min-w-0 shrink-0 flex-col border border-[var(--color-border)] bg-white"
         style={{ width: `${cols.left * 100}%` }} aria-label="Source">
         {multi && (
           <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--color-border)] bg-slate-50 px-2 pt-1.5">
@@ -313,7 +411,7 @@ export default function NotebookWorkspace({
         </div>
       </section>
       <div className={splitter} onPointerDown={drag("left")} role="separator" aria-label="Resize source column" />
-      <section className="flex min-w-0 flex-1 flex-col border border-[var(--color-border)] bg-white" aria-label="Notes">
+      <section ref={notesSec} className="flex min-w-0 flex-1 flex-col border border-[var(--color-border)] bg-white" aria-label="Notes">
         <PdfScroll ref={notesRef} file={pdfUrl(id, pdfBust)} label={title}
           hint={linked
             ? "Double-click a part to see its source page"
@@ -322,14 +420,15 @@ export default function NotebookWorkspace({
               : undefined}
           onDoubleClick={linked ? notesToSource : undefined}
           onTextClick={sideTab === "edit" ? onNotesTextClick : undefined}
-          marks={sideTab === "edit" ? notesMarks : undefined} onPageChange={onNotesPageChange}
+          marks={sideTab === "edit" ? notesMarks : undefined}
+          onPageChange={(p) => { setNotesPage(p); onNotesPageChange?.(p); }}
           onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={openFromText}
           showArea={selection?.where === "notes" && Boolean(selection.area)} />
       </section>
       {cols.rightOpen ? (
         <>
           <div className={splitter} onPointerDown={drag("right")} role="separator" aria-label="Resize side column" />
-          <aside className="flex min-w-0 shrink-0 flex-col border border-[var(--color-border)] bg-white"
+          <aside ref={sideSec} className="flex min-w-0 shrink-0 flex-col border border-[var(--color-border)] bg-white"
             style={{ width: `${cols.right * 100}%` }}>
             <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-2 py-1">
               <div className="min-w-0 flex-1">
@@ -350,6 +449,7 @@ export default function NotebookWorkspace({
                   onAddToNotes={onQueueNote ? addToNotes : undefined}
                   onRemoveQuote={(i) => setQuotes((q) => q.filter((_, j) => j !== i))}
                   onAsk={ask} openThread={openThread} onOpenThread={setOpenThread} onGoTo={goTo}
+                  onClear={newSession} docked={sideTab === "ai" && floatAt === null} onGripDown={startThreadDrag}
                   onDelete={(t) => {
                     if (openThread === t) setOpenThread(null);
                     setThreads((all) => all.filter((x) => x.id !== t));
@@ -364,6 +464,32 @@ export default function NotebookWorkspace({
           aria-label="Open side panel" title="Open side panel" onClick={() => setCols({ ...cols, rightOpen: true })}>
           <ChevronLeft className="h-4 w-4" />
         </button>
+      )}
+      {opened && floatAt !== null && units[floatAt] && (
+        <div className="absolute z-20 border-2 border-indigo-300 bg-white shadow-xl"
+          style={{ left: units[floatAt].left, top: units[floatAt].top, width: units[floatAt].width, height: units[floatAt].height }}>
+          <OpenThread thread={opened} view={view} fill onClose={() => setOpenThread(null)} onGripDown={startThreadDrag}
+            onDockBack={() => {
+              setDock(null);
+              setSideTab("ai");
+              if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
+            }} />
+        </div>
+      )}
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-40">
+          {units.map((b, i) => (
+            <div key={i} className={`absolute flex items-center justify-center border-2 border-dashed text-xs ${dragging.over === i
+              ? "border-indigo-500 bg-indigo-500/15 text-indigo-700" : "border-indigo-300/70 bg-white/30 text-transparent"}`}
+              style={{ left: b.left + 3, top: b.top + 3, width: b.width - 6, height: b.height - 6 }}>
+              {UNIT_NAMES[i]}
+            </div>
+          ))}
+          <div className="absolute rounded-full bg-indigo-600 px-3 py-1 text-xs text-white shadow-lg"
+            style={{ left: dragging.x + 12, top: dragging.y + 12 }}>
+            {opened?.number ? `Question ${opened.number}` : "Question"}
+          </div>
+        </div>
       )}
       {selection && (
         <button type="button" aria-label="Ask AI about the selection" onMouseDown={(e) => e.preventDefault()} onClick={quoteSelection}

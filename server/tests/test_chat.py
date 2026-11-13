@@ -139,3 +139,13 @@ def test_an_area_quote_sends_a_crop_of_its_page(gdir: Path, monkeypatch: pytest.
 def test_an_area_quote_is_one_box(gdir: Path) -> None:
     with pytest.raises(chat.ChatError):
         chat.ask(gdir, "Why?", None, [{**_quote(), "area": True, "rects": []}], sources=1)
+
+
+def test_a_new_session_clears_the_conversation_and_restarts_numbers(gdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat, "create_client", lambda: _FakeClient())
+    chat.ask(gdir, "Why?", None, [_quote()], 1)
+    chat.ask(gdir, "And this?", None, [_quote(page=2, text="Shortcut")], 1)
+    assert chat.clear(gdir) == 2
+    assert chat.load(gdir)["threads"] == []
+    assert (gdir / "threads.cleared.json").is_file()
+    assert chat.ask(gdir, "Again", None, [_quote()], 1)["number"] == 1

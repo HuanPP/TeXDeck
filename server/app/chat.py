@@ -161,6 +161,18 @@ def delete(gdir: Path, thread_id: str) -> None:
         _save(gdir, data)
 
 
+def clear(gdir: Path) -> int:
+    """Start a new session: the conversation goes, numbering starts again at 1.
+    The last cleared session is kept in threads.cleared.json, in case."""
+    with _lock:
+        data = load(gdir)
+        if data["threads"]:
+            backup = gdir / "threads.cleared.json"
+            backup.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        _save(gdir, {"threads": []})
+        return len(data["threads"])
+
+
 def threads_for_view(gdir: Path) -> list[dict[str, Any]]:
     """The threads, with quotes from the notes moved to where their text now
     is after the notes were edited (or marked stale when it is gone)."""

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import chat, deck, figures, fonts, layout, memory, notes_map, pdf, store, tasks
+from . import chat, deck, figures, fonts, layout, memory, notes_map, pdf, progress, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -120,6 +120,10 @@ class AskBody(BaseModel):
     question: str
     thread: str | None = None  # continue this thread; None starts one
     anchors: list[dict[str, Any]] = []  # quotes: where, doc, page, text, rects
+
+
+class ProgressBody(BaseModel):
+    done: list[str] = []  # keys of the parts marked as learnt
 
 
 class CallbackUrlBody(BaseModel):
@@ -1451,6 +1455,27 @@ def api_ask(gen_id: str, body: AskBody) -> dict[str, Any]:
     except chat.ChatError as e:
         raise HTTPException(400, detail=str(e)) from e
     return thread
+
+
+@app.delete("/api/generations/{gen_id}/threads", status_code=204)
+def api_clear_threads(gen_id: str) -> Response:
+    """New session: clear the notebook's conversation."""
+    _load(gen_id)
+    chat.clear(store.generation_dir(gen_id))
+    return Response(status_code=204)
+
+
+@app.get("/api/generations/{gen_id}/progress")
+def api_progress(gen_id: str) -> dict[str, Any]:
+    """Which parts of the notes the reader has marked as learnt."""
+    _load(gen_id)
+    return progress.load(store.generation_dir(gen_id))
+
+
+@app.put("/api/generations/{gen_id}/progress")
+def api_set_progress(gen_id: str, body: ProgressBody) -> dict[str, Any]:
+    _load(gen_id)
+    return progress.save(store.generation_dir(gen_id), body.done)
 
 
 @app.get("/api/generations/{gen_id}/threads/images/{name}")

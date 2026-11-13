@@ -245,6 +245,17 @@ export const askQuestion = (id: string, question: string, thread: string | null,
 export const threadImageUrl = (id: string, name: string) => `/api/generations/${id}/threads/images/${name}`;
 export const deleteThread = (id: string, thread: string) =>
   requestJson<void>(`/api/generations/${id}/threads/${thread}`, { method: "DELETE" });
+export const clearThreads = (id: string) =>
+  requestJson<void>(`/api/generations/${id}/threads`, { method: "DELETE" });
+// Learn: the parts of the notes marked as learnt (keys from the heading titles).
+export const getProgress = (id: string) =>
+  requestJson<{ done: string[] }>(`/api/generations/${id}/progress`).then((r) => r.done);
+export const saveProgress = (id: string, done: string[]) =>
+  requestJson<{ done: string[] }>(`/api/generations/${id}/progress`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ done }),
+  });
 
 export const texUrl = (id: string) => `/api/generations/${id}/tex`;
 export const bundleUrl = (id: string) => `/api/generations/${id}/bundle.zip`;

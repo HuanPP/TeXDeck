@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, MessageSquarePlus, NotebookPen, Trash2, X } from "lucide-react";
+import { ArrowUp, Eraser, GripVertical, MessageSquarePlus, NotebookPen, PanelRightClose, Trash2, X } from "lucide-react";
 import type { ChatAnchor, ChatThread } from "../api";
 import ChatMarkdown from "./ChatMarkdown";
 
 // The notebook's AI column. Every question belongs to a thread: one started by
-// quoting text gets a number, drawn by that text. Opening a number splits the
-// column: that thread on top, the whole conversation below.
+// quoting text gets a number, drawn by that text. Opening a number shows that
+// thread on its own: on top of this column, or (dragged by its grip) over any
+// half-column of the notebook; see NotebookWorkspace.
 
 type Props = {
   threads: ChatThread[];
@@ -20,9 +21,12 @@ type Props = {
   focusKey: number; // bumps when a quote is added, to focus the box
   imageUrl: (name: string) => string; // an area quote's crop
   onAddToNotes?: (thread: ChatThread, answerId: string) => void;
+  onClear: () => Promise<void>; // New session
+  docked: boolean; // the open thread sits on top of this column (else it floats elsewhere)
+  onGripDown: (e: React.PointerEvent) => void; // start dragging the open thread away
 };
 
-type View = { multiDoc: boolean; onGoTo: (a: ChatAnchor) => void; imageUrl: (name: string) => string;
+export type View = { multiDoc: boolean; onGoTo: (a: ChatAnchor) => void; imageUrl: (name: string) => string;
   onAddToNotes?: (thread: ChatThread, answerId: string) => void };
 
 const where = (a: ChatAnchor, multiDoc: boolean) =>
@@ -51,6 +55,48 @@ function Quotes({ anchors, multiDoc, onGoTo, imageUrl }: { anchors: ChatAnchor[]
         </blockquote>
       ))}
     </>
+  );
+}
+
+export const TEXT_SIZE = "text-[13px] leading-relaxed";
+const OPEN_SIZE = "text-[12.5px] leading-relaxed";
+
+// The opened thread: its header (grip to move it, close) and its messages.
+export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, fill }: {
+  thread: ChatThread; view: View; onClose: () => void; onGripDown: (e: React.PointerEvent) => void;
+  onDockBack?: () => void; // shown when it floats over another column
+  fill?: boolean; // floating: takes the whole box
+}) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [thread.id]);
+  const n = thread.messages.filter((m) => m.role === "user").length;
+  return (
+    <section className={`notebook-chat flex min-h-0 flex-col bg-indigo-50/60 ${fill ? "h-full" : "basis-1/2 border-b-2 border-indigo-200"}`}
+      aria-label="Opened question">
+      <div className="flex shrink-0 items-center gap-1.5 px-1.5 py-1.5">
+        <button type="button" className="cursor-grab touch-none p-1 text-slate-400 hover:text-indigo-600 active:cursor-grabbing"
+          aria-label="Drag to place this question over another part of the notebook"
+          title="Drag over any half of a column to read it there" onPointerDown={onGripDown}>
+          <GripVertical className="h-4 w-4" />
+        </button>
+        {thread.number > 0 && <Badge n={thread.number} />}
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+          {n} {n === 1 ? "question" : "questions"} on this passage
+        </span>
+        {onDockBack && (
+          <button type="button" className="p-1 text-slate-400 hover:text-slate-700" aria-label="Back to the side panel"
+            title="Back to the side panel" onClick={onDockBack}>
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        )}
+        <button type="button" className="p-1 text-slate-400 hover:text-slate-700" aria-label="Close" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div ref={bodyRef} className={`min-h-0 flex-1 space-y-3 overflow-auto px-3 pb-3 ${OPEN_SIZE}`}>
+        <Messages thread={thread} {...view} />
+      </div>
+    </section>
   );
 }
 
@@ -84,18 +130,18 @@ function Messages({ thread, ...view }: { thread: ChatThread } & View) {
 
 export default function NotebookChat({
   threads, quotes, onRemoveQuote, onAsk, openThread, onOpenThread, onGoTo, onDelete, error, focusKey, imageUrl, onAddToNotes,
+  onClear, docked, onGripDown,
 }: Props) {
   const [text, setText] = useState("");
   const [fresh, setFresh] = useState(false); // "New topic": the next question starts a thread
   const [sending, setSending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const topRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLTextAreaElement | null>(null);
   const open = threads.find((t) => t.id === openThread) ?? null;
   const last = threads[threads.length - 1] ?? null;
   const multiDoc = threads.some((t) => t.anchors.some((a) => a.doc > 1));
-  const compact = open !== null;
   const view: View = { multiDoc, onGoTo, imageUrl, onAddToNotes };
   // Where the next question goes: quotes start a thread; otherwise it follows
   // up the open thread, or the latest one.
@@ -107,7 +153,6 @@ export default function NotebookChat({
     const el = listRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [tail]);
-  useEffect(() => { topRef.current?.scrollTo({ top: 0 }); }, [openThread]);
   useEffect(() => { if (focusKey) boxRef.current?.focus(); }, [focusKey]);
 
   async function send() {
@@ -123,28 +168,13 @@ export default function NotebookChat({
     }
   }
 
-  const size = compact ? "text-[13px] leading-relaxed" : "text-sm leading-relaxed";
 
   return (
     <div className="notebook-chat flex h-full min-h-0 flex-col">
-      {open && (
-        <section className="flex min-h-0 basis-1/2 flex-col border-b-2 border-indigo-200 bg-indigo-50/40" aria-label="Opened question">
-          <div className="flex shrink-0 items-center gap-2 px-3 py-1.5">
-            {open.number > 0 && <Badge n={open.number} />}
-            <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-              {(() => { const n = open.messages.filter((m) => m.role === "user").length; return `${n} ${n === 1 ? "question" : "questions"} on this passage`; })()}
-            </span>
-            <button type="button" className="p-1 text-slate-400 hover:text-slate-700" aria-label="Close"
-              onClick={() => onOpenThread(null)}>
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div ref={topRef} className={`min-h-0 flex-1 space-y-3 overflow-auto px-3 pb-3 ${size}`}>
-            <Messages thread={open} {...view} />
-          </div>
-        </section>
+      {open && docked && (
+        <OpenThread thread={open} view={view} onClose={() => onOpenThread(null)} onGripDown={onGripDown} />
       )}
-      <div ref={listRef} className={`min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 ${size}`}>
+      <div ref={listRef} className={`min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 ${TEXT_SIZE}`}>
         {threads.length === 0 && (
           <div className="space-y-2 pt-6 text-center text-sm text-slate-500">
             <p>Select text in the source or the notes and press Ask, or just type a question.</p>
@@ -200,15 +230,34 @@ export default function NotebookChat({
                 ? `Follow-up${target.number ? ` in ${target.number}` : " to the last question"}`
                 : "New question"}
           </span>
-          {target && (
-            <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setFresh(true)}>
-              <MessageSquarePlus className="h-3.5 w-3.5" /> New topic
-            </button>
+          {confirmClear ? (
+            <span className="flex items-center gap-1.5">
+              <button type="button" className="text-red-600 hover:underline"
+                onClick={() => { setConfirmClear(false); setFresh(false); void onClear(); }}>
+                Clear {threads.length} {threads.length === 1 ? "conversation" : "conversations"}
+              </button>
+              <button type="button" className="hover:text-slate-700 hover:underline" onClick={() => setConfirmClear(false)}>Keep</button>
+            </span>
+          ) : (
+            <>
+              {target && (
+                <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setFresh(true)}
+                  title="Ask the next question apart from the earlier ones">
+                  <MessageSquarePlus className="h-3.5 w-3.5" /> New topic
+                </button>
+              )}
+              {threads.length > 0 && (
+                <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setConfirmClear(true)}
+                  title="Clear this conversation and start again (numbers restart at 1)">
+                  <Eraser className="h-3.5 w-3.5" /> New session
+                </button>
+              )}
+            </>
           )}
         </div>
         {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
         <div className="flex items-end gap-2">
-          <textarea ref={boxRef} rows={2} value={text} className="input-field max-h-40 min-h-[2.75rem] flex-1 resize-y text-sm"
+          <textarea ref={boxRef} rows={2} value={text} className="input-field max-h-40 min-h-[2.75rem] flex-1 resize-y text-[13px]"
             style={{ padding: "0.5rem 0.65rem" }}
             placeholder={quotes.length ? "Ask about the quoted text…" : "Ask about the material…"}
             onChange={(e) => setText(e.target.value)}
