@@ -1671,7 +1671,7 @@ def api_refine_deck(gen_id: str, body: RefineBody) -> Response:
 def api_regenerate(gen_id: str) -> JSONResponse:
     old_meta = _load(gen_id)
     if old_meta.kind == "exam":
-        raise HTTPException(400, detail="Exams are rewritten from their blueprint")
+        raise HTTPException(400, detail="Exams get new papers from their profile")
     _require_model()
     old_dir = store.generation_dir(gen_id)
     if old_meta.source_kind == "pdf":
@@ -1714,11 +1714,15 @@ def api_regenerate(gen_id: str) -> JSONResponse:
     return JSONResponse({"id": new_id}, status_code=202)
 
 
-# ---- Learn: practice exams (see exam.py) ----
+# ---- Learn: exams and their mock papers (see exam.py) ----
 
 
-class BlueprintBody(BaseModel):
-    blueprint: dict[str, Any]
+class ProfileBody(BaseModel):
+    profile: dict[str, Any]
+
+
+class PaperBody(BaseModel):
+    focus: str = ""  # what this paper should stress, in the reader's words
 
 
 class AttemptBody(BaseModel):
@@ -1732,21 +1736,8 @@ def _exam_meta(gen_id: str) -> GenerationMeta:
     meta = _load(gen_id)
     if meta.kind != "exam":
         raise HTTPException(400, detail="Not an exam")
+    exam.migrate(store.generation_dir(gen_id))
     return meta
-
-
-def _exam_material_excerpt(gdir: Path, meta: GenerationMeta) -> str:
-    """The material's opening text: enough for the blueprint to know the subject."""
-    if meta.source_kind == "text":
-        return (gdir / "source.txt").read_text(encoding="utf-8")[:6000]
-    out = []
-    for path in sorted(gdir.glob("source_*.pdf")):
-        with fitz.open(path) as doc:
-            for page in doc:
-                out.append(page.get_text("text"))
-                if sum(map(len, out)) > 6000:
-                    return "".join(out)[:6000]
-    return "".join(out)[:6000]
 
 
 def _exam_ask_json(client: Any, gdir: Path, stem: str, messages: list[dict[str, Any]],
@@ -1766,23 +1757,23 @@ def _exam_ask_json(client: Any, gdir: Path, stem: str, messages: list[dict[str, 
         return clean(exam.parse_json(reply))
 
 
-def _run_exam_blueprint(gen_id: str, report: ProgressCallback) -> None:
+def _run_exam_profile(gen_id: str, report: ProgressCallback) -> None:
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
     usage = UsageTally()
     try:
         spec = exam.load(gdir, "spec.json")
-        report("Reading the sample papers", 10)
-        messages = exam.blueprint_messages(spec, exam.sample_blocks(gdir), _exam_material_excerpt(gdir, meta),
-                                           meta.title, meta.language)
-        report("Working out the paper's structure", 30)
+        report("Reading the past papers and the material", 10)
+        messages = exam.profile_messages(spec, exam.past_blocks(gdir), exam.material_text(gdir, meta.source_kind),
+                                         meta.title, meta.language)
+        report("Working out what the exam is like", 30)
         client = create_client(on_usage=usage.add)
-        blueprint = _exam_ask_json(client, gdir, "blueprint", messages, exam.clean_blueprint)
-        exam.save(gdir, "blueprint.json", blueprint)
+        profile = _exam_ask_json(client, gdir, "profile", messages, exam.clean_profile)
+        exam.save(gdir, exam.PROFILE_FILE, profile)
         if not meta.title:
-            meta.title = blueprint["title"]
+            meta.title = profile["title"]
         _apply_usage(meta, usage)
-        meta.status, meta.error = "review", ""
+        meta.status, meta.error = ("succeeded" if exam.paper_ids(gdir) else "review"), ""
         store.save_meta(meta)
         report("Done", 100)
     except Exception as exc:
@@ -1791,13 +1782,14 @@ def _run_exam_blueprint(gen_id: str, report: ProgressCallback) -> None:
         raise
 
 
-def _run_exam_paper(gen_id: str, report: ProgressCallback) -> None:
+def _run_exam_paper(gen_id: str, focus: str, report: ProgressCallback) -> None:
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
     usage = UsageTally()
+    folder: Path | None = None
     try:
         spec = exam.load(gdir, "spec.json")
-        blueprint = exam.load(gdir, "blueprint.json")
+        profile = exam.load_profile(gdir)
         documents: list[pdf.PdfDocument] = []
         source_text = ""
         if meta.source_kind == "pdf":
@@ -1811,21 +1803,21 @@ def _run_exam_paper(gen_id: str, report: ProgressCallback) -> None:
             source_text = (gdir / "source.txt").read_text(encoding="utf-8")
         material = deck._material_content(
             DeckRequest(template_key="exam", title=meta.title, source_text=source_text), documents, None)
-        messages = exam.paper_messages(blueprint, spec, material, exam.sample_blocks(gdir), meta.language)
+        messages = exam.paper_messages(profile, spec, material, exam.past_blocks(gdir, max_images=8),
+                                       exam.earlier_questions(gdir), focus, meta.language)
         report("Writing the questions with the model", 45)
         client = create_client(on_usage=usage.add)
-        paper = _exam_ask_json(client, gdir, "paper", messages, lambda raw: exam.clean_exam(raw, blueprint))
-        exam.save(gdir, "exam.json", paper)
+        paper = _exam_ask_json(client, gdir, "paper", messages, lambda raw: exam.clean_exam(raw, profile))
+        paper["focus"] = focus
+        folder = exam.next_paper_dir(gdir)
+        (folder / "exam.json").write_text(json.dumps(paper, ensure_ascii=False, indent=1), encoding="utf-8")
         sample = paper["title"] + "".join(q["stem"] for s in paper["sections"] for q in s["questions"][:3])
         lang = exam.paper_language(meta.language, sample)
-        folder = exam.exam_dir(gdir)
         for i, (name, answers) in enumerate((("paper", False), ("answers", True))):
             report("Typesetting the paper" if not answers else "Typesetting the answer key", 75 + i * 10)
             tex_path = folder / f"{name}.tex"
             tex_path.write_text(exam.render(paper, lang, answers), encoding="utf-8")
             deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
-        if not meta.title:
-            meta.title = paper["title"]
         meta.frame_count = sum(len(s["questions"]) for s in paper["sections"])
         _apply_usage(meta, usage)
         meta.status, meta.error = "succeeded", ""
@@ -1835,17 +1827,19 @@ def _run_exam_paper(gen_id: str, report: ProgressCallback) -> None:
             shutil.rmtree(gdir / "thumbs", ignore_errors=True)
         report("Done", 100)
     except Exception as exc:
+        if folder is not None:
+            shutil.rmtree(folder, ignore_errors=True)  # no half-made papers in the list
         _apply_usage(meta, usage)
         _fail(meta, exc)
         raise
 
 
-def _start_exam_job(gen_id: str, run: Callable[[str, ProgressCallback], None]) -> None:
+def _start_exam_job(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
     meta = store.load_meta(gen_id)
     meta.status, meta.error, meta.error_kind = "running", "", ""
     store.save_meta(meta)
     try:
-        tasks.start(gen_id, lambda report: run(gen_id, report))
+        tasks.start(gen_id, job)
     except tasks.TaskBusy as e:
         raise HTTPException(409, detail=str(e)) from e
 
@@ -1857,10 +1851,10 @@ async def api_create_exam(
     spec: str = Form("{}"),
     source_text: str = Form(""),
     files: list[UploadFile] = File(default=[]),
-    samples: list[UploadFile] = File(default=[]),
+    past: list[UploadFile] = File(default=[]),
 ) -> JSONResponse:
-    """A practice exam: the blueprint is drafted first (by the model when there
-    are sample papers to read), then the reader approves it."""
+    """An exam to prepare for: the model drafts its profile from the material
+    and whatever the reader gives (past papers, a description, a type table)."""
     if language not in exam.LANGUAGE_RULES:
         raise HTTPException(400, detail=f"Unknown language: {language}")
     _require_model()
@@ -1872,9 +1866,9 @@ async def api_create_exam(
         raise HTTPException(400, detail="An uploaded PDF is empty")
     if not contents and not source_text.strip():
         raise HTTPException(400, detail="Upload at least one PDF or provide pasted text")
-    sample_files = [(f.filename or "sample", await _read_upload_capped(f)) for f in samples if f.filename]
+    past_files = [(f.filename or "past paper", await _read_upload_capped(f)) for f in past if f.filename]
     try:
-        clean_spec = exam.clean_spec(json.loads(spec or "{}"), len(sample_files))
+        clean_spec = exam.clean_spec(json.loads(spec or "{}"))
     except ValueError as e:  # ExamError, or JSON that does not parse
         raise HTTPException(400, detail=str(e)) from e
     meta = store.new_generation(
@@ -1888,19 +1882,14 @@ async def api_create_exam(
     if not contents:
         (gdir / "source.txt").write_text(source_text, encoding="utf-8")
     try:
-        exam.store_samples(gdir, sample_files)
+        exam.store_past(gdir, past_files)
     except exam.ExamError as e:
         store.delete_generation(meta.id)
         raise HTTPException(400, detail=str(e)) from e
     exam.save(gdir, "spec.json", clean_spec)
-    if sample_files:
-        _start_exam_job(meta.id, _run_exam_blueprint)
-    else:
-        lang = exam.paper_language(language, _exam_material_excerpt(gdir, meta))
-        exam.save(gdir, "blueprint.json", exam.local_blueprint(clean_spec, meta.title, lang))
-        meta.status = "review"
-        store.save_meta(meta)
-    return JSONResponse({"id": meta.id}, status_code=202)
+    gen_id = meta.id
+    _start_exam_job(gen_id, lambda report: _run_exam_profile(gen_id, report))
+    return JSONResponse({"id": gen_id}, status_code=202)
 
 
 @app.get("/api/generations/{gen_id}/exam")
@@ -1909,59 +1898,103 @@ def api_exam(gen_id: str) -> dict[str, Any]:
     return exam.state(store.generation_dir(gen_id))
 
 
-@app.put("/api/generations/{gen_id}/exam/blueprint")
-def api_exam_blueprint(gen_id: str, body: BlueprintBody) -> dict[str, Any]:
+@app.put("/api/generations/{gen_id}/exam/profile")
+def api_exam_profile(gen_id: str, body: ProfileBody) -> dict[str, Any]:
     _exam_meta(gen_id)
     if tasks.is_running(gen_id):
         raise HTTPException(409, detail="Wait for the running job to finish")
     try:
-        blueprint = exam.clean_blueprint(body.blueprint)
+        profile = exam.clean_profile(body.profile)
     except exam.ExamError as e:
         raise HTTPException(400, detail=str(e)) from e
-    exam.save(store.generation_dir(gen_id), "blueprint.json", blueprint)
-    return blueprint
+    exam.save(store.generation_dir(gen_id), exam.PROFILE_FILE, profile)
+    return profile
+
+
+@app.post("/api/generations/{gen_id}/exam/past", status_code=202)
+async def api_exam_add_past(gen_id: str, past: list[UploadFile] = File(default=[])) -> dict[str, Any]:
+    """More past papers; the profile is drafted again with them."""
+    _exam_meta(gen_id)
+    _require_model()
+    uploads = [(f.filename or "past paper", await _read_upload_capped(f)) for f in past if f.filename]
+    if not uploads:
+        raise HTTPException(400, detail="Add a past paper")
+    if tasks.is_running(gen_id):
+        raise HTTPException(409, detail="Wait for the running job to finish")
+    try:
+        exam.store_past(store.generation_dir(gen_id), uploads)
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    _start_exam_job(gen_id, lambda report: _run_exam_profile(gen_id, report))
+    return {"id": gen_id}
 
 
 @app.post("/api/generations/{gen_id}/exam/redraft", status_code=202)
 def api_exam_redraft(gen_id: str) -> dict[str, Any]:
-    """Draft the blueprint again from the samples."""
+    """Draft the profile again from everything given."""
     _exam_meta(gen_id)
     _require_model()
-    if not exam.state(store.generation_dir(gen_id))["samples"]:
-        raise HTTPException(400, detail="No sample papers to draft from")
-    _start_exam_job(gen_id, _run_exam_blueprint)
+    _start_exam_job(gen_id, lambda report: _run_exam_profile(gen_id, report))
     return {"id": gen_id}
 
 
-@app.post("/api/generations/{gen_id}/exam/paper", status_code=202)
-def api_exam_paper(gen_id: str) -> dict[str, Any]:
-    """Write the paper from the blueprint (again: new questions each time)."""
+@app.post("/api/generations/{gen_id}/exam/papers", status_code=202)
+def api_exam_new_paper(gen_id: str, body: PaperBody) -> dict[str, Any]:
+    """Write a new mock paper to the profile (avoiding the earlier papers' questions)."""
     _exam_meta(gen_id)
     _require_model()
-    if exam.load(store.generation_dir(gen_id), "blueprint.json") is None:
-        raise HTTPException(400, detail="The blueprint is not ready")
-    _start_exam_job(gen_id, _run_exam_paper)
+    if exam.load_profile(store.generation_dir(gen_id)) is None:
+        raise HTTPException(400, detail="The profile is not ready")
+    focus = body.focus.strip()[:1000]
+    _start_exam_job(gen_id, lambda report: _run_exam_paper(gen_id, focus, report))
     return {"id": gen_id}
 
 
-@app.get("/api/generations/{gen_id}/exam/{name}.pdf")
-def api_exam_pdf(gen_id: str, name: str, download: bool = False) -> FileResponse:
+def _paper_dir(gen_id: str, pid: str) -> Path:
+    try:
+        folder = exam.paper_dir(store.generation_dir(gen_id), pid)
+    except exam.ExamError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    if not (folder / "exam.json").is_file():
+        raise HTTPException(404, detail="No such paper")
+    return folder
+
+
+@app.get("/api/generations/{gen_id}/exam/papers/{pid}")
+def api_exam_paper(gen_id: str, pid: str) -> dict[str, Any]:
+    _exam_meta(gen_id)
+    folder = _paper_dir(gen_id, pid)
+    return {**json.loads((folder / "exam.json").read_text(encoding="utf-8")),
+            **exam.paper_summary(store.generation_dir(gen_id), pid)}
+
+
+@app.delete("/api/generations/{gen_id}/exam/papers/{pid}", status_code=204)
+def api_exam_delete_paper(gen_id: str, pid: str) -> Response:
+    _exam_meta(gen_id)
+    _paper_dir(gen_id, pid)
+    exam.delete_paper(store.generation_dir(gen_id), pid)
+    return Response(status_code=204)
+
+
+@app.get("/api/generations/{gen_id}/exam/papers/{pid}/{name}.pdf")
+def api_exam_pdf(gen_id: str, pid: str, name: str, download: bool = False) -> FileResponse:
     meta = _exam_meta(gen_id)
     if name not in ("paper", "answers"):
         raise HTTPException(404, detail="No such file")
-    path = exam.exam_dir(store.generation_dir(gen_id)) / f"{name}.pdf"
+    path = _paper_dir(gen_id, pid) / f"{name}.pdf"
     if not path.is_file():
         raise HTTPException(404, detail="Not typeset yet")
-    label = "answers" if name == "answers" else "exam"
-    filename = f"{(meta.title or 'exam')[:60]} - {label}.pdf"
+    label = "answers" if name == "answers" else "paper"
+    filename = f"{(meta.title or 'exam')[:60]} - {int(pid)} {label}.pdf"
     return FileResponse(path, media_type="application/pdf",
                         filename=filename if download else None,
                         content_disposition_type="attachment" if download else "inline")
 
 
-@app.post("/api/generations/{gen_id}/exam/grade", status_code=202)
+@app.post("/api/generations/{gen_id}/exam/papers/{pid}/grade", status_code=202)
 async def api_exam_grade(
     gen_id: str,
+    pid: str,
     qid: str = Form(...),
     part: int = Form(-1),
     answer: str = Form(""),
@@ -1970,9 +2003,10 @@ async def api_exam_grade(
     """Grade an answer to an open question; poll the returned grade."""
     _exam_meta(gen_id)
     _require_model()
+    _paper_dir(gen_id, pid)
     data = await image.read(figures.MAX_FIGURE_BYTES + 1) if image is not None and image.filename else None
     try:
-        return exam.start_grade(store.generation_dir(gen_id), qid, None if part < 0 else part, answer, data)
+        return exam.start_grade(store.generation_dir(gen_id), pid, qid, None if part < 0 else part, answer, data)
     except exam.ExamError as e:
         raise HTTPException(400, detail=str(e)) from e
 
@@ -1986,10 +2020,11 @@ def api_exam_grade_result(gen_id: str, grade_id: str) -> dict[str, Any]:
     return record
 
 
-@app.post("/api/generations/{gen_id}/exam/attempts")
-def api_exam_attempt(gen_id: str, body: AttemptBody) -> list[dict[str, Any]]:
+@app.post("/api/generations/{gen_id}/exam/papers/{pid}/attempts")
+def api_exam_attempt(gen_id: str, pid: str, body: AttemptBody) -> list[dict[str, Any]]:
     _exam_meta(gen_id)
-    return exam.add_attempt(store.generation_dir(gen_id), body.score, body.total, body.answered, body.correct)
+    _paper_dir(gen_id, pid)
+    return exam.add_attempt(store.generation_dir(gen_id), pid, body.score, body.total, body.answered, body.correct)
 
 
 @app.websocket("/ws/generations/{gen_id}")

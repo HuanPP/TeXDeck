@@ -18,7 +18,7 @@ export const TYPE_LABELS: Record<QuestionType, string> = {
 const OPEN: QuestionType[] = ["short", "calc", "other"];
 const ORDER: QuestionType[] = ["single", "multiple", "truefalse", "fill", "short", "calc", "other"];
 const DEFAULT_POINTS: Record<QuestionType, number> = { single: 2, multiple: 3, truefalse: 1, fill: 2, short: 8, calc: 10, other: 5 };
-const MAX_SAMPLES = 6;
+const MAX_PAST = 10;
 
 type Row = SpecRow & { each: boolean; items: { points: number; parts: string }[]; description: string };
 
@@ -54,7 +54,9 @@ function NewExam({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<File[]>([]);
   const [sourceText, setSourceText] = useState("");
   const [rows, setRows] = useState<Row[]>(freshRows);
-  const [samples, setSamples] = useState<File[]>([]);
+  const [past, setPast] = useState<File[]>([]);
+  const [description, setDescription] = useState("");
+  const [tableOpen, setTableOpen] = useState(false);
   const [duration, setDuration] = useState("");
   const [extra, setExtra] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -63,10 +65,10 @@ function NewExam({ onClose }: { onClose: () => void }) {
   const set = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const totals = rowTotals(rows);
 
-  async function addSamples(list: FileList | null) {
+  async function addPast(list: FileList | null) {
     if (!list) return;
     setError(null);
-    const picked = Array.from(list).slice(0, MAX_SAMPLES - samples.length);
+    const picked = Array.from(list).slice(0, MAX_PAST - past.length);
     const ready: File[] = [];
     for (const f of picked) {
       if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) ready.push(f);
@@ -78,7 +80,7 @@ function NewExam({ onClose }: { onClose: () => void }) {
         }
       }
     }
-    setSamples((s) => [...s, ...ready].slice(0, MAX_SAMPLES));
+    setPast((s) => [...s, ...ready].slice(0, MAX_PAST));
   }
 
   async function submit(e: FormEvent) {
@@ -87,7 +89,6 @@ function NewExam({ onClose }: { onClose: () => void }) {
     if (!ready) return setPanelOpen(true);
     if (sourceTab === "pdf" && !files.length) return setError("Add the material: at least one PDF");
     if (sourceTab === "text" && !sourceText.trim()) return setError("Paste the material");
-    if (!totals.questions && !samples.length) return setError("Choose some questions, or add a sample paper");
     const other = rows.find((r) => r.type === "other");
     if (other && (other.count > 0 || (other.each && other.items.length)) && !other.description.trim()) {
       return setError("Describe the \"Other\" questions");
@@ -95,11 +96,11 @@ function NewExam({ onClose }: { onClose: () => void }) {
     setSubmitting(true);
     try {
       const { id } = await createExam({
-        title: title.trim(), language, samples,
+        title: title.trim(), language, past,
         files: sourceTab === "pdf" ? files : undefined,
         source_text: sourceTab === "text" ? sourceText : undefined,
         spec: {
-          duration: Number(duration) || 0, extra: extra.trim(),
+          duration: Number(duration) || 0, extra: extra.trim(), description: description.trim(),
           types: rows.map((r) => ({
             type: r.type, count: OPEN.includes(r.type) && r.each ? r.items.length : r.count, points: Number(r.points) || 0,
             items: OPEN.includes(r.type) && r.each ? r.items : [], description: r.description.trim(),
@@ -120,7 +121,10 @@ function NewExam({ onClose }: { onClose: () => void }) {
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <section className="w-full max-w-3xl border border-[var(--color-border)] bg-white p-6 shadow-xl">
         <div className="mb-6 flex items-center justify-between gap-3">
-          <h1 className="text-2xl">New practice exam</h1>
+          <div>
+            <h1 className="text-2xl">New exam</h1>
+            <p className="mt-1 text-sm text-slate-500">The exam you are preparing for. Mock papers are written for it afterwards, as many as you like.</p>
+          </div>
           <button type="button" className="p-1 text-slate-500 hover:text-slate-800" aria-label="Close" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
@@ -161,11 +165,39 @@ function NewExam({ onClose }: { onClose: () => void }) {
           </div>
 
           <div>
+            <span className="mb-2 block text-sm text-slate-600">Past papers <span className="text-xs text-slate-400">(optional, the best guide: PDFs or photos, several years if you have them, with answers if you have them)</span></span>
+            <label className="flex cursor-pointer items-center justify-center gap-2 border border-dashed border-[var(--color-border)] bg-slate-50 px-4 py-4 text-sm text-slate-600">
+              <FileUp className="h-4 w-4" /> {past.length ? "Add another past paper" : "Add past papers"}
+              <input type="file" multiple accept="image/*,.heic,.heif,application/pdf,.pdf" className="sr-only"
+                onChange={(e) => { void addPast(e.target.files); e.target.value = ""; }} />
+            </label>
+            {past.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {past.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-1.5 border border-[var(--color-border)] px-2 py-1 text-xs">
+                    {f.name}
+                    <button type="button" className="text-slate-400 hover:text-red-600" aria-label={`Remove ${f.name}`}
+                      onClick={() => setPast((s) => s.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <label className="block text-sm text-slate-600">
+            {past.length ? "Anything the past papers do not show" : "No past papers? Describe the exam"} <span className="text-xs text-slate-400">(optional)</span>
+            <textarea className="input-field mt-1 min-h-20 text-sm" value={description} onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. 2-hour final, closed book. 10 multiple choice, 4 short answers, 2 long calculations on circuits; the teacher said chapter 5 matters most" />
+          </label>
+          <div>
             <div className="mb-2 flex items-baseline justify-between gap-3">
-              <span className="text-sm text-slate-600">Questions</span>
-              <span className="text-xs text-slate-500">{totals.questions} questions · {totals.points} points</span>
+              <button type="button" className="text-sm text-slate-600 hover:text-[var(--color-primary)]" aria-expanded={tableOpen}
+                onClick={() => setTableOpen((o) => !o)}>
+                {tableOpen ? "▾" : "▸"} Set the question types yourself <span className="text-xs text-slate-400">(optional)</span>
+              </button>
+              {totals.questions > 0 && <span className="text-xs text-slate-500">{totals.questions} questions · {totals.points} points</span>}
             </div>
-            <table className="w-full text-sm">
+            {tableOpen && <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-400">
                   <th className="py-1 font-normal">Type</th>
@@ -234,27 +266,7 @@ function NewExam({ onClose }: { onClose: () => void }) {
                   );
                 })}
               </tbody>
-            </table>
-          </div>
-
-          <div>
-            <span className="mb-2 block text-sm text-slate-600">Sample papers <span className="text-xs text-slate-400">(optional: photos or PDFs; the exam follows their style, and fills in what the table leaves open)</span></span>
-            <label className="flex cursor-pointer items-center justify-center gap-2 border border-dashed border-[var(--color-border)] bg-slate-50 px-4 py-4 text-sm text-slate-600">
-              <FileUp className="h-4 w-4" /> {samples.length ? "Add another sample" : "Add a sample paper"}
-              <input type="file" multiple accept="image/*,.heic,.heif,application/pdf,.pdf" className="sr-only"
-                onChange={(e) => { void addSamples(e.target.files); e.target.value = ""; }} />
-            </label>
-            {samples.length > 0 && (
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {samples.map((f, i) => (
-                  <li key={`${f.name}-${i}`} className="flex items-center gap-1.5 border border-[var(--color-border)] px-2 py-1 text-xs">
-                    {f.name}
-                    <button type="button" className="text-slate-400 hover:text-red-600" aria-label={`Remove ${f.name}`}
-                      onClick={() => setSamples((s) => s.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            </table>}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
@@ -273,13 +285,13 @@ function NewExam({ onClose }: { onClose: () => void }) {
           </div>
           <label className="block text-sm text-slate-600">Anything else <span className="text-xs text-slate-400">(optional)</span>
             <textarea className="input-field mt-1 min-h-16" value={extra} onChange={(e) => setExtra(e.target.value)}
-              placeholder="e.g. focus on chapters 3 and 4; harder than the sample; no proofs" />
+              placeholder="e.g. focus on chapters 3 and 4; a bit harder than past years; no proofs" />
           </label>
           {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? "Uploading…" : samples.length ? "Read the samples" : "Next: check the structure"}
+              {submitting ? "Uploading…" : "Create the exam"}
             </button>
           </div>
         </form>
@@ -323,7 +335,7 @@ export default function ExamList() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-baseline gap-4">
           <Link to="/learn" className="text-sm text-[var(--color-primary)] no-underline hover:underline">← Learn</Link>
-          <h1 className="text-3xl">Practice exams</h1>
+          <h1 className="text-3xl">Exams</h1>
         </div>
         <button type="button" className="btn-primary rounded-full px-5" onClick={() => setNewOpen(true)}>
           <Plus className="h-4 w-4" /> New exam
@@ -332,14 +344,13 @@ export default function ExamList() {
       {error && <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {items.length === 0 ? (
         <div className="border border-dashed border-[var(--color-border)] px-6 py-14 text-center text-sm text-slate-500">
-          No exams yet. Upload your material and choose the questions you want.
+          No exams yet. Add one you are preparing for: its material, and past papers if you have them.
         </div>
       ) : (
         <table className="w-full border border-[var(--color-border)] bg-white text-sm">
           <thead>
             <tr className="border-b border-[var(--color-border)] text-left text-xs text-slate-500">
               <th className="px-4 py-2 font-normal">Title</th>
-              <th className="hidden px-2 py-2 text-center font-normal sm:table-cell">Questions</th>
               <th className="hidden px-2 py-2 text-center font-normal sm:table-cell">Created</th>
               <th className="px-2 py-2 text-center font-normal">Status</th>
               <th className="w-12" />
@@ -349,7 +360,6 @@ export default function ExamList() {
             {items.map((g) => (
               <tr key={g.id} className="border-b border-[var(--color-border)] last:border-0 hover:bg-slate-50">
                 <td className="px-4 py-3"><Link to={`/exam/${g.id}`} className="text-[var(--color-heading)] no-underline hover:underline">{displayTitle(g)}</Link></td>
-                <td className="hidden text-center text-slate-600 sm:table-cell">{g.frame_count || ""}</td>
                 <td className="hidden text-center text-slate-600 sm:table-cell">{fmtDay(g.created_at)}</td>
                 <td className="text-center"><StatusBadge status={g.status} /></td>
                 <td className="relative text-center">

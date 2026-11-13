@@ -1,15 +1,20 @@
-"""Learn: practice exams made from the reader's material.
+"""Learn: exams to prepare for, and mock papers for them.
 
-An exam is a generation of kind "exam". The reader gives the material, a table
-of question types (how many, how many points) and, optionally, sample papers.
-The model first proposes a blueprint (sections, types, counts, points, style)
-that the reader can edit; then it writes the questions as JSON, which the
-server checks, scores from the blueprint and typesets as a paper and an answer
-key. The same JSON drives the interactive practice in the browser. Answers to
-open questions are graded by the model on request.
+An exam is a generation of kind "exam": one exam the reader is preparing for.
+They give the study material and, all optional, past papers (PDFs or photos,
+with or without answers), a description of the exam in their own words and a
+table of question types. The model drafts the exam's profile from these: its
+structure (sections, types, counts, points), its topics and their weight, how
+it words questions and how it marks. Past papers are the authority; the
+reader's own statements win where they differ (this year's exam). The reader
+edits the profile; then any number of mock papers are written to it, each
+avoiding the questions of the earlier ones. A paper is JSON checked against
+the profile, scored from it and typeset as a paper and an answer key; the same
+JSON drives the practice in the browser, where open answers are graded by the
+model against the profile's marking.
 
-Files, in <generation>/exam/: spec.json, samples/, blueprint.json, exam.json,
-paper.tex/pdf, answers.tex/pdf, grades.json, attempts.json.
+Files, in <generation>/exam/: spec.json, past/, profile.json, grades.json, and
+papers/NNN/ with exam.json, paper/answers .tex/.pdf, attempts.json.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import contextvars
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -31,7 +37,9 @@ from . import figures
 from .llm import LlmError, create_client, image_block, text_block
 
 EXAM_DIR = "exam"
-SAMPLE_DIR = "samples"
+PAST_DIR = "past"
+PAPERS_DIR = "papers"
+PROFILE_FILE = "profile.json"
 TYPES = ("single", "multiple", "truefalse", "fill", "short", "calc", "other")
 TYPE_NAMES = {
     "single": ("单项选择题", "Single choice"),
@@ -44,8 +52,11 @@ TYPE_NAMES = {
 }
 OPEN_TYPES = ("short", "calc", "other")
 MAX_QUESTIONS = 80
-MAX_SAMPLES = 6
-MAX_SAMPLE_PAGES = 4  # per sample PDF
+MAX_PAST = 10
+MAX_PAST_PAGES = 8  # images of a scanned past paper
+MAX_PAST_TEXT = 30_000  # characters of a past paper with a text layer
+MAX_MATERIAL_TEXT = 40_000  # material text for drafting the profile
+MAX_TOPICS = 30
 MAX_TEXT = 4000
 BLANK = re.compile(r"\{\{(\d+)\}\}")
 CN_NUMBERS = "一二三四五六七八九十"
@@ -100,8 +111,9 @@ def parse_parts(parts: str) -> list[float]:
 # ---- the reader's request ------------------------------------------------------
 
 
-def clean_spec(raw: dict[str, Any], samples: int) -> dict[str, Any]:
-    """The question-type table, checked. Rows with no questions are dropped."""
+def clean_spec(raw: dict[str, Any]) -> dict[str, Any]:
+    """What the reader says about the exam: an optional table of question types
+    (rows with no questions are dropped), a free description, the time."""
     rows = []
     for row in raw.get("types") or []:
         if not isinstance(row, dict) or row.get("type") not in TYPES:
@@ -124,71 +136,109 @@ def clean_spec(raw: dict[str, Any], samples: int) -> dict[str, Any]:
         })
     if sum(r["count"] for r in rows) > MAX_QUESTIONS:
         raise ExamError(f"At most {MAX_QUESTIONS} questions per exam")
-    if not rows and not samples:
-        raise ExamError("Add at least one question type, or a sample paper")
     return {
         "types": rows,
+        "description": _text(raw.get("description"), 6000),
         "duration": int(_num(raw.get("duration"), 0, 600, 0)),
         "extra": _text(raw.get("extra")),
     }
 
 
-def store_samples(gdir: Path, uploads: list[tuple[str, bytes]]) -> list[str]:
-    """Sample papers: images (re-encoded) or PDFs. Returns the stored names."""
-    if len(uploads) > MAX_SAMPLES:
-        raise ExamError(f"At most {MAX_SAMPLES} sample papers")
-    folder = exam_dir(gdir) / SAMPLE_DIR
+def store_past(gdir: Path, uploads: list[tuple[str, bytes]]) -> list[str]:
+    """Past papers: PDFs as they are, images re-encoded. Returns the stored names."""
+    folder = exam_dir(gdir) / PAST_DIR
+    have = len(list(folder.iterdir())) if folder.is_dir() else 0
+    if have + len(uploads) > MAX_PAST:
+        raise ExamError(f"At most {MAX_PAST} past papers")
     names = []
-    for i, (name, data) in enumerate(uploads, start=1):
+    for i, (name, data) in enumerate(uploads, start=have + 1):
         folder.mkdir(parents=True, exist_ok=True)
         if data[:5] == b"%PDF-":
             try:
                 with fitz.open(stream=data, filetype="pdf") as doc:
                     if doc.page_count == 0:
-                        raise ExamError(f"Sample PDF has no pages: {name}")
+                        raise ExamError(f"Past paper PDF has no pages: {name}")
             except (RuntimeError, ValueError) as exc:
-                raise ExamError(f"Cannot read sample PDF: {name}") from exc
-            out = f"sample-{i:02d}.pdf"
+                raise ExamError(f"Cannot read past paper PDF: {name}") from exc
+            out = f"past-{i:02d}.pdf"
             (folder / out).write_bytes(data)
         else:
             try:
                 clean, ext, _w, _h = figures._normalize(name, data)
             except figures.FigureError as exc:
                 raise ExamError(str(exc)) from exc
-            out = f"sample-{i:02d}.{ext}"
+            out = f"past-{i:02d}.{ext}"
             (folder / out).write_bytes(clean)
         names.append(out)
     return names
 
 
-def sample_blocks(gdir: Path, limit: int = 12) -> list[dict[str, Any]]:
-    """The sample papers as images for the model (PDF pages rendered)."""
-    folder = exam_dir(gdir) / SAMPLE_DIR
+def past_blocks(gdir: Path, max_images: int = 16) -> list[dict[str, Any]]:
+    """The past papers for the model. A PDF with a text layer goes as its text
+    (every page, answers included) plus its first page as an image for the
+    layout; a scanned one, or a photo, as page images."""
+    folder = exam_dir(gdir) / PAST_DIR
     if not folder.is_dir():
         return []
     blocks: list[dict[str, Any]] = []
-    cache = exam_dir(gdir) / "sample_pages"
-    for path in sorted(folder.iterdir()):
-        if len(blocks) >= limit:
-            break
-        if path.suffix == ".pdf":
-            cache.mkdir(parents=True, exist_ok=True)
-            with fitz.open(path) as doc:
-                for n in range(min(doc.page_count, MAX_SAMPLE_PAGES)):
-                    png = cache / f"{path.stem}-p{n + 1}.png"
-                    if not png.is_file():
-                        doc.load_page(n).get_pixmap(dpi=110).save(png)
-                    blocks.append(image_block(png))
-        else:
-            blocks.append(image_block(path))
-    return blocks[:limit]
+    images = 0
+    cache = exam_dir(gdir) / "past_pages"
+
+    def page_image(doc: fitz.Document, path: Path, n: int) -> dict[str, Any]:
+        cache.mkdir(parents=True, exist_ok=True)
+        png = cache / f"{path.stem}-p{n + 1}.png"
+        if not png.is_file():
+            doc.load_page(n).get_pixmap(dpi=110).save(png)
+        return image_block(png)
+
+    for k, path in enumerate(sorted(folder.iterdir()), start=1):
+        blocks.append(text_block(f"--- Past paper {k} ---"))
+        if path.suffix != ".pdf":
+            if images < max_images:
+                blocks.append(image_block(path))
+                images += 1
+            continue
+        with fitz.open(path) as doc:
+            text = "\n".join(page.get_text("text") for page in doc)
+            if len(text.strip()) >= 150 * doc.page_count:
+                blocks.append(text_block(text[:MAX_PAST_TEXT]))
+                if images < max_images:
+                    blocks.append(page_image(doc, path, 0))
+                    images += 1
+            else:
+                for n in range(min(doc.page_count, MAX_PAST_PAGES)):
+                    if images >= max_images:
+                        break
+                    blocks.append(page_image(doc, path, n))
+                    images += 1
+    return blocks
 
 
-# ---- blueprint -------------------------------------------------------------------
+def material_text(gdir: Path, kind: str, limit: int = MAX_MATERIAL_TEXT) -> str:
+    """The study material as text, for drafting the profile (its topics)."""
+    if kind == "text":
+        try:
+            return (gdir / "source.txt").read_text(encoding="utf-8")[:limit]
+        except OSError:
+            return ""
+    out: list[str] = []
+    size = 0
+    for path in sorted(gdir.glob("source_*.pdf")):
+        with fitz.open(path) as doc:
+            for page in doc:
+                text = page.get_text("text")
+                out.append(f"[{path.stem} p. {page.number + 1}]\n{text}")
+                size += len(text)
+                if size > limit:
+                    return "\n".join(out)[:limit]
+    return "\n".join(out)
+
+
+# ---- the profile: what the exam is like --------------------------------------------
 
 
 def _zh(text: str) -> bool:
-    cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+    cjk = len(re.findall(r"[一-鿿]", text))
     return cjk > 0 and cjk >= len(re.findall(r"[A-Za-z]", text)) / 4
 
 
@@ -198,34 +248,16 @@ def paper_language(language: str, sample: str) -> str:
     return "zh" if _zh(sample) else "en"
 
 
-def local_blueprint(spec: dict[str, Any], title: str, lang: str) -> dict[str, Any]:
-    """The blueprint the table alone gives (no sample papers to read)."""
-    sections = []
-    for i, row in enumerate(spec["types"]):
-        zh, en = TYPE_NAMES[row["type"]]
-        name = (row["description"][:30] if row["type"] == "other" else zh if lang == "zh" else en)
-        heading = f"{CN_NUMBERS[i] if i < 10 else i + 1}、{name}" if lang == "zh" else f"Part {i + 1}. {name}"
-        if row["items"]:
-            points = [it["points"] for it in row["items"]]
-            parts = [it["parts"] for it in row["items"]]
-        else:
-            points = [row["points"]] * row["count"]
-            parts = [""] * row["count"]
-        sections.append({
-            "title": heading, "type": row["type"], "count": row["count"], "points": points, "parts": parts,
-            "format": row["description"], "passage": False,
-        })
-    return {"title": title, "instructions": "", "duration": spec["duration"], "style": "", "sections": sections}
-
-
 # The count and points after a heading, e.g. "（共 4 题，每题 2 分）" or "(5 questions, 10 points)":
-# the paper writes these itself from the blueprint, so a heading must not carry them.
+# the paper writes these itself from the profile, so a heading must not carry them.
 _HEAD_TALLY = re.compile(r"\s*[(（][^()（）]*\d[^()（）]*(分|题|points?|marks?|questions?)[^()（）]*[)）]\s*$", re.I)
 
 
-def clean_blueprint(raw: Any) -> dict[str, Any]:
+def clean_profile(raw: Any) -> dict[str, Any]:
+    """The exam's profile: its structure (sections), what it asks about (topics,
+    with their share), how it asks (style) and how it marks (marking)."""
     if not isinstance(raw, dict):
-        raise ExamError("The blueprint is not an object")
+        raise ExamError("The profile is not an object")
     sections = []
     for s in raw.get("sections") or []:
         if not isinstance(s, dict):
@@ -247,55 +279,72 @@ def clean_blueprint(raw: Any) -> dict[str, Any]:
             "points": points, "parts": parts, "format": _text(s.get("format"), 1000), "passage": bool(s.get("passage")),
         })
     if not sections:
-        raise ExamError("The blueprint has no sections")
+        raise ExamError("The profile has no sections")
     if sum(s["count"] for s in sections) > MAX_QUESTIONS:
         raise ExamError(f"At most {MAX_QUESTIONS} questions per exam")
+    topics = []
+    for t in raw.get("topics") or []:
+        if isinstance(t, dict) and _text(t.get("name"), 120):
+            topics.append({"name": _text(t.get("name"), 120), "weight": _num(t.get("weight"), 0, 100, 0),
+                           "note": _text(t.get("note"), 500)})
     return {
         "title": _text(raw.get("title"), 200), "instructions": _text(raw.get("instructions"), 2000),
-        "duration": int(_num(raw.get("duration"), 0, 600, 0)), "style": _text(raw.get("style"), 2000),
-        "sections": sections,
+        "duration": int(_num(raw.get("duration"), 0, 600, 0)), "style": _text(raw.get("style"), 3000),
+        "marking": _text(raw.get("marking"), 3000), "sections": sections, "topics": topics[:MAX_TOPICS],
     }
 
 
 LANGUAGE_RULES = {
-    "source": "Write in the language of the material (the dominant one if it mixes languages).",
+    # The exam's own language decides: the past papers'; without them, the one the
+    # student describes the exam in; only then the material's.
+    "source": ("Write in the language the exam is set in: that of the past papers; without past papers, "
+               "the language of the student's description; without either, the material's (the dominant "
+               "one if it mixes languages)."),
     "en": "Write in English.",
     "zh": "Write in Simplified Chinese; keep technical terms, names and formulas as they are.",
 }
 
-BLUEPRINT_PROMPT = """You design the structure of a practice exam. You get the student's request (a table of
-question types, possibly incomplete), sample papers they uploaded as images, and the start of the
-study material. Work out the structure the exam should have and output it as JSON, nothing else:
+PROFILE_PROMPT = """You prepare a student for one exam. From what you are given, work out what the exam
+is like, as JSON, nothing else:
 
-{"title": "named after the study material (or the student's title), never the sample's title",
- "instructions": "notes to candidates printed under the title, or empty; do not copy the sample's",
- "duration": minutes or 0, "style": "a few sentences on how the sample papers ask questions:
- wording, difficulty, how options and answers look; what the question writer must imitate",
- "sections": [{"title": "the heading's name and numbering as the samples write it, without the question
-   count or points (the paper adds those)", "type": "single|multiple|truefalse|fill|short|calc|other",
+{"title": "the exam's name (course and kind of exam), from the past papers or the material",
+ "instructions": "notes to candidates printed under the title, as the past papers word them, or empty",
+ "duration": minutes or 0,
+ "sections": [{"title": "the heading's name and numbering as the past papers write it, without the
+   question count or points (the paper adds those)", "type": "single|multiple|truefalse|fill|short|calc|other",
    "count": N, "points": [points of each question], "parts": ["sub-question split such as 4+6, or empty", ...],
-   "format": "how this section's questions look, especially for type other", "passage": true if the
-   section's questions share a reading passage}]}
+   "format": "how this section's questions look", "passage": true if they share a reading passage}],
+ "topics": [{"name": "a topic the exam tests, named as the material names it", "weight": its share of
+   the marks in percent, "note": "what is asked about it and how (e.g. usually a 10-point calculation
+   on ...)"}],
+ "style": "how the questions are worded, how hard they are, what tricks recur: what a question writer
+   must imitate",
+ "marking": "how answers are marked: what a full answer contains, how steps earn points, what loses
+   points; from the past papers' answer keys when they have them, else what such exams usually do"}
 
-Rules: the student's table wins over the samples where it says something (types, counts, points);
-the samples fill in what it leaves open and give the order, headings and style. Types that fit none
-of single, multiple, truefalse, fill, short, calc are "other", with the format described (for example
-matching headings to paragraphs). Section headings follow the samples' numbering style. Questions
-must be answerable from the study material; do not plan listening or speaking sections."""
+What wins: the past papers are the authority on structure, topics, wording and marking; read every
+one and count how often each topic comes up and for how many points. The student's description and
+question table come next: where they state something, follow them, and where they and the past papers
+disagree, the student is describing this year's exam, so follow the student. The study material decides
+what may be asked: list its topics, weighted by the past papers when there are some, else by how much
+the material dwells on them. Without past papers or a description, plan a typical exam for such
+material. Types that fit none of single, multiple, truefalse, fill, short, calc are "other", with the
+format described. Do not plan listening or speaking sections. Between 5 and 25 topics; weights add up to 100."""
 
 
-def blueprint_messages(spec: dict[str, Any], samples: list[dict[str, Any]], material: str,
-                       title: str, language: str) -> list[dict[str, Any]]:
-    request = json.dumps({"title": title, "duration": spec["duration"], "types": spec["types"]}, ensure_ascii=False)
+def profile_messages(spec: dict[str, Any], past: list[dict[str, Any]], material: str,
+                     title: str, language: str) -> list[dict[str, Any]]:
+    table = json.dumps(spec["types"], ensure_ascii=False) if spec["types"] else "(none)"
     content: list[dict[str, Any]] = [
-        text_block(f"Student's request: {request}"),
-        text_block(f"Extra requirements: {spec['extra'] or '(none)'}"),
+        text_block(f"Title the student gave: {title or '(none)'}. Time: {spec['duration'] or 'not given'} minutes."),
+        text_block(f"Student's description of the exam: {spec.get('description') or '(none)'}"),
+        text_block(f"Student's question table: {table}"),
+        text_block(f"Other requirements: {spec['extra'] or '(none)'}"),
         text_block(f"Language: {LANGUAGE_RULES.get(language, LANGUAGE_RULES['source'])}"),
-        text_block(f"Start of the study material:\n{material[:6000]}"),
-        text_block("Sample papers:"),
-        *samples,
+        text_block(f"Study material (text):\n{material or '(no text layer: scanned material)'}"),
     ]
-    return [{"role": "system", "content": BLUEPRINT_PROMPT}, {"role": "user", "content": content}]
+    content += [text_block("Past papers:"), *past] if past else [text_block("Past papers: none.")]
+    return [{"role": "system", "content": PROFILE_PROMPT}, {"role": "user", "content": content}]
 
 
 def parse_json(reply: str) -> Any:
@@ -312,47 +361,53 @@ def parse_json(reply: str) -> Any:
         raise ExamError(f"The model's JSON does not parse: {exc}") from exc
 
 
-# ---- the paper -----------------------------------------------------------------
+# ---- a paper -----------------------------------------------------------------------
 
-PAPER_PROMPT = """You write a practice exam from study material, following an agreed blueprint. Output
-JSON only, nothing else:
+PAPER_PROMPT = """You write a mock exam paper for a student, from their study material, following the
+exam's profile. Output JSON only, nothing else:
 
-{"title": "...", "instructions": "...", "sections": [ one object per blueprint section, same order:
+{"title": "...", "instructions": "...", "sections": [ one object per profile section, same order:
   {"title": "...", "instructions": "one line on how to answer, or empty",
-   "passage": "the shared reading passage when the blueprint says passage, else empty",
-   "questions": [ exactly the blueprint's count ] } ]}
+   "passage": "the shared reading passage when the profile says passage, else empty",
+   "questions": [ exactly the section's count ] } ]}
 
-Questions, by the section's type:
+Questions, by the section's type; every question also has "topic": the name of the profile topic it tests.
   single:    {"stem": "...", "options": ["...", "...", "...", "..."], "answer": "B", "explanation": "..."}
   multiple:  {"stem": "...", "options": [...], "answer": ["A", "C"], "explanation": "..."}
   truefalse: {"stem": "a statement", "answer": true, "explanation": "..."}
   fill:      {"stem": "text with blanks written {{1}}, {{2}} ...", "answer": [["accepted", "variants"], ["..."]],
               "explanation": "..."}  (one list of accepted answers per blank, short answers only)
   short, calc: {"stem": "...", "answer": "model answer", "rubric": ["scoring point (N points)", ...],
-              "parts": [{"stem": "(1) ...", "answer": "...", "rubric": [...]}] when the blueprint gives a
+              "parts": [{"stem": "(1) ...", "answer": "...", "rubric": [...]}] when the profile gives a
               split, else omit parts, "explanation": "..."}
   other:     follow the section's format; if each question has a fixed set of options, give "options" and
              the answer letter(s) as for single/multiple; otherwise as for short.
 
-Rules: every question is answerable from the material, tests understanding rather than copying, and has
-one defensible answer. Options do not give the answer away by length or wording; spread correct
-letters. Do not number questions or options (no "1." or "A." prefixes). Text may use **bold** and line
-breaks; write maths as LaTeX between $...$ (display: $$...$$), math-mode commands only. Explanations
-are short and cite the material's pages as (p. N) when it has pages. Points come from the blueprint;
-do not write them in stems."""
+Rules: the past papers are the standard. Ask about the topics in proportion to their weights, the way
+the past papers ask; write model answers and scoring points the way the profile's marking says. Every
+question is answerable from the material, tests understanding rather than copying, and has one
+defensible answer. Do not reuse a question from the earlier papers listed, nor copy a past paper's
+question; a new question on the same topic is welcome. Options do not give the answer away by length
+or wording; spread correct letters. Do not number questions or options (no "1." or "A." prefixes).
+Text may use **bold** and line breaks; write maths as LaTeX between $...$ (display: $$...$$),
+math-mode commands only. Explanations are short and cite the material's pages as (p. N) when it has
+pages. Points come from the profile; do not write them in stems."""
 
 
-def paper_messages(blueprint: dict[str, Any], spec: dict[str, Any], material: str | list[dict[str, Any]],
-                   samples: list[dict[str, Any]], language: str) -> list[dict[str, Any]]:
+def paper_messages(profile: dict[str, Any], spec: dict[str, Any], material: str | list[dict[str, Any]],
+                   past: list[dict[str, Any]], earlier: list[str], focus: str, language: str) -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = [
-        text_block("Blueprint: " + json.dumps(blueprint, ensure_ascii=False)),
-        text_block(f"Extra requirements: {spec.get('extra') or '(none)'}"),
+        text_block("Exam profile: " + json.dumps(profile, ensure_ascii=False)),
+        text_block(f"Other requirements: {spec.get('extra') or '(none)'}"),
+        text_block(f"For this paper: {focus or '(nothing special)'}"),
         text_block(f"Language: {LANGUAGE_RULES.get(language, LANGUAGE_RULES['source'])}"),
+        text_block("Questions in the student's earlier papers (do not repeat them):\n"
+                   + ("\n".join(f"- {q}" for q in earlier) if earlier else "(none)")),
         text_block("Study material:"),
     ]
     content += [text_block(material)] if isinstance(material, str) else material
-    if samples:
-        content += [text_block("Sample papers, for style only (do not copy their questions):"), *samples[:4]]
+    if past:
+        content += [text_block("Past papers, the standard to match:"), *past]
     return [{"role": "system", "content": PAPER_PROMPT}, {"role": "user", "content": content}]
 
 
@@ -389,7 +444,7 @@ def clean_question(raw: Any, kind: str, points: float, split: str) -> dict[str, 
     stem = _text(raw.get("stem"), 6000)
     if not stem:
         raise ExamError("a question has no stem")
-    q: dict[str, Any] = {"type": kind, "stem": stem, "points": points,
+    q: dict[str, Any] = {"type": kind, "stem": stem, "points": points, "topic": _text(raw.get("topic"), 120),
                          "explanation": _text(raw.get("explanation"), 3000)}
     options = [_OPTION_PREFIX.sub("", str(o)).strip() for o in raw.get("options") or [] if str(o).strip()]
     choice = kind in ("single", "multiple") or (kind == "other" and len(options) >= 2)
@@ -438,7 +493,7 @@ def clean_question(raw: Any, kind: str, points: float, split: str) -> dict[str, 
 
 
 def clean_exam(raw: Any, blueprint: dict[str, Any]) -> dict[str, Any]:
-    """The model's paper, checked against the blueprint; points come from it."""
+    """The model's paper, checked against the profile (`blueprint`); points come from it."""
     if not isinstance(raw, dict) or not isinstance(raw.get("sections"), list):
         raise ExamError("the paper has no sections list")
     plan = blueprint["sections"]
@@ -630,14 +685,15 @@ def render(exam: dict[str, Any], lang: str, answers: bool) -> str:
 # ---- grading open answers --------------------------------------------------------
 
 GRADE_PROMPT = """You grade a student's answer to one exam question against the model answer and its
-scoring points. Give credit for correct reasoning and equivalent wording; take points off for what
-is missing or wrong, following the scoring points. Reply with JSON only:
+scoring points, the way the exam marks. Give credit for correct reasoning and equivalent wording; take
+points off for what is missing or wrong, following the scoring points. Reply with JSON only:
 {"score": points earned (a number from 0 to the maximum, halves allowed), "feedback": "two to five
 sentences in the language of the question: what was right, what was missing or wrong, and the key
 step or fact to remember. Maths as LaTeX between $...$."}"""
 
 
-def grade_messages(q: dict[str, Any], part: int | None, answer: str, image: Path | None) -> list[dict[str, Any]]:
+def grade_messages(q: dict[str, Any], part: int | None, answer: str, image: Path | None,
+                   marking: str = "") -> list[dict[str, Any]]:
     target = q["parts"][part] if part is not None else q
     stem = q["stem"] + (f"\n{target['stem']}" if part is not None else "")
     if part is None and q.get("parts"):
@@ -645,8 +701,9 @@ def grade_messages(q: dict[str, Any], part: int | None, answer: str, image: Path
     reference = target["answer"] or "\n".join(p["answer"] for p in q.get("parts", []))
     rubric = target.get("rubric") or [r for p in q.get("parts", []) for r in p["rubric"]]
     content: list[dict[str, Any]] = [text_block(
-        f"Question ({target['points']} points):\n{stem}\n\nModel answer:\n{reference}\n\n"
-        f"Scoring points:\n" + ("\n".join(f"- {r}" for r in rubric) or "(none given)")
+        (f"How this exam marks: {marking}\n\n" if marking else "")
+        + f"Question ({target['points']} points):\n{stem}\n\nModel answer:\n{reference}\n\n"
+        + "Scoring points:\n" + ("\n".join(f"- {r}" for r in rubric) or "(none given)")
         + f"\n\nStudent's answer:\n{answer or '(see the photo)'}"
     )]
     if image is not None:
@@ -658,9 +715,62 @@ def find_question(exam: dict[str, Any], qid: str) -> dict[str, Any] | None:
     return next((q for s in exam["sections"] for q in s["questions"] if q["id"] == qid), None)
 
 
-def start_grade(gdir: Path, qid: str, part: int | None, answer: str, image: bytes | None) -> dict[str, Any]:
-    exam = _read(exam_dir(gdir) / "exam.json", None)
-    q = find_question(exam, qid) if exam else None
+# ---- papers --------------------------------------------------------------------------
+# Each paper lives in exam/papers/NNN/: exam.json, paper/answers .tex/.pdf, attempts.json.
+
+_PAPER_ID = re.compile(r"\d{3}")
+
+
+def papers_dir(gdir: Path) -> Path:
+    return exam_dir(gdir) / PAPERS_DIR
+
+
+def paper_dir(gdir: Path, pid: str) -> Path:
+    if not _PAPER_ID.fullmatch(pid or ""):
+        raise ExamError("No such paper")
+    return papers_dir(gdir) / pid
+
+
+def paper_ids(gdir: Path) -> list[str]:
+    folder = papers_dir(gdir)
+    if not folder.is_dir():
+        return []
+    return sorted(p.name for p in folder.iterdir() if _PAPER_ID.fullmatch(p.name) and (p / "exam.json").is_file())
+
+
+def next_paper_dir(gdir: Path) -> Path:
+    """A fresh directory for the next paper (numbers are never reused)."""
+    folder = papers_dir(gdir)
+    folder.mkdir(parents=True, exist_ok=True)
+    used = [int(p.name) for p in folder.iterdir() if _PAPER_ID.fullmatch(p.name)]
+    out = folder / f"{max(used, default=0) + 1:03d}"
+    out.mkdir()
+    return out
+
+
+def load_paper(gdir: Path, pid: str) -> dict[str, Any] | None:
+    return _read(paper_dir(gdir, pid) / "exam.json", None)
+
+
+def earlier_questions(gdir: Path, limit: int = 200) -> list[str]:
+    """The stems of the questions already set, newest first, to avoid repeats."""
+    out: list[str] = []
+    for pid in reversed(paper_ids(gdir)):
+        paper = load_paper(gdir, pid) or {"sections": []}
+        out += [re.sub(r"\s+", " ", q["stem"])[:140] for s in paper["sections"] for q in s["questions"]]
+    return out[:limit]
+
+
+def delete_paper(gdir: Path, pid: str) -> None:
+    folder = paper_dir(gdir, pid)
+    if not folder.is_dir():
+        raise ExamError("No such paper")
+    shutil.rmtree(folder)
+
+
+def start_grade(gdir: Path, pid: str, qid: str, part: int | None, answer: str, image: bytes | None) -> dict[str, Any]:
+    paper = load_paper(gdir, pid)
+    q = find_question(paper, qid) if paper else None
     if q is None or q["mode"] != "open":
         raise ExamError("No open question with that id")
     if part is not None and not 0 <= part < len(q.get("parts", [])):
@@ -678,20 +788,22 @@ def start_grade(gdir: Path, qid: str, part: int | None, answer: str, image: byte
         photo.parent.mkdir(parents=True, exist_ok=True)
         photo.write_bytes(clean)
     target = q["parts"][part] if part is not None else q
-    record = {"id": grade_id, "qid": qid, "part": part, "answer": answer[:MAX_TEXT], "status": "pending",
+    record = {"id": grade_id, "paper": pid, "qid": qid, "part": part, "answer": answer[:MAX_TEXT], "status": "pending",
               "score": 0, "max": target["points"], "feedback": "", "at": time.time()}
     with _lock:
         grades = _read(exam_dir(gdir) / "grades.json", {})
         grades[grade_id] = record
         _write(exam_dir(gdir) / "grades.json", grades)
-    _pool.submit(contextvars.copy_context().run, _grade, gdir, grade_id, q, part, answer, photo)
+    marking = (load_profile(gdir) or {}).get("marking", "")
+    _pool.submit(contextvars.copy_context().run, _grade, gdir, grade_id, q, part, answer, photo, marking)
     return record
 
 
-def _grade(gdir: Path, grade_id: str, q: dict[str, Any], part: int | None, answer: str, photo: Path | None) -> None:
+def _grade(gdir: Path, grade_id: str, q: dict[str, Any], part: int | None, answer: str, photo: Path | None,
+           marking: str) -> None:
     target = q["parts"][part] if part is not None else q
     try:
-        reply = create_client().complete(grade_messages(q, part, answer, photo))
+        reply = create_client().complete(grade_messages(q, part, answer, photo, marking))
         data = parse_json(reply)
         update = {"status": "done", "score": _num(data.get("score"), 0, target["points"], 0),
                   "feedback": _text(data.get("feedback"), 3000)}
@@ -713,32 +825,77 @@ def get_grade(gdir: Path, grade_id: str) -> dict[str, Any] | None:
     return record
 
 
-# ---- attempts --------------------------------------------------------------------
-
-
-def add_attempt(gdir: Path, score: float, total: float, answered: int, correct: int) -> list[dict[str, Any]]:
+def add_attempt(gdir: Path, pid: str, score: float, total: float, answered: int, correct: int) -> list[dict[str, Any]]:
+    path = paper_dir(gdir, pid) / "attempts.json"
+    if not path.parent.is_dir():
+        raise ExamError("No such paper")
     with _lock:
-        attempts = _read(exam_dir(gdir) / "attempts.json", [])
+        attempts = _read(path, [])
         attempts.append({"score": _num(score, 0, 100000, 0), "total": _num(total, 0, 100000, 0),
                          "answered": int(answered), "correct": int(correct), "at": time.time()})
         attempts = attempts[-50:]
-        _write(exam_dir(gdir) / "attempts.json", attempts)
+        _write(path, attempts)
     return attempts
 
 
-def state(gdir: Path) -> dict[str, Any]:
+# ---- the exam as a whole ---------------------------------------------------------------
+
+
+def migrate(gdir: Path) -> None:
+    """Exams made before papers existed: their blueprint is the profile, their
+    one paper becomes paper 001, their sample papers are past papers."""
     d = exam_dir(gdir)
-    exam = _read(d / "exam.json", None)
-    blueprint = _read(d / "blueprint.json", None)
+    with _lock:
+        if (d / "blueprint.json").is_file() and not (d / PROFILE_FILE).is_file():
+            old = _read(d / "blueprint.json", None)
+            if old:
+                _write(d / PROFILE_FILE, {**old, "topics": old.get("topics", []), "marking": old.get("marking", "")})
+            (d / "blueprint.json").unlink()
+        if (d / "exam.json").is_file():
+            target = papers_dir(gdir) / "001"
+            target.mkdir(parents=True, exist_ok=True)
+            for name in ("exam.json", "attempts.json", "paper.tex", "paper.pdf", "answers.tex", "answers.pdf"):
+                if (d / name).is_file():
+                    os.replace(d / name, target / name)
+            for stale in d.glob("*.aux"):
+                stale.unlink()
+            for pattern in ("paper.*", "answers.*"):
+                for stale in d.glob(pattern):
+                    stale.unlink()
+        if (d / "samples").is_dir() and not (d / PAST_DIR).exists():
+            os.replace(d / "samples", d / PAST_DIR)
+            for k, path in enumerate(sorted((d / PAST_DIR).iterdir()), start=1):
+                path.rename(path.with_name(f"past-{k:02d}{path.suffix}"))
+            shutil.rmtree(d / "sample_pages", ignore_errors=True)
+
+
+def load_profile(gdir: Path) -> dict[str, Any] | None:
+    return _read(exam_dir(gdir) / PROFILE_FILE, None)
+
+
+def paper_summary(gdir: Path, pid: str) -> dict[str, Any]:
+    paper = load_paper(gdir, pid) or {"sections": [], "title": "", "total": 0}
+    folder = paper_dir(gdir, pid)
+    attempts = _read(folder / "attempts.json", [])
+    return {
+        "id": pid, "title": paper["title"], "total": paper.get("total", 0),
+        "questions": sum(len(s["questions"]) for s in paper["sections"]),
+        "created": (folder / "exam.json").stat().st_mtime, "attempts": attempts,
+        "focus": paper.get("focus", ""),
+    }
+
+
+def state(gdir: Path) -> dict[str, Any]:
+    migrate(gdir)
+    d = exam_dir(gdir)
+    profile = load_profile(gdir)
+    ids = paper_ids(gdir)
     return {
         "spec": _read(d / "spec.json", None),
-        "blueprint": blueprint,
-        "exam": exam,
-        "stage": "ready" if exam else "blueprint" if blueprint else "drafting",
-        "paper": (d / "paper.pdf").is_file(),
-        "answers": (d / "answers.pdf").is_file(),
-        "attempts": _read(d / "attempts.json", []),
-        "samples": sorted(p.name for p in (d / SAMPLE_DIR).iterdir()) if (d / SAMPLE_DIR).is_dir() else [],
+        "profile": profile,
+        "papers": [paper_summary(gdir, pid) for pid in ids],
+        "stage": "ready" if ids else "profile" if profile else "drafting",
+        "past": sorted(p.name for p in (d / PAST_DIR).iterdir()) if (d / PAST_DIR).is_dir() else [],
     }
 
 

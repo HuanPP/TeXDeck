@@ -58,13 +58,14 @@ function markObjective(q: ExamQuestion, choice: string[], blanks: string[], trut
 
 type Props = {
   id: string;
+  pid: string; // the paper
   exam: Exam;
   only?: string[]; // question ids to practise (retrying mistakes); all when absent
   onExit: () => void;
   onFinish: (summary: { score: number; total: number; answered: number; correct: number; wrong: string[]; full: boolean }) => void;
 };
 
-export default function ExamPractice({ id, exam, only, onExit, onFinish }: Props) {
+export default function ExamPractice({ id, pid, exam, only, onExit, onFinish }: Props) {
   const items = useMemo<Item[]>(() => exam.sections.flatMap((s) => s.questions
     .filter((q) => !only || only.includes(q.id))
     .map((q) => ({ q, section: s.title, passage: s.passage }))), [exam, only]);
@@ -121,8 +122,8 @@ export default function ExamPractice({ id, exam, only, onExit, onFinish }: Props
     try {
       // One grade per part when the question has parts; else one for the whole.
       const asks = parts.length
-        ? parts.map((_, i) => gradeAnswer(id, q.id, i, texts[i] ?? "", i === 0 ? photo ?? undefined : undefined))
-        : [gradeAnswer(id, q.id, null, texts[0] ?? "", photo ?? undefined)];
+        ? parts.map((_, i) => gradeAnswer(id, pid, q.id, i, texts[i] ?? "", i === 0 ? photo ?? undefined : undefined))
+        : [gradeAnswer(id, pid, q.id, null, texts[0] ?? "", photo ?? undefined)];
       let grades = await Promise.all(asks);
       while (grades.some((g) => g.status === "pending")) {
         await new Promise((r) => window.setTimeout(r, 2000));

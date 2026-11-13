@@ -32,10 +32,11 @@ export default function LearnHub() {
         </Link>
         <Link to="/learn/exams" className={card}>
           <ClipboardCheck className="h-8 w-8 text-emerald-600" />
-          <h2 className="text-2xl text-[var(--color-heading)]">Practice exam</h2>
+          <h2 className="text-2xl text-[var(--color-heading)]">Exams</h2>
           <p className="text-sm text-slate-600">
-            Turn your material into an exam paper with the question types and points you choose, or modelled on a
-            sample paper. Print it with its answer key, or answer it here one question at a time.
+            Prepare for an exam: from your material and its past papers (or your description of it), mock papers
+            as close to the real thing as can be. Print them with their answer keys, or answer them here one
+            question at a time.
           </p>
           <span className="mt-auto text-xs text-slate-400">
             {counts ? `${counts.exam} ${counts.exam === 1 ? "exam" : "exams"}` : " "}

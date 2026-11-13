@@ -353,35 +353,47 @@ export const signIn = (username: string, password: string) =>
   });
 export const signOut = () => requestJson<Session>("/api/auth/session", { method: "DELETE" });
 
-// Learn: practice exams (see server/app/exam.py).
+// Learn: exams and their mock papers (see server/app/exam.py).
 export type QuestionType = "single" | "multiple" | "truefalse" | "fill" | "short" | "calc" | "other";
 export type SpecRow = {
   type: QuestionType; count: number; points: number;
   items?: { points: number; parts: string }[]; // short/calc/other: each question's points and split
   description?: string; // other: what the questions look like
 };
-export type ExamSpec = { types: SpecRow[]; duration: number; extra: string };
+export type ExamSpec = { types: SpecRow[]; description: string; duration: number; extra: string };
 export type BlueprintSection = {
   title: string; type: QuestionType; count: number; points: number[]; parts: string[]; format: string; passage: boolean;
 };
-export type Blueprint = { title: string; instructions: string; duration: number; style: string; sections: BlueprintSection[] };
+export type Topic = { name: string; weight: number; note: string };
+// What the exam is like: structure, topics, wording, marking.
+export type Profile = {
+  title: string; instructions: string; duration: number; style: string; marking: string;
+  sections: BlueprintSection[]; topics: Topic[];
+};
 export type ExamPart = { stem: string; answer: string; rubric: string[]; points: number };
 export type ExamQuestion = {
   id: string; number: number; type: QuestionType; mode: "single" | "multiple" | "truefalse" | "fill" | "open";
-  stem: string; points: number; explanation: string; options?: string[];
+  stem: string; points: number; explanation: string; topic?: string; options?: string[];
   answer: string | string[] | boolean | string[][]; rubric?: string[]; parts?: ExamPart[];
 };
 export type ExamSection = { title: string; type: QuestionType; instructions: string; passage: string; questions: ExamQuestion[] };
-export type Exam = { title: string; instructions: string; duration: number; total: number; sections: ExamSection[] };
 export type Attempt = { score: number; total: number; answered: number; correct: number; at: number };
+export type PaperSummary = {
+  id: string; title: string; total: number; questions: number; created: number; attempts: Attempt[]; focus: string;
+};
+export type Exam = PaperSummary & { instructions: string; duration: number; sections: ExamSection[] };
 export type ExamState = {
-  spec: ExamSpec | null; blueprint: Blueprint | null; exam: Exam | null;
-  stage: "drafting" | "blueprint" | "ready"; paper: boolean; answers: boolean; attempts: Attempt[]; samples: string[];
+  spec: ExamSpec | null; profile: Profile | null; papers: PaperSummary[];
+  stage: "drafting" | "profile" | "ready"; past: string[];
 };
 export type Grade = { id: string; qid: string; part: number | null; status: "pending" | "done" | "error"; score: number; max: number; feedback: string };
 
+const exam = (id: string) => `/api/generations/${id}/exam`;
+const json = (method: string, body: unknown): RequestInit =>
+  ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
 export function createExam(input: {
-  title: string; language: SlideLanguage; spec: ExamSpec; files?: File[]; source_text?: string; samples: File[];
+  title: string; language: SlideLanguage; spec: ExamSpec; files?: File[]; source_text?: string; past: File[];
 }): Promise<{ id: string }> {
   const form = new FormData();
   form.append("title", input.title);
@@ -389,28 +401,30 @@ export function createExam(input: {
   form.append("spec", JSON.stringify(input.spec));
   if (input.source_text) form.append("source_text", input.source_text);
   for (const f of input.files ?? []) form.append("files", f);
-  for (const f of input.samples) form.append("samples", f);
+  for (const f of input.past) form.append("past", f);
   return requestJson<{ id: string }>("/api/exams", { method: "POST", body: form });
 }
-export const getExam = (id: string) => requestJson<ExamState>(`/api/generations/${id}/exam`);
-export const saveBlueprint = (id: string, blueprint: Blueprint) =>
-  requestJson<Blueprint>(`/api/generations/${id}/exam/blueprint`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blueprint }),
-  });
-export const redraftBlueprint = (id: string) => requestJson<void>(`/api/generations/${id}/exam/redraft`, { method: "POST" });
-export const writePaper = (id: string) => requestJson<void>(`/api/generations/${id}/exam/paper`, { method: "POST" });
-export const examPdfUrl = (id: string, name: "paper" | "answers", download = false) =>
-  `/api/generations/${id}/exam/${name}.pdf${download ? "?download=true" : ""}`;
-export function gradeAnswer(id: string, qid: string, part: number | null, answer: string, image?: File): Promise<Grade> {
+export const getExam = (id: string) => requestJson<ExamState>(exam(id));
+export const saveProfile = (id: string, profile: Profile) => requestJson<Profile>(`${exam(id)}/profile`, json("PUT", { profile }));
+export const redraftProfile = (id: string) => requestJson<void>(`${exam(id)}/redraft`, { method: "POST" });
+export function addPastPapers(id: string, files: File[]): Promise<void> {
+  const form = new FormData();
+  for (const f of files) form.append("past", f);
+  return requestJson<void>(`${exam(id)}/past`, { method: "POST", body: form });
+}
+export const newPaper = (id: string, focus: string) => requestJson<void>(`${exam(id)}/papers`, json("POST", { focus }));
+export const getPaper = (id: string, pid: string) => requestJson<Exam>(`${exam(id)}/papers/${pid}`);
+export const deletePaper = (id: string, pid: string) => requestJson<void>(`${exam(id)}/papers/${pid}`, { method: "DELETE" });
+export const examPdfUrl = (id: string, pid: string, name: "paper" | "answers", download = false) =>
+  `${exam(id)}/papers/${pid}/${name}.pdf${download ? "?download=true" : ""}`;
+export function gradeAnswer(id: string, pid: string, qid: string, part: number | null, answer: string, image?: File): Promise<Grade> {
   const form = new FormData();
   form.append("qid", qid);
   form.append("part", String(part ?? -1));
   form.append("answer", answer);
   if (image) form.append("image", image);
-  return requestJson<Grade>(`/api/generations/${id}/exam/grade`, { method: "POST", body: form });
+  return requestJson<Grade>(`${exam(id)}/papers/${pid}/grade`, { method: "POST", body: form });
 }
-export const getGrade = (id: string, grade: string) => requestJson<Grade>(`/api/generations/${id}/exam/grade/${grade}`);
-export const saveAttempt = (id: string, a: Omit<Attempt, "at">) =>
-  requestJson<Attempt[]>(`/api/generations/${id}/exam/attempts`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a),
-  });
+export const getGrade = (id: string, grade: string) => requestJson<Grade>(`${exam(id)}/grade/${grade}`);
+export const saveAttempt = (id: string, pid: string, a: Omit<Attempt, "at">) =>
+  requestJson<Attempt[]>(`${exam(id)}/papers/${pid}/attempts`, json("POST", a));
