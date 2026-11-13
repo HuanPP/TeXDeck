@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Download, FileText, ImagePlus, Package, Presentation, RotateCw } from "lucide-react";
+import { ChevronDown, Download, FileText, ImagePlus, Package, Presentation, RotateCw } from "lucide-react";
 import {
   addFigures,
   applyChanges,
@@ -82,6 +82,7 @@ export default function Generation() {
   const [frames, setFrames] = useState<FrameItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [moreOpen, setMoreOpen] = useState(false); // the notebook's Export menu
   const [pdfBust, setPdfBust] = useState(0);
   const [editText, setEditText] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
@@ -626,35 +627,42 @@ export default function Generation() {
               {llmCalls > 0 ? ` · ${meta.llm_model || "LLM"} · ${fmtTokens(meta.llm_prompt_tokens)} in / ${fmtTokens(meta.llm_completion_tokens)} out` : ""}
             </span>
           </div>
-          <div className="flex flex-wrap gap-2 [&>*]:py-1.5">
-          {succeeded && (
-            <>
-              <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
-                <Download className="h-4 w-4" /> PDF
-              </a>
-              {!notes && (
-                <a className="btn-secondary text-sm" href={pptxUrl(id, myFonts ?? undefined)} download
-                  title="Editable PowerPoint: text boxes over the PDF's own graphics">
-                  <Presentation className="h-4 w-4" /> PPTX
-                </a>
+          {succeeded ? (
+            <div className="relative shrink-0">
+              <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-sm text-slate-500 hover:text-slate-800"
+                aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
+                <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              {moreOpen && <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />}
+              {moreOpen && (
+                <div role="menu" className="absolute right-0 top-full z-40 w-48 border border-[var(--color-border)] bg-white py-1 text-sm shadow-lg"
+                  onClick={() => setMoreOpen(false)}>
+                  <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={pdfUrl(id)} download>
+                    <Download className="h-4 w-4" /> Notes PDF
+                  </a>
+                  <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={texUrl(id)} download="main.tex">
+                    <FileText className="h-4 w-4" /> main.tex
+                  </a>
+                  <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={bundleUrl(id)} download>
+                    <Package className="h-4 w-4" /> Overleaf zip
+                  </a>
+                  <div className="my-1 border-t border-[var(--color-border)]" />
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    disabled={busy || regenerating} onClick={() => void handleRegenerate()}>
+                    <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
+                    {regenerating ? "Regenerating…" : "Regenerate notes"}
+                  </button>
+                </div>
               )}
-              <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
-                <FileText className="h-4 w-4" /> main.tex
-              </a>
-              <a className="btn-secondary text-sm" href={bundleUrl(id)} download>
-                <Package className="h-4 w-4" /> Overleaf zip
-              </a>
-            </>
-          )}
-          {!(failed && modelError) && (
-            <button type="button" className="btn-secondary text-sm"
+            </div>
+          ) : !(failed && modelError) && (
+            <button type="button" className="btn-secondary py-1.5 text-sm"
               disabled={busy || meta.status === "running" || regenerating}
               onClick={() => void handleRegenerate()}>
               <RotateCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
               {regenerating ? "Regenerating…" : "Regenerate"}
             </button>
           )}
-          </div>
         </div>
       ) : (
       <div className="flex flex-wrap items-start justify-between gap-4">
