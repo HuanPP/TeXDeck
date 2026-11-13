@@ -28,16 +28,19 @@ p { line-height: 1.7; }
   border: 1px solid var(--color-border);
 }
 
-.input-field {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  padding: 0.75rem 1rem;
-  width: 100%;
-  color: var(--color-on-surface);
-  font-family: inherit;
+/* In the components layer, so utilities on a field (w-16, px-2, rounded-full) take effect. */
+@layer components {
+  .input-field {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    padding: 0.75rem 1rem;
+    width: 100%;
+    color: var(--color-on-surface);
+    font-family: inherit;
+  }
+  .input-field:focus { outline: none; border-color: var(--color-primary); }
 }
-.input-field:focus { outline: none; border-color: var(--color-primary); }
 
 .btn-primary, .btn-secondary {
   display: inline-flex;
