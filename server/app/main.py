@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import chat, deck, figures, fonts, layout, memory, notes_map, pdf, progress, store, tasks
+from . import chat, deck, exam, figures, fonts, layout, memory, notes_map, pdf, progress, store, tasks
 from .config import settings
 from .deck import CompileError, DeckError, DeckRequest
 from .edit import (
@@ -1668,6 +1668,8 @@ def api_refine_deck(gen_id: str, body: RefineBody) -> Response:
 @app.post("/api/generations/{gen_id}/regenerate")
 def api_regenerate(gen_id: str) -> JSONResponse:
     old_meta = _load(gen_id)
+    if old_meta.kind == "exam":
+        raise HTTPException(400, detail="Exams are rewritten from their blueprint")
     _require_model()
     old_dir = store.generation_dir(gen_id)
     if old_meta.source_kind == "pdf":
@@ -1708,6 +1710,284 @@ def api_regenerate(gen_id: str) -> JSONResponse:
 
     tasks.start(new_id, job)
     return JSONResponse({"id": new_id}, status_code=202)
+
+
+# ---- Learn: practice exams (see exam.py) ----
+
+
+class BlueprintBody(BaseModel):
+    blueprint: dict[str, Any]
+
+
+class AttemptBody(BaseModel):
+    score: float
+    total: float
+    answered: int = 0
+    correct: int = 0
+
+
+def _exam_meta(gen_id: str) -> GenerationMeta:
+    meta = _load(gen_id)
+    if meta.kind != "exam":
+        raise HTTPException(400, detail="Not an exam")
+    return meta
+
+
+def _exam_material_excerpt(gdir: Path, meta: GenerationMeta) -> str:
+    """The material's opening text: enough for the blueprint to know the subject."""
+    if meta.source_kind == "text":
+        return (gdir / "source.txt").read_text(encoding="utf-8")[:6000]
+    out = []
+    for path in sorted(gdir.glob("source_*.pdf")):
+        with fitz.open(path) as doc:
+            for page in doc:
+                out.append(page.get_text("text"))
+                if sum(map(len, out)) > 6000:
+                    return "".join(out)[:6000]
+    return "".join(out)[:6000]
+
+
+def _exam_ask_json(client: Any, gdir: Path, stem: str, messages: list[dict[str, Any]],
+                   clean: Callable[[Any], Any]) -> Any:
+    """One model call for JSON, checked by `clean`; one retry quoting the problem."""
+    reply = client.complete(messages)
+    _dump_llm(gdir, stem, messages, reply)
+    try:
+        return clean(exam.parse_json(reply))
+    except exam.ExamError as first:
+        retry = messages + [
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": f"That output has a problem: {first}. Output the complete JSON again, fixed. JSON only."},
+        ]
+        reply = client.complete(retry)
+        _dump_llm(gdir, f"{stem}_retry", retry, reply)
+        return clean(exam.parse_json(reply))
+
+
+def _run_exam_blueprint(gen_id: str, report: ProgressCallback) -> None:
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    usage = UsageTally()
+    try:
+        spec = exam.load(gdir, "spec.json")
+        report("Reading the sample papers", 10)
+        messages = exam.blueprint_messages(spec, exam.sample_blocks(gdir), _exam_material_excerpt(gdir, meta),
+                                           meta.title, meta.language)
+        report("Working out the paper's structure", 30)
+        client = create_client(on_usage=usage.add)
+        blueprint = _exam_ask_json(client, gdir, "blueprint", messages, exam.clean_blueprint)
+        exam.save(gdir, "blueprint.json", blueprint)
+        if not meta.title:
+            meta.title = blueprint["title"]
+        _apply_usage(meta, usage)
+        meta.status, meta.error = "review", ""
+        store.save_meta(meta)
+        report("Done", 100)
+    except Exception as exc:
+        _apply_usage(meta, usage)
+        _fail(meta, exc)
+        raise
+
+
+def _run_exam_paper(gen_id: str, report: ProgressCallback) -> None:
+    meta = store.load_meta(gen_id)
+    gdir = store.generation_dir(gen_id)
+    usage = UsageTally()
+    try:
+        spec = exam.load(gdir, "spec.json")
+        blueprint = exam.load(gdir, "blueprint.json")
+        documents: list[pdf.PdfDocument] = []
+        source_text = ""
+        if meta.source_kind == "pdf":
+            paths = sorted(gdir.glob("source_*.pdf"))
+            documents = pdf.load_pdfs(
+                list(zip(paths, meta.source_names, strict=True)), gdir,
+                progress=lambda stage, pct: report(stage, 5 + pct * 35 // 100), on_usage=usage.add,
+            )
+            meta.page_count = sum(len(d.pages) for d in documents)
+        else:
+            source_text = (gdir / "source.txt").read_text(encoding="utf-8")
+        material = deck._material_content(
+            DeckRequest(template_key="exam", title=meta.title, source_text=source_text), documents, None)
+        messages = exam.paper_messages(blueprint, spec, material, exam.sample_blocks(gdir), meta.language)
+        report("Writing the questions with the model", 45)
+        client = create_client(on_usage=usage.add)
+        paper = _exam_ask_json(client, gdir, "paper", messages, lambda raw: exam.clean_exam(raw, blueprint))
+        exam.save(gdir, "exam.json", paper)
+        sample = paper["title"] + "".join(q["stem"] for s in paper["sections"] for q in s["questions"][:3])
+        lang = exam.paper_language(meta.language, sample)
+        folder = exam.exam_dir(gdir)
+        for i, (name, answers) in enumerate((("paper", False), ("answers", True))):
+            report("Typesetting the paper" if not answers else "Typesetting the answer key", 75 + i * 10)
+            tex_path = folder / f"{name}.tex"
+            tex_path.write_text(exam.render(paper, lang, answers), encoding="utf-8")
+            deck.compile_tex(tex_path, client=client, llm_dump_dir=gdir / "llm")
+        if not meta.title:
+            meta.title = paper["title"]
+        meta.frame_count = sum(len(s["questions"]) for s in paper["sections"])
+        _apply_usage(meta, usage)
+        meta.status, meta.error = "succeeded", ""
+        store.save_meta(meta)
+        if not settings.keep_page_renders:
+            shutil.rmtree(gdir / "pages", ignore_errors=True)
+            shutil.rmtree(gdir / "thumbs", ignore_errors=True)
+        report("Done", 100)
+    except Exception as exc:
+        _apply_usage(meta, usage)
+        _fail(meta, exc)
+        raise
+
+
+def _start_exam_job(gen_id: str, run: Callable[[str, ProgressCallback], None]) -> None:
+    meta = store.load_meta(gen_id)
+    meta.status, meta.error, meta.error_kind = "running", "", ""
+    store.save_meta(meta)
+    try:
+        tasks.start(gen_id, lambda report: run(gen_id, report))
+    except tasks.TaskBusy as e:
+        raise HTTPException(409, detail=str(e)) from e
+
+
+@app.post("/api/exams")
+async def api_create_exam(
+    title: str = Form(""),
+    language: str = Form("source"),
+    spec: str = Form("{}"),
+    source_text: str = Form(""),
+    files: list[UploadFile] = File(default=[]),
+    samples: list[UploadFile] = File(default=[]),
+) -> JSONResponse:
+    """A practice exam: the blueprint is drafted first (by the model when there
+    are sample papers to read), then the reader approves it."""
+    if language not in exam.LANGUAGE_RULES:
+        raise HTTPException(400, detail=f"Unknown language: {language}")
+    _require_model()
+    uploads = [f for f in files if f.filename]
+    if len(uploads) > MAX_UPLOAD_FILES:
+        raise HTTPException(400, detail=f"At most {MAX_UPLOAD_FILES} PDF files per exam")
+    contents = [await _read_upload_capped(f) for f in uploads]
+    if any(not c for c in contents):
+        raise HTTPException(400, detail="An uploaded PDF is empty")
+    if not contents and not source_text.strip():
+        raise HTTPException(400, detail="Upload at least one PDF or provide pasted text")
+    sample_files = [(f.filename or "sample", await _read_upload_capped(f)) for f in samples if f.filename]
+    try:
+        clean_spec = exam.clean_spec(json.loads(spec or "{}"), len(sample_files))
+    except ValueError as e:  # ExamError, or JSON that does not parse
+        raise HTTPException(400, detail=str(e)) from e
+    meta = store.new_generation(
+        title=title.strip(), template_key="exam", template_name="Exam", instruction=clean_spec["extra"],
+        source_kind="pdf" if contents else "text", source_names=[f.filename or "source.pdf" for f in uploads],
+        language=language, owner=auth.current_user.get() or "", kind="exam",
+    )
+    gdir = store.generation_dir(meta.id)
+    for i, data in enumerate(contents, start=1):
+        (gdir / f"source_{i:02d}.pdf").write_bytes(data)
+    if not contents:
+        (gdir / "source.txt").write_text(source_text, encoding="utf-8")
+    try:
+        exam.store_samples(gdir, sample_files)
+    except exam.ExamError as e:
+        store.delete_generation(meta.id)
+        raise HTTPException(400, detail=str(e)) from e
+    exam.save(gdir, "spec.json", clean_spec)
+    if sample_files:
+        _start_exam_job(meta.id, _run_exam_blueprint)
+    else:
+        lang = exam.paper_language(language, _exam_material_excerpt(gdir, meta))
+        exam.save(gdir, "blueprint.json", exam.local_blueprint(clean_spec, meta.title, lang))
+        meta.status = "review"
+        store.save_meta(meta)
+    return JSONResponse({"id": meta.id}, status_code=202)
+
+
+@app.get("/api/generations/{gen_id}/exam")
+def api_exam(gen_id: str) -> dict[str, Any]:
+    _exam_meta(gen_id)
+    return exam.state(store.generation_dir(gen_id))
+
+
+@app.put("/api/generations/{gen_id}/exam/blueprint")
+def api_exam_blueprint(gen_id: str, body: BlueprintBody) -> dict[str, Any]:
+    _exam_meta(gen_id)
+    if tasks.is_running(gen_id):
+        raise HTTPException(409, detail="Wait for the running job to finish")
+    try:
+        blueprint = exam.clean_blueprint(body.blueprint)
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    exam.save(store.generation_dir(gen_id), "blueprint.json", blueprint)
+    return blueprint
+
+
+@app.post("/api/generations/{gen_id}/exam/redraft", status_code=202)
+def api_exam_redraft(gen_id: str) -> dict[str, Any]:
+    """Draft the blueprint again from the samples."""
+    _exam_meta(gen_id)
+    _require_model()
+    if not exam.state(store.generation_dir(gen_id))["samples"]:
+        raise HTTPException(400, detail="No sample papers to draft from")
+    _start_exam_job(gen_id, _run_exam_blueprint)
+    return {"id": gen_id}
+
+
+@app.post("/api/generations/{gen_id}/exam/paper", status_code=202)
+def api_exam_paper(gen_id: str) -> dict[str, Any]:
+    """Write the paper from the blueprint (again: new questions each time)."""
+    _exam_meta(gen_id)
+    _require_model()
+    if exam.load(store.generation_dir(gen_id), "blueprint.json") is None:
+        raise HTTPException(400, detail="The blueprint is not ready")
+    _start_exam_job(gen_id, _run_exam_paper)
+    return {"id": gen_id}
+
+
+@app.get("/api/generations/{gen_id}/exam/{name}.pdf")
+def api_exam_pdf(gen_id: str, name: str, download: bool = False) -> FileResponse:
+    meta = _exam_meta(gen_id)
+    if name not in ("paper", "answers"):
+        raise HTTPException(404, detail="No such file")
+    path = exam.exam_dir(store.generation_dir(gen_id)) / f"{name}.pdf"
+    if not path.is_file():
+        raise HTTPException(404, detail="Not typeset yet")
+    label = "answers" if name == "answers" else "exam"
+    filename = f"{(meta.title or 'exam')[:60]} - {label}.pdf"
+    return FileResponse(path, media_type="application/pdf",
+                        filename=filename if download else None,
+                        content_disposition_type="attachment" if download else "inline")
+
+
+@app.post("/api/generations/{gen_id}/exam/grade", status_code=202)
+async def api_exam_grade(
+    gen_id: str,
+    qid: str = Form(...),
+    part: int = Form(-1),
+    answer: str = Form(""),
+    image: UploadFile | None = File(default=None),
+) -> dict[str, Any]:
+    """Grade an answer to an open question; poll the returned grade."""
+    _exam_meta(gen_id)
+    _require_model()
+    data = await image.read(figures.MAX_FIGURE_BYTES + 1) if image is not None and image.filename else None
+    try:
+        return exam.start_grade(store.generation_dir(gen_id), qid, None if part < 0 else part, answer, data)
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.get("/api/generations/{gen_id}/exam/grade/{grade_id}")
+def api_exam_grade_result(gen_id: str, grade_id: str) -> dict[str, Any]:
+    _exam_meta(gen_id)
+    record = exam.get_grade(store.generation_dir(gen_id), grade_id)
+    if record is None:
+        raise HTTPException(404, detail="No such grade")
+    return record
+
+
+@app.post("/api/generations/{gen_id}/exam/attempts")
+def api_exam_attempt(gen_id: str, body: AttemptBody) -> list[dict[str, Any]]:
+    _exam_meta(gen_id)
+    return exam.add_attempt(store.generation_dir(gen_id), body.score, body.total, body.answered, body.correct)
 
 
 @app.websocket("/ws/generations/{gen_id}")
