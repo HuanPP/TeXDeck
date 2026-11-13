@@ -1725,6 +1725,17 @@ class PaperBody(BaseModel):
     focus: str = ""  # what this paper should stress, in the reader's words
 
 
+class DrillBody(BaseModel):
+    topic: str
+    type: str
+    count: int = 12
+
+
+class ResultBody(BaseModel):
+    qid: str
+    score: float
+
+
 class AttemptBody(BaseModel):
     score: float
     total: float
@@ -1782,7 +1793,10 @@ def _run_exam_profile(gen_id: str, report: ProgressCallback) -> None:
         raise
 
 
-def _run_exam_paper(gen_id: str, focus: str, report: ProgressCallback) -> None:
+def _run_exam_paper(gen_id: str, focus: str, report: ProgressCallback,
+                    drill: dict[str, Any] | None = None) -> None:
+    """A mock paper, or with `drill` ({topic, type, count}) a drill: one type of
+    question on one topic, getting harder."""
     meta = store.load_meta(gen_id)
     gdir = store.generation_dir(gen_id)
     usage = UsageTally()
@@ -1803,12 +1817,19 @@ def _run_exam_paper(gen_id: str, focus: str, report: ProgressCallback) -> None:
             source_text = (gdir / "source.txt").read_text(encoding="utf-8")
         material = deck._material_content(
             DeckRequest(template_key="exam", title=meta.title, source_text=source_text), documents, None)
+        if drill:
+            lang = exam.paper_language(meta.language, profile["title"] + "".join(t["name"] for t in profile["topics"]))
+            profile = exam.drill_profile(profile, drill["topic"], drill["type"], drill["count"], lang)
         messages = exam.paper_messages(profile, spec, material, exam.past_blocks(gdir, max_images=8),
-                                       exam.earlier_questions(gdir), focus, meta.language)
+                                       exam.earlier_questions(gdir), focus, meta.language, exam.standing(gdir),
+                                       exam.DRILL_PROMPT if drill else "")
         report("Writing the questions with the model", 45)
         client = create_client(on_usage=usage.add)
-        paper = _exam_ask_json(client, gdir, "paper", messages, lambda raw: exam.clean_exam(raw, profile))
+        paper = _exam_ask_json(client, gdir, "drill" if drill else "paper", messages,
+                               lambda raw: exam.clean_exam(raw, profile))
         paper["focus"] = focus
+        if drill:
+            paper["drill"] = drill
         folder = exam.next_paper_dir(gdir)
         (folder / "exam.json").write_text(json.dumps(paper, ensure_ascii=False, indent=1), encoding="utf-8")
         sample = paper["title"] + "".join(q["stem"] for s in paper["sections"] for q in s["questions"][:3])
@@ -1948,6 +1969,36 @@ def api_exam_new_paper(gen_id: str, body: PaperBody) -> dict[str, Any]:
     focus = body.focus.strip()[:1000]
     _start_exam_job(gen_id, lambda report: _run_exam_paper(gen_id, focus, report))
     return {"id": gen_id}
+
+
+@app.post("/api/generations/{gen_id}/exam/drills", status_code=202)
+def api_exam_new_drill(gen_id: str, body: DrillBody) -> dict[str, Any]:
+    """A drill: `count` questions of one type on one topic, from plain to past-paper hard."""
+    _exam_meta(gen_id)
+    _require_model()
+    profile = exam.load_profile(store.generation_dir(gen_id))
+    if profile is None:
+        raise HTTPException(400, detail="The profile is not ready")
+    drill = {"topic": body.topic.strip()[:120], "type": body.type, "count": body.count}
+    if not drill["topic"]:
+        raise HTTPException(400, detail="Choose a topic")
+    try:
+        exam.drill_profile(profile, drill["topic"], drill["type"], drill["count"], "en")  # checks type and count
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    _start_exam_job(gen_id, lambda report: _run_exam_paper(gen_id, "", report, drill))
+    return {"id": gen_id}
+
+
+@app.post("/api/generations/{gen_id}/exam/papers/{pid}/results")
+def api_exam_result(gen_id: str, pid: str, body: ResultBody) -> dict[str, Any]:
+    """One answered question, for the topic's mastery."""
+    _exam_meta(gen_id)
+    _paper_dir(gen_id, pid)
+    try:
+        return exam.record_result(store.generation_dir(gen_id), pid, body.qid, body.score)
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
 
 
 def _paper_dir(gen_id: str, pid: str) -> Path:

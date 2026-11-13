@@ -244,3 +244,42 @@ def test_an_exam_from_before_papers_is_migrated(client: TestClient, monkeypatch:
     assert state["profile"]["topics"] and [p["id"] for p in state["papers"]] == ["001"]
     assert state["past"] == ["past-01.png"]
     assert (d / "papers" / "001" / "paper.pdf").read_bytes() == b"%PDF-old" and not (d / "blueprint.json").exists()
+
+
+# ---- results, mastery, drills -------------------------------------------------------------
+
+
+def test_results_build_a_recency_weighted_mastery_and_reach_the_next_paper(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_xelatex_ok: dict[str, int],
+) -> None:
+    gid = _create(client, monkeypatch)
+    _write_paper(gid, monkeypatch, json.dumps(_paper()))
+    post = lambda qid, score: client.post(f"/api/generations/{gid}/exam/papers/001/results", json={"qid": qid, "score": score})  # noqa: E731
+    assert post("q1", 0).json()["topic"] == "Residual learning"
+    post("q1", 2)  # wrong first, right later: the later answer counts more
+    post("q2", 0)
+    assert post("q9", 1).status_code == 400
+    rows = {m["name"]: m for m in client.get(f"/api/generations/{gid}/exam").json()["mastery"]}
+    assert rows["Residual learning"]["answered"] == 2
+    assert rows["Residual learning"]["mastery"] == pytest.approx(1 / 1.75, abs=0.001)
+    assert rows["Depth"]["mastery"] == 0 and rows["Depth"]["weight"] == 40
+    fake = _write_paper(gid, monkeypatch, json.dumps(_paper()))
+    standing = next(b["text"] for b in fake.calls[0][1]["content"] if "results so far" in b.get("text", ""))
+    assert standing.index("Depth: 0%") < standing.index("Residual learning: 57%")  # weakest first
+
+
+def test_a_drill_is_one_type_on_one_topic(client: TestClient, monkeypatch: pytest.MonkeyPatch,
+                                          fake_xelatex_ok: dict[str, int]) -> None:
+    gid = _create(client, monkeypatch)
+    assert client.post(f"/api/generations/{gid}/exam/drills", json={"topic": "Depth", "type": "calc", "count": 3}).status_code == 400
+    questions = [{"stem": f"Step {i}: compute.", "answer": "x", "topic": "Depth"} for i in range(6)]
+    fake = FakeLlm([json.dumps({"title": "Depth", "sections": [{"title": "s", "questions": questions}]})])
+    monkeypatch.setattr("app.main.create_client", lambda on_usage=None: fake)
+    _run_exam_paper(gid, "", lambda _s, _p: None, {"topic": "Depth", "type": "calc", "count": 6})
+    assert "This paper is a drill" in fake.calls[0][0]["content"]
+    profile_sent = next(b["text"] for b in fake.calls[0][1]["content"] if b.get("text", "").startswith("Exam profile"))
+    assert '"count": 6' in profile_sent and '"name": "Depth"' in profile_sent and "Residual learning" not in profile_sent
+    summary = client.get(f"/api/generations/{gid}/exam").json()["papers"][0]
+    assert summary["drill"] == {"topic": "Depth", "type": "calc", "count": 6} and summary["questions"] == 6
+    paper = client.get(f"/api/generations/{gid}/exam/papers/{summary['id']}").json()
+    assert paper["total"] == 60  # the profile's calculation points, per question

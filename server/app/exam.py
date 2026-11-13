@@ -395,11 +395,15 @@ pages. Points come from the profile; do not write them in stems."""
 
 
 def paper_messages(profile: dict[str, Any], spec: dict[str, Any], material: str | list[dict[str, Any]],
-                   past: list[dict[str, Any]], earlier: list[str], focus: str, language: str) -> list[dict[str, Any]]:
+                   past: list[dict[str, Any]], earlier: list[str], focus: str, language: str,
+                   standing: str = "", system: str = "") -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = [
         text_block("Exam profile: " + json.dumps(profile, ensure_ascii=False)),
         text_block(f"Other requirements: {spec.get('extra') or '(none)'}"),
         text_block(f"For this paper: {focus or '(nothing special)'}"),
+        text_block("The student's results so far, by topic: " + (standing or "(none yet)")
+                   + ("\nKeep the profile's structure and roughly its topic weights, but lean toward the topics "
+                      "the student is weak in, and spend less on those they have mastered." if standing else "")),
         text_block(f"Language: {LANGUAGE_RULES.get(language, LANGUAGE_RULES['source'])}"),
         text_block("Questions in the student's earlier papers (do not repeat them):\n"
                    + ("\n".join(f"- {q}" for q in earlier) if earlier else "(none)")),
@@ -408,7 +412,95 @@ def paper_messages(profile: dict[str, Any], spec: dict[str, Any], material: str 
     content += [text_block(material)] if isinstance(material, str) else material
     if past:
         content += [text_block("Past papers, the standard to match:"), *past]
-    return [{"role": "system", "content": PAPER_PROMPT}, {"role": "user", "content": content}]
+    return [{"role": "system", "content": system or PAPER_PROMPT}, {"role": "user", "content": content}]
+
+
+# ---- drills: one type of question on one topic, getting harder -------------------------
+
+DRILL_PROMPT = PAPER_PROMPT + """
+
+This paper is a drill: one section, every question of the section's type and on the one topic the
+profile lists (all with that "topic"). Order the questions as a progression: start with the plainest
+form of the idea; each next question changes one thing (a condition, a given, what is asked, a trap
+the past papers use); then combine changes; the last questions are as hard as the past papers' hardest
+on this topic. Each explanation names what changed from the question before and the step that handles it.
+The paper's title is the topic and the question type."""
+
+DEFAULT_POINTS = {"single": 2, "multiple": 3, "truefalse": 1, "fill": 2, "short": 6, "calc": 10, "other": 5}
+
+
+def drill_profile(profile: dict[str, Any], topic: str, kind: str, count: int, lang: str) -> dict[str, Any]:
+    """The profile for a drill: the exam's style and marking, one section of `count`
+    questions of type `kind`, and the one topic."""
+    if kind not in TYPES:
+        raise ExamError("Unknown question type")
+    if not 5 <= count <= 20:
+        raise ExamError("A drill has 5 to 20 questions")
+    like = next((s for s in profile["sections"] if s["type"] == kind), None)
+    points = like["points"][0] if like else DEFAULT_POINTS[kind]
+    found = next((t for t in profile["topics"] if t["name"] == topic), None)
+    name = TYPE_NAMES[kind][0 if lang == "zh" else 1]
+    return {
+        **profile, "title": f"{topic} · {name}", "instructions": "",
+        "sections": [{"title": name, "type": kind, "count": count, "points": [points] * count, "parts": [""] * count,
+                      "format": like["format"] if like else "", "passage": bool(like and like["passage"])}],
+        "topics": [found or {"name": topic, "weight": 100, "note": ""}],
+    }
+
+
+# ---- results by topic, and mastery -------------------------------------------------------
+# Every answered question is recorded (results.json); a topic's mastery is the
+# share of points earned, the most recent answers counting most.
+
+RESULTS_FILE = "results.json"
+MAX_RESULTS = 5000
+DECAY = 0.75  # each older answer counts this much less than the next newer one
+
+
+def record_result(gdir: Path, pid: str, qid: str, score: float) -> dict[str, Any]:
+    paper = load_paper(gdir, pid)
+    q = find_question(paper, qid) if paper else None
+    if q is None:
+        raise ExamError("No such question")
+    top = q["points"] or 1
+    entry = {"paper": pid, "qid": qid, "topic": q.get("topic") or "", "type": q["type"],
+             "score": _num(score, 0, top, 0), "max": top, "at": time.time()}
+    with _lock:
+        results = _read(exam_dir(gdir) / RESULTS_FILE, [])
+        results.append(entry)
+        _write(exam_dir(gdir) / RESULTS_FILE, results[-MAX_RESULTS:])
+    return entry
+
+
+def mastery(gdir: Path) -> list[dict[str, Any]]:
+    """Per topic of the profile (and any older topic that has results): how much
+    of it is mastered, from the recorded answers."""
+    profile = load_profile(gdir) or {"topics": []}
+    results = _read(exam_dir(gdir) / RESULTS_FILE, [])
+    by_topic: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        by_topic.setdefault(r.get("topic") or "", []).append(r)
+    names = [t["name"] for t in profile["topics"]] + [n for n in by_topic if n and n not in {t["name"] for t in profile["topics"]}]
+    weights = {t["name"]: t["weight"] for t in profile["topics"]}
+    out = []
+    for name in names:
+        rs = sorted(by_topic.get(name, []), key=lambda r: r["at"])
+        level = None
+        if rs:
+            ws = [DECAY ** k for k in range(len(rs))][::-1]  # newest weighs 1
+            level = round(sum(w * r["score"] / (r["max"] or 1) for w, r in zip(ws, rs)) / sum(ws), 3)
+        out.append({"name": name, "weight": weights.get(name, 0), "answered": len(rs), "mastery": level,
+                    "recent": [round(r["score"] / (r["max"] or 1), 2) for r in rs[-8:]]})
+    return out
+
+
+def standing(gdir: Path) -> str:
+    """The student's results by topic, for the model: weakest first."""
+    rows = [m for m in mastery(gdir) if m["answered"]]
+    if not rows:
+        return ""
+    rows.sort(key=lambda m: m["mastery"])
+    return "; ".join(f"{m['name']}: {round(m['mastery'] * 100)}% right over {m['answered']} questions" for m in rows)
 
 
 _OPTION_PREFIX = re.compile(r"^\s*[\(（]?[A-Ha-h][\)）\.．、:：]\s*")
@@ -881,7 +973,7 @@ def paper_summary(gdir: Path, pid: str) -> dict[str, Any]:
         "id": pid, "title": paper["title"], "total": paper.get("total", 0),
         "questions": sum(len(s["questions"]) for s in paper["sections"]),
         "created": (folder / "exam.json").stat().st_mtime, "attempts": attempts,
-        "focus": paper.get("focus", ""),
+        "focus": paper.get("focus", ""), "drill": paper.get("drill"),
     }
 
 
@@ -896,6 +988,7 @@ def state(gdir: Path) -> dict[str, Any]:
         "papers": [paper_summary(gdir, pid) for pid in ids],
         "stage": "ready" if ids else "profile" if profile else "drafting",
         "past": sorted(p.name for p in (d / PAST_DIR).iterdir()) if (d / PAST_DIR).is_dir() else [],
+        "mastery": mastery(gdir),
     }
 
 

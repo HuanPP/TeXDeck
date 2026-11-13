@@ -62,10 +62,11 @@ type Props = {
   exam: Exam;
   only?: string[]; // question ids to practise (retrying mistakes); all when absent
   onExit: () => void;
+  onResult?: (qid: string, score: number) => void; // each marked question, for the topic's mastery
   onFinish: (summary: { score: number; total: number; answered: number; correct: number; wrong: string[]; full: boolean }) => void;
 };
 
-export default function ExamPractice({ id, pid, exam, only, onExit, onFinish }: Props) {
+export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, onResult }: Props) {
   const items = useMemo<Item[]>(() => exam.sections.flatMap((s) => s.questions
     .filter((q) => !only || only.includes(q.id))
     .map((q) => ({ q, section: s.title, passage: s.passage }))), [exam, only]);
@@ -100,6 +101,7 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish }: 
     if (!q) return;
     setResult(r);
     setResults((all) => ({ ...all, [q.id]: r }));
+    onResult?.(q.id, r.score);
     if (r.correct) {
       playDone();
       setStreak((s) => { setBest((b) => Math.max(b, s + 1)); return s + 1; });

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FileUp, Pencil, Plus, RefreshCw, Trash2, Trophy } from "lucide-react";
+import { Dumbbell, FileUp, Pencil, Plus, RefreshCw, Trash2, Trophy } from "lucide-react";
 import {
-  addPastPapers, deletePaper, getExam, getGeneration, newPaper, redraftProfile, saveProfile,
-  type ExamState, type PaperSummary, type Profile,
+  addPastPapers, deletePaper, getExam, getGeneration, newDrill, newPaper, redraftProfile, saveProfile,
+  type ExamState, type Mastery, type PaperSummary, type Profile, type QuestionType,
 } from "../api";
+import { TYPE_LABELS } from "./ExamList";
 import ProfileEditor from "../components/ProfileEditor";
 import StatusBadge from "../components/StatusBadge";
 import { useTaskWs } from "../hooks/useTaskWs";
@@ -19,16 +20,19 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const pct = (a: { score: number; total: number }) => (a.total ? Math.round((a.score / a.total) * 100) : 0);
 
 function PaperCard({ id, paper, n, onDelete }: { id: string; paper: PaperSummary; n: number; onDelete: () => void }) {
+  const name = paper.drill ? paper.drill.topic : `Paper ${n}`;
   const [confirm, setConfirm] = useState(false);
   const best = paper.attempts.reduce<number | null>((b, a) => Math.max(b ?? 0, pct(a)), null);
   return (
     <li className="relative flex flex-col gap-2 border border-[var(--color-border)] bg-white p-4 transition hover:border-[var(--color-primary)]">
-      <Link to={`/exam/${id}/paper/${paper.id}`} className="absolute inset-0" aria-label={`Open paper ${n}`} />
+      <Link to={`/exam/${id}/paper/${paper.id}`} className="absolute inset-0" aria-label={`Open ${paper.drill ? "drill" : "paper"} ${n}`} />
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-lg text-[var(--color-heading)]">Paper {n}</span>
+        <span className="min-w-0 truncate text-lg text-[var(--color-heading)]" title={name}>{name}</span>
         <span className="text-xs text-slate-400">{new Date(paper.created * 1000).toLocaleDateString()}</span>
       </div>
-      <p className="text-sm text-slate-500">{paper.questions} questions · {paper.total} points</p>
+      <p className="text-sm text-slate-500">
+        {paper.drill ? `${TYPE_LABELS[paper.drill.type].replace(" (describe)", "")} · ${paper.questions} questions` : `${paper.questions} questions · ${paper.total} points`}
+      </p>
       {paper.focus && <p className="line-clamp-2 text-xs text-slate-500">Focus: {paper.focus}</p>}
       <div className="mt-auto flex items-center justify-between pt-1">
         <span className="flex items-center gap-1.5 text-sm">
@@ -43,6 +47,73 @@ function PaperCard({ id, paper, n, onDelete }: { id: string; paper: PaperSummary
         </button>
       </div>
     </li>
+  );
+}
+
+// Mastery as a word and a colour; null is "not practised yet".
+function level(m: number | null): { label: string; bar: string } {
+  if (m === null) return { label: "Not practised", bar: "bg-slate-200" };
+  if (m >= 0.85) return { label: "Strong", bar: "bg-emerald-500" };
+  if (m >= 0.6) return { label: "Getting there", bar: "bg-sky-500" };
+  return { label: "Weak", bar: "bg-amber-500" };
+}
+
+// Where practice pays most: topics worth many marks and not yet mastered
+// (an unpractised topic counts as half known).
+const priority = (t: Mastery) => t.weight * (1 - (t.mastery ?? 0.5));
+
+function Topics({ rows, types, disabled, onDrill }: {
+  rows: Mastery[]; types: QuestionType[]; disabled: boolean; onDrill: (topic: string, type: QuestionType, count: number) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [type, setType] = useState<QuestionType>(types[0] ?? "single");
+  const [count, setCount] = useState(12);
+  const sorted = [...rows].sort((a, b) => priority(b) - priority(a));
+  return (
+    <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] bg-white">
+      {sorted.map((t, i) => {
+        const l = level(t.mastery);
+        return (
+          <li key={t.name} className="px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-heading)]" title={t.name}>
+                {t.name}
+                {i === 0 && t.weight > 0 && <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-px text-[10px] text-amber-800">Practise next</span>}
+              </span>
+              <span className="w-12 text-right text-xs text-slate-400" title="Share of the marks">{t.weight}%</span>
+              <span className="flex w-40 items-center gap-2" title={`${t.answered} answered`}>
+                <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                  <span className={`block h-full rounded-full ${l.bar}`} style={{ width: `${Math.round((t.mastery ?? 0) * 100)}%` }} />
+                </span>
+                <span className="w-20 text-xs text-slate-500">{t.mastery === null ? l.label : `${Math.round(t.mastery * 100)}%`}</span>
+              </span>
+              <button type="button" className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline disabled:opacity-40"
+                disabled={disabled} onClick={() => setOpen((o) => (o === t.name ? null : t.name))}>
+                <Dumbbell className="h-3.5 w-3.5" /> Drill
+              </button>
+            </div>
+            {open === t.name && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <select className="input-field w-44 px-2 py-1 text-sm" aria-label="Question type" value={type}
+                  onChange={(e) => setType(e.target.value as QuestionType)}>
+                  {(Object.keys(TYPE_LABELS) as QuestionType[]).map((k) => (
+                    <option key={k} value={k}>{TYPE_LABELS[k].replace(" (describe)", "")}{types.includes(k) ? "" : " (not in the exam)"}</option>
+                  ))}
+                </select>
+                <select className="input-field w-36 px-2 py-1 text-sm" aria-label="How many" value={count} onChange={(e) => setCount(Number(e.target.value))}>
+                  {[10, 12, 15].map((n) => <option key={n} value={n}>{n} questions</option>)}
+                </select>
+                <button type="button" className="btn-primary py-1 text-sm" disabled={disabled}
+                  onClick={() => { onDrill(t.name, type, count); setOpen(null); }}>
+                  Make the drill
+                </button>
+                <span className="text-xs text-slate-400">From the plainest form to past-paper hard, one change at a time.</span>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -116,6 +187,8 @@ export default function ExamPage() {
 
   const profile = state.profile;
   const showEditor = !running && draft && (state.stage === "profile" || editing);
+  const mocks = state.papers.filter((p) => !p.drill);
+  const drills = state.papers.filter((p) => p.drill).reverse();
   const points = (p: Profile) => p.sections.reduce((n, s) => n + s.points.reduce((a, b) => a + b, 0), 0);
 
   return (
@@ -183,11 +256,32 @@ export default function ExamPage() {
               </div>
             </div>
             <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {state.papers.map((p, i) => (
+              {mocks.map((p, i) => (
                 <PaperCard key={p.id} id={id} paper={p} n={i + 1} onDelete={() => void act(() => deletePaper(id, p.id))} />
               ))}
             </ol>
-            <p className="text-xs text-slate-400">Each new paper avoids the questions of the earlier ones.</p>
+            <p className="text-xs text-slate-400">
+              Each new paper avoids the questions of the earlier ones{state.mastery.some((m) => m.answered) ? ", and leans toward your weak topics" : ""}.
+            </p>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-xl">Topics</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                How well you know each topic, from every question you have answered here (recent answers count most).
+                A drill is 10 to 15 questions of one kind on one topic.
+              </p>
+            </div>
+            <Topics rows={state.mastery} types={[...new Set(profile.sections.map((s) => s.type))]} disabled={busy || running}
+              onDrill={(topic, type, count) => void act(() => newDrill(id, { topic, type, count }))} />
+            {drills.length > 0 && (
+              <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {drills.map((p, i) => (
+                  <PaperCard key={p.id} id={id} paper={p} n={i + 1} onDelete={() => void act(() => deletePaper(id, p.id))} />
+                ))}
+              </ol>
+            )}
           </section>
 
           <section className="space-y-3 border border-[var(--color-border)] bg-white p-5">

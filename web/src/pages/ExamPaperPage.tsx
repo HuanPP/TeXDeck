@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronDown, Download, Play, Trophy } from "lucide-react";
-import { examPdfUrl, getPaper, saveAttempt, type Exam } from "../api";
+import { examPdfUrl, getPaper, saveAttempt, saveResult, type Exam } from "../api";
 import ExamPractice from "../components/ExamPractice";
 import PdfScroll from "../components/PdfScroll";
 import Segmented from "../components/Segmented";
@@ -32,6 +32,7 @@ export default function ExamPaperPage() {
   if (practising !== false) {
     return (
       <ExamPractice id={id} pid={pid} exam={paper} only={practising ?? undefined} onExit={() => setPractising(false)}
+        onResult={(qid, score) => void saveResult(id, pid, qid, score).catch(() => undefined)}
         onFinish={(s) => {
           setLastWrong(s.wrong);
           if (s.full) void saveAttempt(id, pid, { score: s.score, total: s.total, answered: s.answered, correct: s.correct })
@@ -47,7 +48,7 @@ export default function ExamPaperPage() {
         <div className="flex min-w-0 items-center gap-3">
           <Link to={`/exam/${id}`} className="shrink-0 text-sm text-[var(--color-primary)] no-underline hover:underline">← Exam</Link>
           <h1 className="min-w-0 truncate text-2xl">{paper.title}</h1>
-          <span className="text-sm text-slate-400">Paper {Number(pid)}</span>
+          <span className="text-sm text-slate-400">{paper.drill ? `Drill · ${paper.drill.count} questions, getting harder` : `Paper ${Number(pid)}`}</span>
         </div>
         <div className="relative">
           <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-sm text-slate-500 hover:text-slate-800"

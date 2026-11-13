@@ -378,13 +378,17 @@ export type ExamQuestion = {
 };
 export type ExamSection = { title: string; type: QuestionType; instructions: string; passage: string; questions: ExamQuestion[] };
 export type Attempt = { score: number; total: number; answered: number; correct: number; at: number };
+export type Drill = { topic: string; type: QuestionType; count: number };
 export type PaperSummary = {
   id: string; title: string; total: number; questions: number; created: number; attempts: Attempt[]; focus: string;
+  drill: Drill | null; // set for drills: one type of question on one topic
 };
+// A topic's mastery: share of points earned, recent answers counting most; null before any answer.
+export type Mastery = { name: string; weight: number; answered: number; mastery: number | null; recent: number[] };
 export type Exam = PaperSummary & { instructions: string; duration: number; sections: ExamSection[] };
 export type ExamState = {
   spec: ExamSpec | null; profile: Profile | null; papers: PaperSummary[];
-  stage: "drafting" | "profile" | "ready"; past: string[];
+  stage: "drafting" | "profile" | "ready"; past: string[]; mastery: Mastery[];
 };
 export type Grade = { id: string; qid: string; part: number | null; status: "pending" | "done" | "error"; score: number; max: number; feedback: string };
 
@@ -413,6 +417,9 @@ export function addPastPapers(id: string, files: File[]): Promise<void> {
   return requestJson<void>(`${exam(id)}/past`, { method: "POST", body: form });
 }
 export const newPaper = (id: string, focus: string) => requestJson<void>(`${exam(id)}/papers`, json("POST", { focus }));
+export const newDrill = (id: string, drill: Drill) => requestJson<void>(`${exam(id)}/drills`, json("POST", drill));
+export const saveResult = (id: string, pid: string, qid: string, score: number) =>
+  requestJson<unknown>(`${exam(id)}/papers/${pid}/results`, json("POST", { qid, score }));
 export const getPaper = (id: string, pid: string) => requestJson<Exam>(`${exam(id)}/papers/${pid}`);
 export const deletePaper = (id: string, pid: string) => requestJson<void>(`${exam(id)}/papers/${pid}`, { method: "DELETE" });
 export const examPdfUrl = (id: string, pid: string, name: "paper" | "answers", download = false) =>
