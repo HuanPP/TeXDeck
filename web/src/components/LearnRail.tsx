@@ -47,9 +47,10 @@ type Props = {
   anchors: SourceAnchor[];
   notesPage: number; // where the notes are scrolled to: the part being read
   onGo: (anchor: SourceAnchor) => void;
+  onDone?: (keys: Set<string>) => void; // the parts marked as learnt, whenever they change
 };
 
-export default function LearnRail({ id, anchors, notesPage, onGo }: Props) {
+export default function LearnRail({ id, anchors, notesPage, onGo, onDone }: Props) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<Set<string>>(new Set());
   const [popped, setPopped] = useState<string | null>(null);
@@ -68,6 +69,8 @@ export default function LearnRail({ id, anchors, notesPage, onGo }: Props) {
     }, () => undefined);
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => { onDone?.(done); }, [done, onDone]);
 
   useEffect(() => {
     if (!finished) return;
@@ -195,4 +198,37 @@ export default function LearnRail({ id, anchors, notesPage, onGo }: Props) {
       )}
     </nav>
   );
+}
+
+// Where each learnt part sits, to tint it: in the notes, from its heading to the
+// next part's heading (or the next sheet's title); in the source, whole pages
+// whose every citing part is learnt.
+export function learntShades(anchors: SourceAnchor[], done: Set<string>, notesPages: number) {
+  const units = learnUnits(anchors);
+  const starts = anchors.filter((a) => a.level <= 1);
+  const notes: { page: number; y0: number; y1: number; label?: string }[] = [];
+  for (const u of units) {
+    if (!done.has(u.key)) continue;
+    const a = u.anchor;
+    const at = starts.indexOf(a);
+    const next = at >= 0 ? starts[at + 1] : undefined;
+    const end = next ? { page: next.notes_page, y: Math.max(0, next.y - 0.008) } : { page: notesPages || a.notes_page, y: 1 };
+    const y0 = Math.max(0, a.y - 0.008);
+    for (let p = a.notes_page; p <= end.page; p += 1) {
+      const top = p === a.notes_page ? y0 : 0;
+      const bottom = p === end.page ? end.y : 1;
+      if (bottom > top + 0.005) notes.push({ page: p, y0: top, y1: bottom, label: p === a.notes_page ? "Learnt" : undefined });
+    }
+  }
+  const covered = new Map<string, boolean>(); // "doc:page" -> all citing parts learnt
+  for (const u of units) {
+    const a = u.anchor;
+    for (let p = a.page; p <= a.to; p += 1) {
+      const k = `${a.doc}:${p}`;
+      covered.set(k, (covered.get(k) ?? true) && done.has(u.key));
+    }
+  }
+  const source = (doc: number) => [...covered].filter(([k, ok]) => ok && k.startsWith(`${doc}:`))
+    .map(([k]) => ({ page: Number(k.split(":")[1]), y0: 0, y1: 1, label: "Learnt" }));
+  return { notes, source };
 }

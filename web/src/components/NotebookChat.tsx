@@ -22,7 +22,7 @@ type Props = {
   imageUrl: (name: string) => string; // an area quote's crop
   onAddToNotes?: (thread: ChatThread, answerId: string) => void;
   onClear: () => Promise<void>; // New session
-  docked: boolean; // the open thread sits on top of this column (else it floats elsewhere)
+  docked: "top" | "bottom" | null; // where the open thread splits this column (null: it is elsewhere)
   onGripDown: (e: React.PointerEvent) => void; // start dragging the open thread away
 };
 
@@ -62,16 +62,17 @@ export const TEXT_SIZE = "text-[13px] leading-relaxed";
 const OPEN_SIZE = "text-[12.5px] leading-relaxed";
 
 // The opened thread: its header (grip to move it, close) and its messages.
-export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, fill }: {
+export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, fill, bottom }: {
   thread: ChatThread; view: View; onClose: () => void; onGripDown: (e: React.PointerEvent) => void;
   onDockBack?: () => void; // shown when it floats over another column
   fill?: boolean; // floating: takes the whole box
+  bottom?: boolean; // in the lower half of the side panel
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [thread.id]);
   const n = thread.messages.filter((m) => m.role === "user").length;
   return (
-    <section className={`notebook-chat flex min-h-0 flex-col bg-indigo-50/60 ${fill ? "h-full" : "basis-1/2 border-b-2 border-indigo-200"}`}
+    <section className={`notebook-chat flex min-h-0 flex-col bg-indigo-50/60 ${fill ? "h-full" : bottom ? "basis-1/2 border-t-2 border-indigo-200" : "basis-1/2 border-b-2 border-indigo-200"}`}
       aria-label="Opened question">
       <div className="flex shrink-0 items-center gap-1.5 px-1.5 py-1.5">
         <button type="button" className="cursor-grab touch-none p-1 text-slate-400 hover:text-indigo-600 active:cursor-grabbing"
@@ -171,7 +172,7 @@ export default function NotebookChat({
 
   return (
     <div className="notebook-chat flex h-full min-h-0 flex-col">
-      {open && docked && (
+      {open && docked === "top" && (
         <OpenThread thread={open} view={view} onClose={() => onOpenThread(null)} onGripDown={onGripDown} />
       )}
       <div ref={listRef} className={`min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 ${TEXT_SIZE}`}>
@@ -204,6 +205,9 @@ export default function NotebookChat({
           </article>
         ))}
       </div>
+      {open && docked === "bottom" && (
+        <OpenThread thread={open} view={view} bottom onClose={() => onOpenThread(null)} onGripDown={onGripDown} />
+      )}
       <form className="shrink-0 space-y-2 border-t border-[var(--color-border)] p-2.5"
         onSubmit={(e) => { e.preventDefault(); void send(); }}>
         {quotes.length > 0 && (

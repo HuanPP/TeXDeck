@@ -42,6 +42,9 @@ function lineBoxes(rects: DOMRect[], page: DOMRect): PageBox[] {
   }));
 }
 
+// A stretch of a page tinted as done (fractions of the page height).
+export type Shade = { page: number; y0: number; y1: number; label?: string };
+
 export type PdfScrollHandle = {
   // Scroll so the point (page, y as a fraction of the page height) sits near the top.
   scrollTo: (page: number, y?: number, flash?: boolean) => void;
@@ -63,11 +66,12 @@ type Props = {
   onUnderlineClick?: (key: string) => void;
   // The dragged box stays drawn while the parent still holds that selection.
   showArea?: boolean;
+  shades?: Shade[];
 };
 
 export default function PdfScroll({
   file, label, ref, onDoubleClick, onTextClick, marks = [], onPageChange, hint, onSelect, underlines = [], onUnderlineClick,
-  showArea = false,
+  showArea = false, shades = [],
 }: Props) {
   // Area mode: the next drag draws a box (scanned pages, figures, formulas).
   const [areaMode, setAreaMode] = useState(false);
@@ -368,6 +372,17 @@ export default function PdfScroll({
                           onDoubleClick={(e) => e.stopPropagation()}>
                           {u.number}
                         </button>
+                      )}
+                    </div>
+                  ))}
+                  {shades.filter((d) => d.page === n).map((d, k) => (
+                    <div key={`shade${k}`} aria-hidden="true"
+                      className="learnt-shade pointer-events-none absolute inset-x-0 z-[5] border-l-[3px] border-emerald-400/80"
+                      style={{ top: `${d.y0 * 100}%`, height: `${(d.y1 - d.y0) * 100}%` }}>
+                      {d.label && (
+                        <span className="absolute right-2 top-1 rounded-full bg-emerald-500/85 px-1.5 py-px font-sans text-[10px] leading-4 text-white">
+                          {d.label}
+                        </span>
                       )}
                     </div>
                   ))}

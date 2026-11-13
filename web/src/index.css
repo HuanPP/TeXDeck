@@ -117,3 +117,8 @@ p { line-height: 1.7; }
 }
 .learn-pop { animation: learn-pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
 .learn-ring { animation: learn-ring 0.65s ease-out forwards; }
+/* A part marked as learnt: a pale wash that multiplies, so the text stays as it was. */
+.learnt-shade {
+  background: rgb(209 250 229 / 0.45);
+  mix-blend-mode: multiply;
+}

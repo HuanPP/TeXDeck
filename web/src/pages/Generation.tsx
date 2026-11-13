@@ -861,7 +861,7 @@ export default function Generation() {
       {succeeded && notes && (
         <div className="relative left-1/2 min-h-[440px] w-[calc(100vw-2rem)] flex-1 -translate-x-1/2">
           <NotebookWorkspace id={id} pdfBust={pdfBust} sourceKind={meta.source_kind} sourceNames={meta.source_names}
-            title={displayTitle(meta)}
+            title={displayTitle(meta)} notesPages={meta.pdf_pages ?? 0}
             editPanel={editPanel}
             onNotesTextClick={busy ? undefined : handleTextClick}
             notesMarks={textMarks}
