@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import shutil
@@ -167,6 +168,7 @@ MAX_UPLOAD_FILES = 10
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings.artifact_root.mkdir(parents=True, exist_ok=True)
+    tasks.bind_loop(asyncio.get_running_loop())
     # Jobs live only in this process; anything still "running" on disk was
     # killed by the previous shutdown and will never finish.
     store.mark_interrupted_generations()

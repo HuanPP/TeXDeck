@@ -72,13 +72,19 @@ def is_running(gen_id: str) -> bool:
         return gen_id in _running
 
 
-def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
+def bind_loop(loop: asyncio.AbstractEventLoop | None) -> None:
+    """The server's event loop, where progress is pushed to WebSocket watchers.
+    Bound at startup: jobs are also started from sync routes, which run in a
+    worker thread with no loop of their own."""
     global _loop
+    _loop = loop
+
+
+def start(gen_id: str, job: Callable[[ProgressCallback], None]) -> None:
     try:
-        _loop = asyncio.get_running_loop()
+        bind_loop(asyncio.get_running_loop())
     except RuntimeError:
-        # no running loop (tests): update state dict only, no broadcast
-        _loop = None
+        pass  # a sync route's worker thread: keep the loop bound at startup
 
     with _lock:
         if gen_id in _running:
