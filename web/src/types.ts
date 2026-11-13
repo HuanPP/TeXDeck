@@ -1,4 +1,4 @@
-export type TaskStatus = "running" | "succeeded" | "failed";
+export type TaskStatus = "running" | "succeeded" | "failed" | "review"; // review: an exam blueprint waits for the reader
 
 export type GenerationMeta = {
   id: string;
@@ -33,7 +33,7 @@ export type GenerationMeta = {
 };
 
 // Presentation makes slide decks; Learn makes study notes.
-export type Kind = "deck" | "notes";
+export type Kind = "deck" | "notes" | "exam";
 
 export type FigureItem = {
   file: string; // "figures/fig-01.png"

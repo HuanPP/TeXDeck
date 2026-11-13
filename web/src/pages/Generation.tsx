@@ -465,7 +465,7 @@ export default function Generation() {
   }
   if (!meta) return <p className="text-sm text-slate-500">Loading…</p>;
   const notes = meta.kind === "notes";
-  const home = notes ? "/learn" : "/present";
+  const home = notes ? "/learn/notes" : "/present";
 
   const showProgress = meta.status === "running" || busy;
   const failed = meta.status === "failed" && !busy;

@@ -235,7 +235,10 @@ export default function Home({ kind }: { kind: Kind }) {
     return (
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-3xl">My notebooks</h1>
+          <div className="flex items-baseline gap-4">
+            <Link to="/learn" className="text-sm text-[var(--color-primary)] no-underline hover:underline">← Learn</Link>
+            <h1 className="text-3xl">My notebooks</h1>
+          </div>
           <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
             <label className="relative w-full max-w-sm">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

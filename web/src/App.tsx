@@ -3,6 +3,9 @@ import { Link, Navigate, NavLink, Route, Routes, useLocation, useParams } from "
 import Home from "./pages/Home";
 import Generation from "./pages/Generation";
 import TemplateEditor from "./pages/TemplateEditor";
+import LearnHub from "./pages/LearnHub";
+import ExamList from "./pages/ExamList";
+import ExamPage from "./pages/ExamPage";
 import ModelMenu from "./components/ModelMenu";
 import InvitesMenu from "./components/InvitesMenu";
 import MemoryMenu from "./components/MemoryMenu";
@@ -15,6 +18,11 @@ import { ModelProvider } from "./model";
 function GenerationRoute() {
   const { id } = useParams();
   return <Generation key={id} />;
+}
+
+function ExamRoute() {
+  const { id } = useParams();
+  return <ExamPage key={id} />;
 }
 
 // A fresh editor per template key, like GenerationRoute.
@@ -96,7 +104,10 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-6 py-8">
         <Routes>
           <Route path="/" element={<RootRedirect />} />
-          <Route path="/learn" element={<Section path="/learn"><Home key="notes" kind="notes" /></Section>} />
+          <Route path="/learn" element={<Section path="/learn"><LearnHub /></Section>} />
+          <Route path="/learn/notes" element={<Section path="/learn"><Home key="notes" kind="notes" /></Section>} />
+          <Route path="/learn/exams" element={<Section path="/learn"><ExamList /></Section>} />
+          <Route path="/exam/:id" element={<ExamRoute />} />
           <Route path="/present" element={<Section path="/present"><Home key="deck" kind="deck" /></Section>} />
           <Route path="/g/:id" element={<GenerationRoute />} />
           <Route path="/templates/new" element={<TemplateEditor />} />

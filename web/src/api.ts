@@ -352,3 +352,65 @@ export const signIn = (username: string, password: string) =>
     body: JSON.stringify({ username, password }),
   });
 export const signOut = () => requestJson<Session>("/api/auth/session", { method: "DELETE" });
+
+// Learn: practice exams (see server/app/exam.py).
+export type QuestionType = "single" | "multiple" | "truefalse" | "fill" | "short" | "calc" | "other";
+export type SpecRow = {
+  type: QuestionType; count: number; points: number;
+  items?: { points: number; parts: string }[]; // short/calc/other: each question's points and split
+  description?: string; // other: what the questions look like
+};
+export type ExamSpec = { types: SpecRow[]; duration: number; extra: string };
+export type BlueprintSection = {
+  title: string; type: QuestionType; count: number; points: number[]; parts: string[]; format: string; passage: boolean;
+};
+export type Blueprint = { title: string; instructions: string; duration: number; style: string; sections: BlueprintSection[] };
+export type ExamPart = { stem: string; answer: string; rubric: string[]; points: number };
+export type ExamQuestion = {
+  id: string; number: number; type: QuestionType; mode: "single" | "multiple" | "truefalse" | "fill" | "open";
+  stem: string; points: number; explanation: string; options?: string[];
+  answer: string | string[] | boolean | string[][]; rubric?: string[]; parts?: ExamPart[];
+};
+export type ExamSection = { title: string; type: QuestionType; instructions: string; passage: string; questions: ExamQuestion[] };
+export type Exam = { title: string; instructions: string; duration: number; total: number; sections: ExamSection[] };
+export type Attempt = { score: number; total: number; answered: number; correct: number; at: number };
+export type ExamState = {
+  spec: ExamSpec | null; blueprint: Blueprint | null; exam: Exam | null;
+  stage: "drafting" | "blueprint" | "ready"; paper: boolean; answers: boolean; attempts: Attempt[]; samples: string[];
+};
+export type Grade = { id: string; qid: string; part: number | null; status: "pending" | "done" | "error"; score: number; max: number; feedback: string };
+
+export function createExam(input: {
+  title: string; language: SlideLanguage; spec: ExamSpec; files?: File[]; source_text?: string; samples: File[];
+}): Promise<{ id: string }> {
+  const form = new FormData();
+  form.append("title", input.title);
+  form.append("language", input.language);
+  form.append("spec", JSON.stringify(input.spec));
+  if (input.source_text) form.append("source_text", input.source_text);
+  for (const f of input.files ?? []) form.append("files", f);
+  for (const f of input.samples) form.append("samples", f);
+  return requestJson<{ id: string }>("/api/exams", { method: "POST", body: form });
+}
+export const getExam = (id: string) => requestJson<ExamState>(`/api/generations/${id}/exam`);
+export const saveBlueprint = (id: string, blueprint: Blueprint) =>
+  requestJson<Blueprint>(`/api/generations/${id}/exam/blueprint`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blueprint }),
+  });
+export const redraftBlueprint = (id: string) => requestJson<void>(`/api/generations/${id}/exam/redraft`, { method: "POST" });
+export const writePaper = (id: string) => requestJson<void>(`/api/generations/${id}/exam/paper`, { method: "POST" });
+export const examPdfUrl = (id: string, name: "paper" | "answers", download = false) =>
+  `/api/generations/${id}/exam/${name}.pdf${download ? "?download=true" : ""}`;
+export function gradeAnswer(id: string, qid: string, part: number | null, answer: string, image?: File): Promise<Grade> {
+  const form = new FormData();
+  form.append("qid", qid);
+  form.append("part", String(part ?? -1));
+  form.append("answer", answer);
+  if (image) form.append("image", image);
+  return requestJson<Grade>(`/api/generations/${id}/exam/grade`, { method: "POST", body: form });
+}
+export const getGrade = (id: string, grade: string) => requestJson<Grade>(`/api/generations/${id}/exam/grade/${grade}`);
+export const saveAttempt = (id: string, a: Omit<Attempt, "at">) =>
+  requestJson<Attempt[]>(`/api/generations/${id}/exam/attempts`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a),
+  });
