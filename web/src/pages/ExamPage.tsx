@@ -13,6 +13,7 @@ import { useTaskWs } from "../hooks/useTaskWs";
 import { displayTitle } from "../title";
 import type { GenerationMeta, TaskEvent } from "../types";
 import { TYPE_LABELS } from "./ExamList";
+import { renumber } from "../examNumbering";
 
 // One practice exam: its blueprint while that waits for the reader, then the
 // paper, the answer key and the practice.
@@ -28,7 +29,7 @@ function BlueprintEditor({ value, onChange }: { value: Blueprint; onChange: (b: 
   const move = (i: number, d: number) => {
     const s = [...value.sections];
     [s[i], s[i + d]] = [s[i + d], s[i]];
-    set({ sections: s });
+    set({ sections: renumber(s) });
   };
   const resize = (s: BlueprintSection, count: number): Partial<BlueprintSection> => ({
     count,
@@ -90,7 +91,7 @@ function BlueprintEditor({ value, onChange }: { value: Blueprint; onChange: (b: 
                 <button type="button" className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === value.sections.length - 1}
                   aria-label="Move down" onClick={() => move(i, 1)}><ArrowDown className="h-4 w-4" /></button>
                 <button type="button" className="p-1 text-slate-400 hover:text-red-600" aria-label="Remove section"
-                  onClick={() => set({ sections: value.sections.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" /></button>
+                  onClick={() => set({ sections: renumber(value.sections.filter((_, j) => j !== i)) })}><Trash2 className="h-4 w-4" /></button>
               </div>
               {(open || !same) && (
                 <div className="flex flex-wrap gap-2">
@@ -123,7 +124,7 @@ function BlueprintEditor({ value, onChange }: { value: Blueprint; onChange: (b: 
         })}
       </ol>
       <button type="button" className="inline-flex items-center gap-1 text-sm text-[var(--color-primary)] hover:underline"
-        onClick={() => set({ sections: [...value.sections, { title: "", type: "single", count: 5, points: [2, 2, 2, 2, 2], parts: ["", "", "", "", ""], format: "", passage: false }] })}>
+        onClick={() => set({ sections: renumber([...value.sections, { title: "", type: "single", count: 5, points: [2, 2, 2, 2, 2], parts: ["", "", "", "", ""], format: "", passage: false }]) })}>
         <Plus className="h-4 w-4" /> Add a section
       </button>
     </div>
