@@ -17,6 +17,7 @@ import type { GenerationMeta, TaskEvent } from "../types";
 // the mock papers written for it.
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 const pct = (a: { score: number; total: number }) => (a.total ? Math.round((a.score / a.total) * 100) : 0);
 
 function PaperCard({ id, paper, n, onDelete }: { id: string; paper: PaperSummary; n: number; onDelete: () => void }) {
@@ -28,7 +29,7 @@ function PaperCard({ id, paper, n, onDelete }: { id: string; paper: PaperSummary
       <Link to={`/exam/${id}/paper/${paper.id}`} className="absolute inset-0" aria-label={`Open ${paper.drill ? "drill" : "paper"} ${n}`} />
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 truncate text-lg text-[var(--color-heading)]" title={name}>{name}</span>
-        <span className="text-xs text-slate-400">{new Date(paper.created * 1000).toLocaleDateString()}</span>
+        <span className="shrink-0 text-xs text-slate-400">{fmtDay(paper.created * 1000)}</span>
       </div>
       <p className="text-sm text-slate-500">
         {paper.drill ? `${TYPE_LABELS[paper.drill.type].replace(" (describe)", "")} · ${paper.questions} questions` : `${paper.questions} questions · ${paper.total} points`}
@@ -69,8 +70,22 @@ function Topics({ rows, types, disabled, onDrill }: {
   const [type, setType] = useState<QuestionType>(types[0] ?? "single");
   const [count, setCount] = useState(12);
   const sorted = [...rows].sort((a, b) => priority(b) - priority(a));
+  const practised = rows.some((t) => t.answered > 0);
+  if (!rows.length) {
+    return (
+      <p className="border border-dashed border-[var(--color-border)] px-4 py-6 text-center text-sm text-slate-500">
+        This exam's profile lists no topics yet. Use Read again or Edit below to add them; then answers count toward each topic.
+      </p>
+    );
+  }
   return (
     <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] bg-white">
+      <li className="flex items-center gap-3 px-4 py-1.5 text-xs text-slate-400">
+        <span className="flex-1">Topic</span>
+        <span className="w-12 text-right">Of marks</span>
+        <span className="w-40">You know</span>
+        <span className="w-[3.25rem]" />
+      </li>
       {sorted.map((t, i) => {
         const l = level(t.mastery);
         return (
@@ -78,7 +93,7 @@ function Topics({ rows, types, disabled, onDrill }: {
             <div className="flex flex-wrap items-center gap-3">
               <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-heading)]" title={t.name}>
                 {t.name}
-                {i === 0 && t.weight > 0 && <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-px text-[10px] text-amber-800">Practise next</span>}
+                {i === 0 && practised && t.weight > 0 && <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-px text-[10px] text-amber-800">Practise next</span>}
               </span>
               <span className="w-12 text-right text-xs text-slate-400" title="Share of the marks">{t.weight}%</span>
               <span className="flex w-40 items-center gap-2" title={`${t.answered} answered`}>
@@ -195,7 +210,7 @@ export default function ExamPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <Link to="/learn/exams" className="shrink-0 text-sm text-[var(--color-primary)] no-underline hover:underline">← Exams</Link>
-        <h1 className="min-w-0 truncate text-2xl">{profile?.title || displayTitle(meta)}</h1>
+        <h1 className="min-w-0 truncate text-2xl" title={profile?.title || displayTitle(meta)}>{profile?.title || displayTitle(meta)}</h1>
         <StatusBadge status={meta.status} />
       </div>
 
@@ -275,6 +290,7 @@ export default function ExamPage() {
             </div>
             <Topics rows={state.mastery} types={[...new Set(profile.sections.map((s) => s.type))]} disabled={busy || running}
               onDrill={(topic, type, count) => void act(() => newDrill(id, { topic, type, count }))} />
+            {drills.length > 0 && <h3 className="pt-2 text-lg">Drills</h3>}
             {drills.length > 0 && (
               <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {drills.map((p, i) => (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FileUp, MoreVertical, Plus, Trash2, X } from "lucide-react";
 import { createExam, deleteGeneration, listGenerations, type QuestionType, type SpecRow } from "../api";
@@ -61,6 +61,8 @@ function NewExam({ onClose }: { onClose: () => void }) {
   const [extra, setExtra] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [error]);
 
   const set = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const totals = rowTotals(rows);
@@ -274,7 +276,7 @@ function NewExam({ onClose }: { onClose: () => void }) {
               <input className="input-field mt-1" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Made from the material if empty" />
             </label>
             <label className="block text-sm text-slate-600">Time, minutes
-              <input className="input-field mt-1 w-28" type="number" min={0} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="none" />
+              <input className="input-field mt-1 block w-28" type="number" min={0} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="none" />
             </label>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -287,7 +289,7 @@ function NewExam({ onClose }: { onClose: () => void }) {
             <textarea className="input-field mt-1 min-h-16" value={extra} onChange={(e) => setExtra(e.target.value)}
               placeholder="e.g. focus on chapters 3 and 4; a bit harder than past years; no proofs" />
           </label>
-          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          {error && <p ref={errorRef} role="alert" className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={submitting}>
@@ -360,8 +362,8 @@ export default function ExamList() {
             {items.map((g) => (
               <tr key={g.id} className="border-b border-[var(--color-border)] last:border-0 hover:bg-slate-50">
                 <td className="px-4 py-3"><Link to={`/exam/${g.id}`} className="text-[var(--color-heading)] no-underline hover:underline">{displayTitle(g)}</Link></td>
-                <td className="hidden text-center text-slate-600 sm:table-cell">{fmtDay(g.created_at)}</td>
-                <td className="text-center"><StatusBadge status={g.status} /></td>
+                <td className="hidden whitespace-nowrap px-2 text-center text-slate-600 sm:table-cell">{fmtDay(g.created_at)}</td>
+                <td className="whitespace-nowrap px-2 text-center"><StatusBadge status={g.status} /></td>
                 <td className="relative text-center">
                   <button type="button" className="p-1.5 text-slate-500 hover:text-slate-800" aria-label={`Actions for "${displayTitle(g)}"`}
                     onClick={() => { setMenuId((m) => (m === g.id ? null : g.id)); setConfirmId(null); }}>

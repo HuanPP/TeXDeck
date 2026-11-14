@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Flame, ImagePlus, Loader2, Sparkles, X } from "lucide-react";
-import { getGrade, gradeAnswer, type Exam, type ExamQuestion } from "../api";
+import { Check, CircleDot, Flame, ImagePlus, Loader2, Sparkles, X } from "lucide-react";
+import { getGrade, gradeAnswer, type Exam, type ExamQuestion, type Grade } from "../api";
 import { prepareFigure } from "../imageTools";
 import { playDone, playFinish, playWrong } from "../sounds";
 import ChatMarkdown from "./ChatMarkdown";
@@ -10,6 +10,12 @@ import ChatMarkdown from "./ChatMarkdown";
 // are marked by the model (or by the reader against the model answer).
 
 const LETTERS = "ABCDEFGH";
+
+const TONES = {
+  good: { bar: "border-emerald-300 bg-emerald-50", dot: "bg-emerald-500", text: "text-emerald-700", button: "bg-emerald-500 hover:bg-emerald-600" },
+  part: { bar: "border-amber-300 bg-amber-50", dot: "bg-amber-500", text: "text-amber-700", button: "bg-amber-500 hover:bg-amber-600" },
+  bad: { bar: "border-red-200 bg-red-50", dot: "bg-red-500", text: "text-red-700", button: "bg-red-500 hover:bg-red-600" },
+};
 
 type Result = { score: number; max: number; correct: boolean; feedback?: string; reference: string };
 type Item = { q: ExamQuestion; section: string; passage: string };
@@ -56,21 +62,44 @@ function markObjective(q: ExamQuestion, choice: string[], blanks: string[], trut
   return { score, max: q.points, correct: fraction === 1, reference };
 }
 
+// A practice run in progress, kept in the browser so leaving or reloading the
+// page does not lose it.
+export type SavedRun = { only: string[] | null; results: Record<string, Result>; streak: number; best: number };
+const runKey = (id: string, pid: string) => `texdeck.practice.${id}.${pid}`;
+
+export function savedRun(id: string, pid: string): SavedRun | null {
+  try {
+    const run = JSON.parse(localStorage.getItem(runKey(id, pid)) ?? "null") as SavedRun | null;
+    return run && Object.keys(run.results).length ? run : null;
+  } catch {
+    return null;
+  }
+}
+
+export const forgetRun = (id: string, pid: string) => localStorage.removeItem(runKey(id, pid));
+
 type Props = {
   id: string;
   pid: string; // the paper
   exam: Exam;
   only?: string[]; // question ids to practise (retrying mistakes); all when absent
+  resume?: SavedRun; // carry on from here
   onExit: () => void;
   onResult?: (qid: string, score: number) => void; // each marked question, for the topic's mastery
   onFinish: (summary: { score: number; total: number; answered: number; correct: number; wrong: string[]; full: boolean }) => void;
 };
 
-export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, onResult }: Props) {
+export default function ExamPractice({ id, pid, exam, only: asked, resume, onExit, onFinish, onResult }: Props) {
+  const only = resume ? resume.only ?? undefined : asked;
   const items = useMemo<Item[]>(() => exam.sections.flatMap((s) => s.questions
     .filter((q) => !only || only.includes(q.id))
     .map((q) => ({ q, section: s.title, passage: s.passage }))), [exam, only]);
-  const [at, setAt] = useState(0);
+  // Resuming: the first question not yet answered (questions go in order).
+  const [at, setAt] = useState(() => {
+    if (!resume) return 0;
+    const first = items.findIndex((it) => !resume.results[it.q.id]);
+    return first < 0 ? Math.max(0, items.length - 1) : first;
+  });
   const [choice, setChoice] = useState<string[]>([]);
   const [truth, setTruth] = useState<boolean | null>(null);
   const [blanks, setBlanks] = useState<string[]>([]);
@@ -80,13 +109,19 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
   const [grading, setGrading] = useState(false);
   const [selfMark, setSelfMark] = useState(false); // open question: showing the model answer to mark oneself
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, Result>>({});
-  const [streak, setStreak] = useState(0);
-  const [best, setBest] = useState(0);
+  const [results, setResults] = useState<Record<string, Result>>(resume?.results ?? {});
+  const [streak, setStreak] = useState(resume?.streak ?? 0);
+  const [best, setBest] = useState(resume?.best ?? 0);
   const [done, setDone] = useState(false);
   const [showPassage, setShowPassage] = useState(true);
   const cancelled = useRef(false);
   useEffect(() => () => { cancelled.current = true; }, []);
+
+  useEffect(() => {
+    if (done || !Object.keys(results).length) return;
+    const run: SavedRun = { only: only ?? null, results, streak, best };
+    localStorage.setItem(runKey(id, pid), JSON.stringify(run));
+  }, [id, pid, only, results, streak, best, done]);
 
   const item = items[at];
   const q = item?.q;
@@ -123,8 +158,12 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
     setError(null);
     try {
       // One grade per part when the question has parts; else one for the whole.
+      // A part left blank (the photo goes with part 1) scores nothing, as on paper.
+      const blank = (i: number): Promise<Grade> => Promise.resolve(
+        { id: "", qid: q.id, part: i, status: "done", score: 0, max: parts[i].points, feedback: "No answer." });
       const asks = parts.length
-        ? parts.map((_, i) => gradeAnswer(id, pid, q.id, i, texts[i] ?? "", i === 0 ? photo ?? undefined : undefined))
+        ? parts.map((_, i) => ((texts[i] ?? "").trim() || (i === 0 && photo)
+          ? gradeAnswer(id, pid, q.id, i, texts[i] ?? "", i === 0 ? photo ?? undefined : undefined) : blank(i)))
         : [gradeAnswer(id, pid, q.id, null, texts[0] ?? "", photo ?? undefined)];
       let grades = await Promise.all(asks);
       while (grades.some((g) => g.status === "pending")) {
@@ -152,6 +191,7 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
   function next() {
     if (at + 1 < items.length) return setAt(at + 1);
     setDone(true);
+    forgetRun(id, pid);
     playFinish();
     const all = Object.entries(results);
     const score = all.reduce((s, [, r]) => s + r.score, 0);
@@ -220,6 +260,9 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
     );
   }
   if (!q) return null;
+
+  // A result reads right, partly right (some credit) or wrong.
+  const tone: keyof typeof TONES = !result ? "good" : result.correct ? "good" : result.score > 0 ? "part" : "bad";
 
   const optionClass = (l: string) => {
     const picked = choice.includes(l);
@@ -342,14 +385,14 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       </div>
 
-      <div className={`sticky bottom-0 -mx-4 border-t-2 px-6 py-4 ${result ? (result.correct ? "border-emerald-300 bg-emerald-50" : "border-red-200 bg-red-50") : "border-[var(--color-border)] bg-white"}`}>
+      <div className={`sticky bottom-0 -mx-4 border-t-2 px-6 py-4 ${result ? TONES[tone].bar : "border-[var(--color-border)] bg-white"}`}>
         {result ? (
           <div className="flex flex-wrap items-start gap-4">
-            <div className={`learn-pop flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${result.correct ? "bg-emerald-500" : "bg-red-500"} text-white`}>
-              {result.correct ? <Check className="h-6 w-6" strokeWidth={3} /> : <X className="h-6 w-6" strokeWidth={3} />}
+            <div className={`learn-pop flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${TONES[tone].dot} text-white`}>
+              {tone === "good" ? <Check className="h-6 w-6" strokeWidth={3} /> : tone === "part" ? <CircleDot className="h-6 w-6" strokeWidth={3} /> : <X className="h-6 w-6" strokeWidth={3} />}
             </div>
             <div className="min-w-0 flex-1 space-y-1 text-sm">
-              <p className={`text-lg font-semibold ${result.correct ? "text-emerald-700" : "text-red-700"}`}>
+              <p className={`text-lg font-semibold ${TONES[tone].text}`}>
                 {result.correct ? (streak >= 3 ? `${streak} in a row!` : "Correct!") : result.score > 0 ? "Partly right" : "Not quite"}
                 <span className="ml-2 font-mono text-sm font-normal">{result.score} / {result.max}</span>
               </p>
@@ -362,7 +405,7 @@ export default function ExamPractice({ id, pid, exam, only, onExit, onFinish, on
               )}
               {q.explanation && <div className="text-slate-600"><ChatMarkdown text={q.explanation} /></div>}
             </div>
-            <button type="button" autoFocus className={`self-center rounded-xl px-8 py-3 font-semibold text-white shadow-[0_4px_0_0_rgba(0,0,0,0.15)] ${result.correct ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"}`}
+            <button type="button" autoFocus className={`self-center rounded-xl px-8 py-3 font-semibold text-white shadow-[0_4px_0_0_rgba(0,0,0,0.15)] ${TONES[tone].button}`}
               onClick={next}>
               {at + 1 < items.length ? "Continue" : "See results"}
             </button>

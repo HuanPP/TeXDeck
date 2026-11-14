@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronDown, Download, Play, Trophy } from "lucide-react";
 import { examPdfUrl, getPaper, saveAttempt, saveResult, type Exam } from "../api";
-import ExamPractice from "../components/ExamPractice";
+import ExamPractice, { forgetRun, savedRun, type SavedRun } from "../components/ExamPractice";
 import PdfScroll from "../components/PdfScroll";
 import Segmented from "../components/Segmented";
 
 // One mock paper of an exam: practise it, read it, or read its answer key.
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 const sum = (xs: number[]) => xs.reduce((a, b) => a + (Number(b) || 0), 0);
 
 export default function ExamPaperPage() {
@@ -19,6 +20,8 @@ export default function ExamPaperPage() {
   const [practising, setPractising] = useState<string[] | null | false>(false); // false: not; null: all; list: these
   const [lastWrong, setLastWrong] = useState<string[]>([]);
   const [menu, setMenu] = useState(false);
+  const [resume, setResume] = useState<SavedRun | null>(null);
+  const [saved, setSaved] = useState<SavedRun | null>(() => savedRun(id, pid));
 
   useEffect(() => {
     getPaper(id, pid).then(setPaper, (e) => setError(errMsg(e)));
@@ -31,10 +34,12 @@ export default function ExamPaperPage() {
 
   if (practising !== false) {
     return (
-      <ExamPractice id={id} pid={pid} exam={paper} only={practising ?? undefined} onExit={() => setPractising(false)}
+      <ExamPractice id={id} pid={pid} exam={paper} only={practising ?? undefined} resume={resume ?? undefined}
+        onExit={() => { setPractising(false); setResume(null); setSaved(savedRun(id, pid)); }}
         onResult={(qid, score) => void saveResult(id, pid, qid, score).catch(() => undefined)}
         onFinish={(s) => {
           setLastWrong(s.wrong);
+          setSaved(null);
           if (s.full) void saveAttempt(id, pid, { score: s.score, total: s.total, answered: s.answered, correct: s.correct })
             .then((attempts) => setPaper((p) => p && { ...p, attempts }), () => undefined);
         }} />
@@ -82,12 +87,27 @@ export default function ExamPaperPage() {
                 </li>
               ))}
             </ul>
-            <div className="flex flex-wrap gap-3 pt-2">
-              <button type="button" className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-[0_4px_0_0_#059669] hover:bg-emerald-600"
-                onClick={() => setPractising(null)}>
-                <Play className="h-4 w-4" /> Start
-              </button>
-              {lastWrong.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              {saved ? (
+                <>
+                  <button type="button" className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-[0_4px_0_0_#059669] hover:bg-emerald-600"
+                    onClick={() => { setResume(saved); setPractising(saved.only); }}>
+                    <Play className="h-4 w-4" /> Continue
+                  </button>
+                  <span className="text-sm text-slate-500">
+                    {Object.keys(saved.results).length} of {saved.only?.length ?? paper.questions} answered
+                  </span>
+                  <button type="button" className="btn-secondary" onClick={() => { forgetRun(id, pid); setSaved(null); setPractising(null); }}>
+                    Start over
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-[0_4px_0_0_#059669] hover:bg-emerald-600"
+                  onClick={() => setPractising(null)}>
+                  <Play className="h-4 w-4" /> Start
+                </button>
+              )}
+              {lastWrong.length > 0 && !saved && (
                 <button type="button" className="btn-secondary" onClick={() => setPractising(lastWrong)}>
                   Retry the {lastWrong.length} I missed
                 </button>
@@ -102,7 +122,7 @@ export default function ExamPaperPage() {
                 {best !== null && <p className="text-2xl font-semibold text-[var(--color-heading)]">{best}%<span className="ml-2 text-xs font-normal text-slate-400">best</span></p>}
                 <ol className="space-y-1 text-xs text-slate-500">
                   {[...paper.attempts].reverse().slice(0, 8).map((a) => (
-                    <li key={a.at} className="flex justify-between"><span>{new Date(a.at * 1000).toLocaleDateString()}</span><span className="font-mono">{a.score} / {a.total}</span></li>
+                    <li key={a.at} className="flex justify-between"><span>{fmtDay(a.at * 1000)}</span><span className="font-mono">{a.score} / {a.total}</span></li>
                   ))}
                 </ol>
               </>

@@ -21,12 +21,12 @@ function TopicEditor({ topics, onChange }: { topics: Topic[]; onChange: (t: Topi
       <ul className="space-y-1">
         {topics.map((t, i) => (
           <li key={i} className="flex items-center gap-2 text-sm">
-            <input className="input-field min-w-0 flex-1 px-2 py-1 text-sm" aria-label="Topic" value={t.name}
+            <input className="input-field min-w-0 flex-[3] px-2 py-1 text-sm" aria-label="Topic" value={t.name} title={t.name}
               onChange={(e) => set(i, { name: e.target.value })} />
             <input className="input-field w-16 px-1 py-1 text-center text-sm" type="number" min={0} max={100} aria-label="Share in percent"
               value={t.weight} onChange={(e) => set(i, { weight: Number(e.target.value) || 0 })} />
             <span className="text-xs text-slate-400">%</span>
-            <input className="input-field hidden min-w-0 flex-[2] px-2 py-1 text-xs sm:block" aria-label="How it is asked" placeholder="How it is asked"
+            <input className="input-field hidden min-w-0 flex-[4] px-2 py-1 text-xs sm:block" aria-label="How it is asked" placeholder="How it is asked" title={t.note}
               value={t.note} onChange={(e) => set(i, { note: e.target.value })} />
             <button type="button" className="p-1 text-slate-400 hover:text-red-600" aria-label="Remove topic"
               onClick={() => onChange(topics.filter((_, j) => j !== i))}><X className="h-3.5 w-3.5" /></button>
@@ -65,19 +65,19 @@ export default function ProfileEditor({ value, onChange }: { value: Profile; onC
           <input className="input-field mt-1" value={value.title} onChange={(e) => set({ title: e.target.value })} />
         </label>
         <label className="text-sm text-slate-600">Minutes
-          <input className="input-field mt-1 w-24" type="number" min={0} value={value.duration || ""}
+          <input className="input-field mt-1 block w-24" type="number" min={0} value={value.duration || ""}
             onChange={(e) => set({ duration: Number(e.target.value) || 0 })} />
         </label>
       </div>
       <label className="block text-sm text-slate-600">Notes to candidates
-        <textarea className="input-field mt-1 min-h-12 text-sm" value={value.instructions} onChange={(e) => set({ instructions: e.target.value })} />
+        <textarea className="input-field mt-1 min-h-12 max-h-96 text-sm [field-sizing:content]" value={value.instructions} onChange={(e) => set({ instructions: e.target.value })} />
       </label>
       <TopicEditor topics={value.topics} onChange={(topics) => set({ topics })} />
       <label className="block text-sm text-slate-600">How it asks
-        <textarea className="input-field mt-1 min-h-16 text-sm" value={value.style} onChange={(e) => set({ style: e.target.value })} />
+        <textarea className="input-field mt-1 min-h-16 max-h-96 text-sm [field-sizing:content]" value={value.style} onChange={(e) => set({ style: e.target.value })} />
       </label>
       <label className="block text-sm text-slate-600">How it marks
-        <textarea className="input-field mt-1 min-h-16 text-sm" value={value.marking} onChange={(e) => set({ marking: e.target.value })} />
+        <textarea className="input-field mt-1 min-h-16 max-h-96 text-sm [field-sizing:content]" value={value.marking} onChange={(e) => set({ marking: e.target.value })} />
       </label>
       <div className="flex items-baseline justify-between">
         <span className="text-sm text-slate-600">Sections</span>
