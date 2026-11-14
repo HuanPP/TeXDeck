@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import threading
 from contextlib import asynccontextmanager
@@ -762,9 +763,16 @@ def _run_refine(gen_id: str, instruction: str, progress: ProgressCallback) -> No
         raise
 
 
-def _plain(gen_id: str, name: str, missing: str) -> FileResponse:
-    _load(gen_id)
-    return FileResponse(_file(gen_id, name, missing), media_type="text/plain; charset=utf-8", filename=name)
+def _download_name(meta, gen_id: str, ext: str) -> str:
+    """Name a downloaded file after the deck title, safe on every OS."""
+    stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", meta.title or "").strip(" .") or gen_id
+    return stem[:120] + ext
+
+
+def _plain(gen_id: str, name: str, missing: str, ext: str | None = None) -> FileResponse:
+    meta = _load(gen_id)
+    filename = _download_name(meta, gen_id, ext) if ext else name
+    return FileResponse(_file(gen_id, name, missing), media_type="text/plain; charset=utf-8", filename=filename)
 
 
 @app.get("/health")
@@ -1266,18 +1274,18 @@ def api_delete_generation(gen_id: str) -> Response:
 
 @app.get("/api/generations/{gen_id}/pdf")
 def api_get_pdf(gen_id: str) -> FileResponse:
-    _load(gen_id)
+    meta = _load(gen_id)
     return FileResponse(
         _file(gen_id, "main.pdf", "PDF not generated yet"),
         media_type="application/pdf",
-        filename="main.pdf",
+        filename=_download_name(meta, gen_id, ".pdf"),
         content_disposition_type="inline",
     )
 
 
 @app.get("/api/generations/{gen_id}/tex")
 def api_get_tex(gen_id: str) -> FileResponse:
-    return _plain(gen_id, "main.tex", "TeX not generated yet")
+    return _plain(gen_id, "main.tex", "TeX not generated yet", ".tex")
 
 
 @app.get("/api/generations/{gen_id}/log")
@@ -1293,7 +1301,7 @@ def api_get_bundle(gen_id: str) -> FileResponse:
     except KeyError as e:
         raise HTTPException(404, detail=f"Generation not found: {gen_id}") from e
     return FileResponse(
-        path, media_type="application/zip", filename=(meta.title or gen_id).replace("/", "_") + ".zip"
+        path, media_type="application/zip", filename=_download_name(meta, gen_id, ".zip")
     )
 
 
@@ -1350,7 +1358,7 @@ def api_get_pptx(gen_id: str, fonts_: str | None = Query(None, alias="fonts")) -
     return FileResponse(
         out,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        filename=(meta.title or gen_id).replace("/", "_") + ".pptx",
+        filename=_download_name(meta, gen_id, ".pptx"),
     )
 
 

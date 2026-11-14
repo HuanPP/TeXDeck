@@ -640,8 +640,8 @@ export default function Generation() {
                   <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={pdfUrl(id)} download>
                     <Download className="h-4 w-4" /> Notes PDF
                   </a>
-                  <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={texUrl(id)} download="main.tex">
-                    <FileText className="h-4 w-4" /> main.tex
+                  <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={texUrl(id)} download>
+                    <FileText className="h-4 w-4" /> TeX
                   </a>
                   <a role="menuitem" className="flex items-center gap-2 px-3 py-2 text-slate-700 no-underline hover:bg-slate-50" href={bundleUrl(id)} download>
                     <Package className="h-4 w-4" /> Overleaf zip
@@ -701,8 +701,8 @@ export default function Generation() {
                   <Presentation className="h-4 w-4" /> PPTX
                 </a>
               )}
-              <a className="btn-secondary text-sm" href={texUrl(id)} download="main.tex">
-                <FileText className="h-4 w-4" /> main.tex
+              <a className="btn-secondary text-sm" href={texUrl(id)} download>
+                <FileText className="h-4 w-4" /> TeX
               </a>
               <a className="btn-secondary text-sm" href={bundleUrl(id)} download>
                 <Package className="h-4 w-4" /> Overleaf zip
