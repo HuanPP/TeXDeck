@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -19,7 +20,7 @@ export function normalizeMath(text: string): string {
 export default function ChatMarkdown({ text }: { text: string }) {
   return (
     <div className="chat-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly, remarkMath]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: "ignore" }]]}
         components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}>
         {normalizeMath(text)}
