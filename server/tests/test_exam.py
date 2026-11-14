@@ -290,3 +290,11 @@ def test_a_drill_is_one_type_on_one_topic(client: TestClient, monkeypatch: pytes
     assert summary["drill"] == {"topic": "Depth", "type": "calc", "count": 6} and summary["questions"] == 6
     paper = client.get(f"/api/generations/{gid}/exam/papers/{summary['id']}").json()
     assert paper["total"] == 60  # the profile's calculation points, per question
+
+
+def test_two_column_options_grow_with_tall_maths() -> None:
+    # Tabular rows have a fixed height, so fractions in them ran into the next row.
+    tex = exam._options([r"$-\frac{v_0}{3}$", r"$\frac{v_0}{3}$", r"$-\frac{2v_0}{3}$", r"$\sqrt{\frac{2}{3}}$"])
+    assert "tabular" not in tex
+    assert tex.count(r"\parbox[t]{0.48\linewidth}") == 4 and tex.count(r"\par ") == 2
+    assert r"\setlength{\lineskip}" in exam.PREAMBLE

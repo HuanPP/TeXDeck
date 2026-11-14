@@ -698,9 +698,11 @@ def _options(options: list[str]) -> str:
     if width <= 12 and len(options) <= 4:
         return "\\par " + "\\hspace{2.2em}".join(items)
     if width <= 28:
+        # Two per line as top-aligned boxes in a paragraph: a line holding a tall
+        # fraction or root gets its height plus \lineskip, where tabular rows keep
+        # a fixed height and run into each other.
         rows = [items[i:i + 2] for i in range(0, len(items), 2)]
-        return "\\par\\begin{tabular}{@{}p{0.45\\linewidth}p{0.45\\linewidth}@{}}" + \
-            "\\\\".join(" & ".join(r + [""] * (2 - len(r))) for r in rows) + "\\end{tabular}"
+        return "".join("\\par " + "".join(f"\\parbox[t]{{0.48\\linewidth}}{{{it}}}" for it in r) for r in rows)
     return "".join(f"\\par {it}" for it in items)
 
 
@@ -710,6 +712,9 @@ PREAMBLE = r"""\documentclass[11pt]{ctexart}
 \usepackage{enumitem}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.35em}
+% Lines with tall maths keep clear of their neighbours (TeX's default: 1pt).
+\setlength{\lineskiplimit}{3pt}
+\setlength{\lineskip}{5pt}
 \pagestyle{plain}
 \begin{document}
 """
