@@ -36,9 +36,10 @@ export default function InvitesMenu() {
     }
   }
 
+  // The link opens the sign-up form with the code filled in.
   async function copy(code: string) {
     try {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(`${window.location.origin}/?invite=${encodeURIComponent(code)}`);
       setCopied(code);
     } catch {
       setCopied("");
@@ -73,7 +74,7 @@ export default function InvitesMenu() {
                 <code className="truncate font-mono text-xs text-[var(--color-heading)]">{i.code}</code>
                 <span className="flex shrink-0 gap-2 text-xs">
                   <button type="button" className="text-[var(--color-primary)] hover:underline" onClick={() => void copy(i.code)}>
-                    {copied === i.code ? "Copied" : "Copy"}
+                    {copied === i.code ? "Copied" : "Copy link"}
                   </button>
                   <button type="button" className="text-slate-500 hover:underline"
                     onClick={() => void run(() => revokeInvite(i.code))}>

@@ -50,7 +50,9 @@ function Section({ path, children }: { path: string; children: React.ReactNode }
 }
 
 function RootRedirect() {
-  const { search } = useLocation();
+  const params = new URLSearchParams(useLocation().search);
+  params.delete("invite"); // spent by the sign-up form
+  const search = params.toString() ? `?${params}` : "";
   const last = localStorage.getItem(LAST_SECTION);
   const to = SECTIONS.some((s) => s.path === last) && !search.includes("template=") ? last! : "/present";
   return <Navigate to={to + search} replace />;

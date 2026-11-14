@@ -9,9 +9,12 @@ const AuthContext = createContext<AuthValue>({ user: null, admin: false, signOut
 
 export const useAuth = () => useContext(AuthContext);
 
+// An invite link (?invite=CODE) opens the sign-up form with the code filled in.
+const linkedInvite = () => new URLSearchParams(window.location.search).get("invite")?.trim() ?? "";
+
 function SignInForm({ registration, onDone }: { registration: boolean; onDone: (session: Session) => void }) {
-  const [signingUp, setSigningUp] = useState(false);
-  const [invite, setInvite] = useState("");
+  const [invite, setInvite] = useState(() => (registration ? linkedInvite() : ""));
+  const [signingUp, setSigningUp] = useState(() => Boolean(registration && linkedInvite()));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +25,9 @@ function SignInForm({ registration, onDone }: { registration: boolean; onDone: (
     setError(null);
     setBusy(true);
     try {
-      onDone(signingUp ? await register(invite, username, password) : await signIn(username, password));
+      const session = signingUp ? await register(invite, username, password) : await signIn(username, password);
+      if (linkedInvite()) window.history.replaceState(null, "", window.location.pathname); // the code is spent
+      onDone(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPassword("");
@@ -44,13 +49,13 @@ function SignInForm({ registration, onDone }: { registration: boolean; onDone: (
         {signingUp && (
           <div>
             <label className="mb-2 block text-sm text-slate-600" htmlFor="invite">Invite code</label>
-            <input id="invite" className="input-field" autoComplete="off" autoFocus
+            <input id="invite" className="input-field" autoComplete="off" autoFocus={!invite}
               value={invite} onChange={(e) => setInvite(e.target.value)} />
           </div>
         )}
         <div>
           <label className="mb-2 block text-sm text-slate-600" htmlFor="username">Username</label>
-          <input id="username" className="input-field" autoComplete="username" autoFocus={!signingUp}
+          <input id="username" className="input-field" autoComplete="username" autoFocus={!signingUp || Boolean(invite)}
             value={username} onChange={(e) => setUsername(e.target.value)} />
         </div>
         <div>
