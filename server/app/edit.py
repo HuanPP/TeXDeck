@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .deck import DIAGRAM_RULE
+from .deck import DIAGRAM_RULE, WRITING_RULE
 from .llm import text_block
 
 
@@ -64,7 +64,7 @@ class Unit:
         return f"\\end{{{self.env}}}"
 
 
-DECK_UNIT = Unit("frame", "frame", "XeLaTeX Beamer deck", KEEP_NOTES_RULE + " " + DIAGRAM_RULE)
+DECK_UNIT = Unit("frame", "frame", "XeLaTeX Beamer deck", " ".join((KEEP_NOTES_RULE, WRITING_RULE, DIAGRAM_RULE)))
 NOTES_UNIT = Unit("notesheet", "sheet", "XeLaTeX study-notes document", NOTES_EDIT_RULE)
 
 

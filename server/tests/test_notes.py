@@ -109,6 +109,7 @@ def test_notes_edit_prompts_speak_of_sheets() -> None:
         parse_frames(get_template("navy").main_tex)[0], "x", get_template("navy").main_tex
     )[0]["content"]
     assert r"\begin{frame}...\end{frame}" in deck_system and r"\note{" in deck_system
+    assert deck.WRITING_RULE in deck_system and deck.WRITING_RULE not in system
     whole = _text(build_deck_edit_messages(NOTES, template.main_tex, "全部精简"))
     assert "Revision request for the notes" in whole and "notesheet" in whole
 

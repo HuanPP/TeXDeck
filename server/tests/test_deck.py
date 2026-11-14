@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.deck import (
+    WRITING_RULE,
     CompileError,
     DeckError,
     DeckRequest,
@@ -227,6 +228,7 @@ def test_build_generation_messages_order_and_verbatim_template() -> None:
     assert "Requirements: Focus on risks" in title_msg
     # Slides follow the source language by default; Requirements may override it.
     assert "Output language: the language of the source material" in title_msg
+    assert WRITING_RULE in title_msg  # no hedging, no image provenance
     assert "No author was provided" not in title_msg
     assert "No institute was provided" not in title_msg
     assert messages[4]["content"] == title_msg  # title requirement repeated

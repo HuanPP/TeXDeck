@@ -100,7 +100,8 @@ PLACEMENT_RULE = (
     "fits best, or where its user note says; use every image exactly once unless the "
     "Requirements say otherwise. Include an image only as "
     "\\includegraphics[width=<w>\\linewidth,height=<h>\\textheight,keepaspectratio]{<file>} "
-    "with both bounds and the file name exactly as listed. Choose the layout from the "
+    "with both bounds and the file name exactly as listed; never say in the text that the "
+    "user supplied it. Choose the layout from the "
     "image's shape: a wide image takes the full width with at most two short lines of "
     "text above or below it; a square or tall image goes in a columns layout with the "
     "image in a 0.4-0.5 wide column and the text beside it; a logo-like or decorative "
@@ -115,6 +116,19 @@ SOURCE_IMAGES_RULE = (
     "tikz, pgfplots or booktabs when their data or structure is stated in the material. "
     "Never redraw photographs, micrographs, scans, maps, renders or dense plots whose "
     "content you cannot reproduce faithfully; state what they show in words instead."
+)
+
+# Some models hedge everything ("X does not mean Y", "this is only an
+# interpretation", "image supplied by the user") and bolt a summary box onto
+# slides. Users read that as filler; it applies to slides, notes and edits.
+WRITING_RULE = (
+    "Writing: state the content directly. No disclaimers, caveats or scope notes about "
+    "the material, the analysis or the images (such as saying it is only an "
+    "interpretation, not official, or what it does not prove), and no defensive "
+    "\"X does not mean Y\" phrasing, unless the Requirements ask for them. Never say "
+    "that an image was supplied by the user or where it came from; a caption, if any, "
+    "names what the image shows. No one-sentence-summary or key-takeaway boxes unless "
+    "the Requirements ask for them. The speaker notes follow the same rules."
 )
 
 # Users kept asking to fix these by hand: arrows too short to see, edge labels
@@ -154,7 +168,8 @@ NOTES_PLACEMENT_RULE = (
     "heading, whose content it fits best, or where its user note says; use every image "
     "exactly once unless the Requirements say otherwise. Include an image only as "
     "\\begin{center}\\includegraphics[width=<w>\\linewidth,height=0.4\\textheight,"
-    "keepaspectratio]{<file>}\\end{center} with the file name exactly as listed: "
+    "keepaspectratio]{<file>}\\end{center} with the file name exactly as listed (never say "
+    "in the text that the user supplied it): "
     "w = 0.8 for a wide image, 0.4-0.5 for a square or tall one, smaller for a logo-like "
     "one. Add one short line under it saying what it shows only when the notes do not "
     "already say so. Never crop, stretch, rotate or redraw a user image, and never "
@@ -332,6 +347,7 @@ def build_generation_messages(
         title_parts.append(f"Requirements: {request.instruction}")
     title_parts.append(LANGUAGE_RULES.get(request.language, LANGUAGE_RULES["source"]))
     title_parts.append(NOTES_RULE)
+    title_parts.append(WRITING_RULE)
     title_parts.append(DIAGRAM_RULE)
     title_parts.append(SOURCE_IMAGES_RULE)
     if memory_note:
