@@ -612,7 +612,7 @@ export default function Generation() {
     <div className={notes && succeeded ? "-mt-5 flex flex-col gap-2 [&>*]:shrink-0" : "space-y-6"}
       style={notes && succeeded ? { height: "calc(100vh - 7rem)" } : undefined}>
       {notes ? (
-        <div className={`flex flex-wrap items-center justify-between gap-2 ${succeeded ? "relative left-1/2 w-[calc(100vw-2rem)] -translate-x-1/2 px-1" : ""}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-2 ${succeeded ? "relative left-1/2 z-30 w-[calc(100vw-2rem)] -translate-x-1/2 px-1" : ""}`}>
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             {!succeeded && (
               <Link to={home} className="shrink-0 text-xs text-[var(--color-primary)] no-underline hover:underline">
