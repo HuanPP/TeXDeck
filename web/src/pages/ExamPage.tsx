@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Dumbbell, FileUp, Pencil, Plus, RefreshCw, Trash2, Trophy } from "lucide-react";
+import { Dumbbell, FileUp, Paperclip, Pencil, Plus, RefreshCw, Trash2, Trophy, X } from "lucide-react";
 import {
-  addPastPapers, deletePaper, getExam, getGeneration, newDrill, newPaper, redraftProfile, saveProfile,
-  type ExamState, type Mastery, type PaperSummary, type Profile, type QuestionType,
+  addPastPapers, deleteOwnTopic, deleteOwnTopicFile, deletePaper, getExam, getGeneration, newDrill, newPaper,
+  ownTopicFileUrl, redraftProfile, saveOwnTopic, saveProfile,
+  type ExamState, type Mastery, type OwnTopic, type PaperSummary, type Profile, type QuestionType,
 } from "../api";
 import { TYPE_LABELS } from "./ExamList";
 import ProfileEditor from "../components/ProfileEditor";
@@ -63,19 +64,118 @@ function level(m: number | null): { label: string; bar: string } {
 // (an unpractised topic counts as half known).
 const priority = (t: Mastery) => t.weight * (1 - (t.mastery ?? 0.5));
 
-function Topics({ rows, types, disabled, onDrill }: {
-  rows: Mastery[]; types: QuestionType[]; disabled: boolean; onDrill: (topic: string, type: QuestionType, count: number) => void;
+const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+
+// Add or change a topic of the reader's own: a name, what it covers, and example
+// questions, pasted or as PDFs and photos. Drills on it follow the examples.
+function TopicForm({ id, topic, onDone }: { id: string; topic: OwnTopic | null; onDone: (changed: boolean) => void }) {
+  const [name, setName] = useState(topic?.name ?? "");
+  const [note, setNote] = useState(topic?.note ?? "");
+  const [text, setText] = useState(topic?.text ?? "");
+  const [files, setFiles] = useState<File[]>([]);
+  const [kept, setKept] = useState<string[]>(topic?.files ?? []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const ready: File[] = [];
+      for (const f of files) ready.push(isPdf(f) ? f : await prepareFigure(f));
+      await saveOwnTopic(id, topic?.id ?? null, { name: name.trim(), note: note.trim(), text: text.trim(), files: ready });
+      onDone(true);
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function dropKept(file: string) {
+    if (!topic) return;
+    try {
+      await deleteOwnTopicFile(id, topic.id, file);
+      setKept((k) => k.filter((x) => x !== file));
+    } catch (e) {
+      setError(errMsg(e));
+    }
+  }
+
+  return (
+    <form className="space-y-2 bg-slate-50 px-4 py-3 text-sm" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      <input className="input-field w-full" placeholder="Topic, e.g. 斜面上的连接体" value={name} maxLength={120}
+        aria-label="Topic name" onChange={(e) => setName(e.target.value)} autoFocus />
+      <textarea className="input-field w-full" rows={2} placeholder="What it covers (optional)" value={note} maxLength={1000}
+        aria-label="What the topic covers" onChange={(e) => setNote(e.target.value)} />
+      <textarea className="input-field w-full" rows={4} placeholder="Example questions: paste them here, or attach PDFs or photos below"
+        value={text} aria-label="Example questions" onChange={(e) => setText(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {kept.map((f) => (
+          <span key={f} className="inline-flex items-center gap-1 border border-[var(--color-border)] bg-white px-2 py-0.5">
+            <a href={ownTopicFileUrl(id, topic!.id, f)} target="_blank" rel="noreferrer" className="text-[var(--color-primary)]">{f}</a>
+            <button type="button" aria-label={`Remove ${f}`} className="text-slate-400 hover:text-red-600" onClick={() => void dropKept(f)}>
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        {files.map((f, i) => (
+          <span key={`${f.name}${i}`} className="inline-flex items-center gap-1 border border-dashed border-[var(--color-border)] bg-white px-2 py-0.5">
+            {f.name}
+            <button type="button" aria-label={`Remove ${f.name}`} className="text-slate-400 hover:text-red-600"
+              onClick={() => setFiles((all) => all.filter((_, j) => j !== i))}>
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <label className="inline-flex cursor-pointer items-center gap-1 text-[var(--color-primary)] hover:underline">
+          <Paperclip className="h-3.5 w-3.5" /> Attach PDFs or photos
+          <input type="file" multiple accept="application/pdf,.pdf,image/*,.heic,.heif" className="sr-only"
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []); // read before the reset below empties the list
+              setFiles((all) => [...all, ...picked]);
+              e.target.value = "";
+            }} />
+        </label>
+        <span className="text-slate-400">up to 5 files</span>
+      </div>
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" className="btn-primary py-1 text-sm" disabled={saving || !name.trim()}>
+          {saving ? "Saving…" : topic ? "Save" : "Add the topic"}
+        </button>
+        <button type="button" className="btn-secondary py-1 text-sm" onClick={() => onDone(false)}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function Topics({ id, rows, types, disabled, onDrill, onChanged }: {
+  id: string; rows: Mastery[]; types: QuestionType[]; disabled: boolean;
+  onDrill: (topic: string, type: QuestionType, count: number) => void; onChanged: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [type, setType] = useState<QuestionType>(types[0] ?? "single");
   const [count, setCount] = useState(12);
+  const [editing, setEditing] = useState<string | null>(null); // a topic's name, or "+" for a new one
+  const [confirm, setConfirm] = useState<string | null>(null);
   const sorted = [...rows].sort((a, b) => priority(b) - priority(a));
   const practised = rows.some((t) => t.answered > 0);
+  const done = (changed: boolean) => { setEditing(null); if (changed) onChanged(); };
+  const add = editing === "+" ? <TopicForm id={id} topic={null} onDone={done} /> : (
+    <button type="button" className="inline-flex items-center gap-1 px-4 py-2 text-sm text-[var(--color-primary)] hover:underline disabled:opacity-40"
+      disabled={disabled} onClick={() => setEditing("+")}>
+      <Plus className="h-4 w-4" /> Add a topic of your own
+    </button>
+  );
   if (!rows.length) {
     return (
-      <p className="border border-dashed border-[var(--color-border)] px-4 py-6 text-center text-sm text-slate-500">
-        This exam's profile lists no topics yet. Use Read again or Edit below to add them; then answers count toward each topic.
-      </p>
+      <div className="border border-dashed border-[var(--color-border)]">
+        <p className="px-4 pt-6 text-center text-sm text-slate-500">
+          This exam's profile lists no topics yet. Use Read again or Edit below, or add your own; then answers count toward each topic.
+        </p>
+        <div className="py-2 text-center">{add}</div>
+      </div>
     );
   }
   return (
@@ -88,14 +188,35 @@ function Topics({ rows, types, disabled, onDrill }: {
       </li>
       {sorted.map((t, i) => {
         const l = level(t.mastery);
+        if (t.own && editing === t.name) {
+          return <li key={t.name}><TopicForm id={id} topic={t.own} onDone={done} /></li>;
+        }
         return (
-          <li key={t.name} className="px-4 py-2.5">
+          <li key={t.name} className="group px-4 py-2.5">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-heading)]" title={t.name}>
+              <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-heading)]" title={t.own?.note || t.name}>
                 {t.name}
                 {i === 0 && practised && t.weight > 0 && <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-px text-[10px] text-amber-800">Practise next</span>}
+                {t.own && (
+                  <span className="ml-2 inline-flex items-center gap-1.5 align-middle opacity-60 group-hover:opacity-100">
+                    <button type="button" aria-label={`Edit ${t.name}`} title="Edit" className="text-slate-400 hover:text-slate-700"
+                      disabled={disabled} onClick={() => setEditing(t.name)}><Pencil className="h-3.5 w-3.5" /></button>
+                    {confirm === t.name ? (
+                      <span className="text-[11px]">
+                        <button type="button" className="text-red-600 hover:underline"
+                          onClick={() => { setConfirm(null); void deleteOwnTopic(id, t.own!.id).then(onChanged); }}>Delete topic</button>
+                        <button type="button" className="ml-1.5 text-slate-500 hover:underline" onClick={() => setConfirm(null)}>Keep</button>
+                      </span>
+                    ) : (
+                      <button type="button" aria-label={`Delete ${t.name}`} title="Delete" className="text-slate-400 hover:text-red-600"
+                        disabled={disabled} onClick={() => setConfirm(t.name)}><Trash2 className="h-3.5 w-3.5" /></button>
+                    )}
+                  </span>
+                )}
               </span>
-              <span className="w-12 text-right text-xs text-slate-400" title="Share of the marks">{t.weight}%</span>
+              <span className="w-12 text-right text-xs text-slate-400" title={t.own ? "A topic you added" : "Share of the marks"}>
+                {t.own ? "Yours" : `${t.weight}%`}
+              </span>
               <span className="flex w-40 items-center gap-2" title={`${t.answered} answered`}>
                 <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                   <span className={`block h-full rounded-full ${l.bar}`} style={{ width: `${Math.round((t.mastery ?? 0) * 100)}%` }} />
@@ -122,12 +243,15 @@ function Topics({ rows, types, disabled, onDrill }: {
                   onClick={() => { onDrill(t.name, type, count); setOpen(null); }}>
                   Make the drill
                 </button>
-                <span className="text-xs text-slate-400">From the plainest form to past-paper hard, one change at a time.</span>
+                <span className="text-xs text-slate-400">
+                  {t.own && (t.own.text || t.own.files.length) ? "Questions like your examples, ending at least as hard as they are." : "From the plainest form to past-paper hard, one change at a time."}
+                </span>
               </div>
             )}
           </li>
         );
       })}
+      <li>{add}</li>
     </ul>
   );
 }
@@ -288,8 +412,8 @@ export default function ExamPage() {
                 A drill is 10 to 15 questions of one kind on one topic.
               </p>
             </div>
-            <Topics rows={state.mastery} types={[...new Set(profile.sections.map((s) => s.type))]} disabled={busy || running}
-              onDrill={(topic, type, count) => void act(() => newDrill(id, { topic, type, count }))} />
+            <Topics id={id} rows={state.mastery} types={[...new Set(profile.sections.map((s) => s.type))]} disabled={busy || running}
+              onDrill={(topic, type, count) => void act(() => newDrill(id, { topic, type, count }))} onChanged={() => void load()} />
             {drills.length > 0 && <h3 className="pt-2 text-lg">Drills</h3>}
             {drills.length > 0 && (
               <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

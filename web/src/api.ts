@@ -383,7 +383,10 @@ export type PaperSummary = {
   drill: Drill | null; // set for drills: one type of question on one topic
 };
 // A topic's mastery: share of points earned, recent answers counting most; null before any answer.
-export type Mastery = { name: string; weight: number; answered: number; mastery: number | null; recent: number[] };
+export type Mastery = { name: string; weight: number; answered: number; mastery: number | null; recent: number[];
+  own?: OwnTopic }; // set for a topic the student added
+// A topic the student added: what it covers and example questions (pasted, or files).
+export type OwnTopic = { id: string; name: string; note: string; text: string; files: string[] };
 export type Exam = PaperSummary & { instructions: string; duration: number; sections: ExamSection[] };
 export type ExamState = {
   spec: ExamSpec | null; profile: Profile | null; papers: PaperSummary[];
@@ -417,6 +420,19 @@ export function addPastPapers(id: string, files: File[]): Promise<void> {
 }
 export const newPaper = (id: string, focus: string) => requestJson<void>(`${exam(id)}/papers`, json("POST", { focus }));
 export const newDrill = (id: string, drill: Drill) => requestJson<void>(`${exam(id)}/drills`, json("POST", drill));
+export function saveOwnTopic(id: string, tid: string | null,
+  topic: { name: string; note: string; text: string; files: File[] }): Promise<OwnTopic> {
+  const form = new FormData();
+  form.append("name", topic.name);
+  form.append("note", topic.note);
+  form.append("text", topic.text);
+  for (const f of topic.files) form.append("files", f);
+  return requestJson<OwnTopic>(`${exam(id)}/topics${tid ? `/${tid}` : ""}`, { method: tid ? "PUT" : "POST", body: form });
+}
+export const deleteOwnTopic = (id: string, tid: string) => requestJson<void>(`${exam(id)}/topics/${tid}`, { method: "DELETE" });
+export const deleteOwnTopicFile = (id: string, tid: string, name: string) =>
+  requestJson<void>(`${exam(id)}/topics/${tid}/files/${name}`, { method: "DELETE" });
+export const ownTopicFileUrl = (id: string, tid: string, name: string) => `${exam(id)}/topics/${tid}/files/${name}`;
 export const saveResult = (id: string, pid: string, qid: string, score: number) =>
   requestJson<unknown>(`${exam(id)}/papers/${pid}/results`, json("POST", { qid, score }));
 export const getPaper = (id: string, pid: string) => requestJson<Exam>(`${exam(id)}/papers/${pid}`);

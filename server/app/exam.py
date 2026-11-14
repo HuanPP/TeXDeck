@@ -144,45 +144,40 @@ def clean_spec(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def store_past(gdir: Path, uploads: list[tuple[str, bytes]]) -> list[str]:
-    """Past papers: PDFs as they are, images re-encoded. Returns the stored names."""
-    folder = exam_dir(gdir) / PAST_DIR
-    have = len(list(folder.iterdir())) if folder.is_dir() else 0
-    if have + len(uploads) > MAX_PAST:
-        raise ExamError(f"At most {MAX_PAST} past papers")
+def _store_files(folder: Path, uploads: list[tuple[str, bytes]], prefix: str, limit: int, what: str) -> list[str]:
+    """PDFs as they are, images re-encoded, as <prefix>-NN.<ext>. Returns the stored names."""
+    taken = sorted(folder.iterdir()) if folder.is_dir() else []
+    if len(taken) + len(uploads) > limit:
+        raise ExamError(f"At most {limit} {what}s")
+    start = 1 + max((int(m.group(1)) for p in taken if (m := re.search(r"-(\d+)\.", p.name))), default=0)
     names = []
-    for i, (name, data) in enumerate(uploads, start=have + 1):
+    for i, (name, data) in enumerate(uploads, start=start):
         folder.mkdir(parents=True, exist_ok=True)
         if data[:5] == b"%PDF-":
             try:
                 with fitz.open(stream=data, filetype="pdf") as doc:
                     if doc.page_count == 0:
-                        raise ExamError(f"Past paper PDF has no pages: {name}")
+                        raise ExamError(f"{what.capitalize()} PDF has no pages: {name}")
             except (RuntimeError, ValueError) as exc:
-                raise ExamError(f"Cannot read past paper PDF: {name}") from exc
-            out = f"past-{i:02d}.pdf"
+                raise ExamError(f"Cannot read {what} PDF: {name}") from exc
+            out = f"{prefix}-{i:02d}.pdf"
             (folder / out).write_bytes(data)
         else:
             try:
                 clean, ext, _w, _h = figures._normalize(name, data)
             except figures.FigureError as exc:
                 raise ExamError(str(exc)) from exc
-            out = f"past-{i:02d}.{ext}"
+            out = f"{prefix}-{i:02d}.{ext}"
             (folder / out).write_bytes(clean)
         names.append(out)
     return names
 
 
-def past_blocks(gdir: Path, max_images: int = 16) -> list[dict[str, Any]]:
-    """The past papers for the model. A PDF with a text layer goes as its text
-    (every page, answers included) plus its first page as an image for the
-    layout; a scanned one, or a photo, as page images."""
-    folder = exam_dir(gdir) / PAST_DIR
-    if not folder.is_dir():
-        return []
+def _file_blocks(paths: list[Path], label: str, cache: Path, max_images: int) -> list[dict[str, Any]]:
+    """Files for the model. A PDF with a text layer goes as its text plus its
+    first page as an image for the layout; a scanned one, or a photo, as page images."""
     blocks: list[dict[str, Any]] = []
     images = 0
-    cache = exam_dir(gdir) / "past_pages"
 
     def page_image(doc: fitz.Document, path: Path, n: int) -> dict[str, Any]:
         cache.mkdir(parents=True, exist_ok=True)
@@ -191,8 +186,8 @@ def past_blocks(gdir: Path, max_images: int = 16) -> list[dict[str, Any]]:
             doc.load_page(n).get_pixmap(dpi=110).save(png)
         return image_block(png)
 
-    for k, path in enumerate(sorted(folder.iterdir()), start=1):
-        blocks.append(text_block(f"--- Past paper {k} ---"))
+    for k, path in enumerate(paths, start=1):
+        blocks.append(text_block(f"--- {label} {k} ---"))
         if path.suffix != ".pdf":
             if images < max_images:
                 blocks.append(image_block(path))
@@ -212,6 +207,121 @@ def past_blocks(gdir: Path, max_images: int = 16) -> list[dict[str, Any]]:
                     blocks.append(page_image(doc, path, n))
                     images += 1
     return blocks
+
+
+def store_past(gdir: Path, uploads: list[tuple[str, bytes]]) -> list[str]:
+    """Past papers: PDFs as they are, images re-encoded. Returns the stored names."""
+    return _store_files(exam_dir(gdir) / PAST_DIR, uploads, "past", MAX_PAST, "past paper")
+
+
+def past_blocks(gdir: Path, max_images: int = 16) -> list[dict[str, Any]]:
+    """The past papers for the model (every page's text, answers included)."""
+    folder = exam_dir(gdir) / PAST_DIR
+    if not folder.is_dir():
+        return []
+    return _file_blocks(sorted(folder.iterdir()), "Past paper", exam_dir(gdir) / "past_pages", max_images)
+
+
+# ---- the student's own topics: a name, what it covers, example questions ----------------
+# Kept apart from the drafted profile, so drafting it again or editing it leaves them be.
+
+OWN_TOPICS_FILE = "own_topics.json"
+OWN_TOPICS_DIR = "own_topics"
+MAX_OWN_TOPICS = 20
+MAX_TOPIC_FILES = 5
+_TOPIC_ID = re.compile(r"[0-9a-f]{8}")
+
+
+def own_topics(gdir: Path) -> list[dict[str, Any]]:
+    return _read(exam_dir(gdir) / OWN_TOPICS_FILE, [])
+
+
+def _topic_folder(gdir: Path, tid: str) -> Path:
+    if not _TOPIC_ID.fullmatch(tid):
+        raise ExamError("No such topic")
+    return exam_dir(gdir) / OWN_TOPICS_DIR / tid
+
+
+def save_own_topic(gdir: Path, tid: str | None, name: str, note: str, text: str,
+                   uploads: list[tuple[str, bytes]]) -> dict[str, Any]:
+    """Add a topic (tid None) or change one; uploads join its example files.
+    A renamed topic takes its recorded answers along."""
+    name, note, text = _text(name, 120), _text(note, 1000), _text(text, 20_000)
+    if not name:
+        raise ExamError("Name the topic")
+    with _lock:
+        topics = own_topics(gdir)
+        profile = load_profile(gdir) or {"topics": []}
+        clash = {t["name"] for t in profile["topics"]} | {t["name"] for t in topics if t["id"] != tid}
+        if name in clash:
+            raise ExamError("A topic with this name is already listed")
+        if tid is None:
+            if len(topics) >= MAX_OWN_TOPICS:
+                raise ExamError(f"At most {MAX_OWN_TOPICS} topics of your own")
+            topic = {"id": uuid.uuid4().hex[:8], "name": name, "note": note, "text": text, "files": []}
+            topics.append(topic)
+        else:
+            topic = next((t for t in topics if t["id"] == tid), None)
+            if topic is None:
+                raise ExamError("No such topic")
+            if topic["name"] != name:
+                results = _read(exam_dir(gdir) / RESULTS_FILE, [])
+                for r in results:
+                    if r.get("topic") == topic["name"]:
+                        r["topic"] = name
+                _write(exam_dir(gdir) / RESULTS_FILE, results)
+            topic.update(name=name, note=note, text=text)
+        if uploads:
+            topic["files"] += _store_files(_topic_folder(gdir, topic["id"]), uploads, "example",
+                                           MAX_TOPIC_FILES, "example file")
+        _write(exam_dir(gdir) / OWN_TOPICS_FILE, topics)
+        return topic
+
+
+def delete_own_topic(gdir: Path, tid: str, file: str | None = None) -> None:
+    """Drop a topic (its recorded answers stay, listed by name), or one of its files."""
+    folder = _topic_folder(gdir, tid)
+    with _lock:
+        topics = own_topics(gdir)
+        topic = next((t for t in topics if t["id"] == tid), None)
+        if topic is None:
+            raise ExamError("No such topic")
+        if file is None:
+            topics.remove(topic)
+            shutil.rmtree(folder, ignore_errors=True)
+        else:
+            if file not in topic["files"]:
+                raise ExamError("No such file")
+            topic["files"].remove(file)
+            (folder / file).unlink(missing_ok=True)
+        _write(exam_dir(gdir) / OWN_TOPICS_FILE, topics)
+
+
+def own_topic_file(gdir: Path, tid: str, file: str) -> Path:
+    topic = next((t for t in own_topics(gdir) if t["id"] == tid), None)
+    if topic is None or file not in topic["files"]:
+        raise ExamError("No such file")
+    return _topic_folder(gdir, tid) / file
+
+
+def own_topic_blocks(gdir: Path, name: str, max_images: int = 6) -> list[dict[str, Any]]:
+    """The examples the student gave for a topic of their own, for the model."""
+    topic = next((t for t in own_topics(gdir) if t["name"] == name), None)
+    if topic is None or not (topic["text"] or topic["files"]):
+        return []
+    blocks = [text_block("Example questions the student gave for this topic: the drill's questions are of "
+                         "this kind, and its hardest are at least as hard as these. Do not copy them.")]
+    if topic["text"]:
+        blocks.append(text_block(topic["text"]))
+    folder = _topic_folder(gdir, topic["id"])
+    blocks += _file_blocks([folder / f for f in topic["files"]], "Example file", folder / "pages", max_images)
+    return blocks
+
+
+def with_own_topics(gdir: Path, profile: dict[str, Any]) -> dict[str, Any]:
+    """The profile with the student's topics added (no share of the marks)."""
+    own = [{"name": t["name"], "weight": 0, "note": t["note"]} for t in own_topics(gdir)]
+    return {**profile, "topics": profile["topics"] + own}
 
 
 def material_text(gdir: Path, kind: str, limit: int = MAX_MATERIAL_TEXT) -> str:
@@ -491,7 +601,9 @@ def mastery(gdir: Path) -> list[dict[str, Any]]:
     by_topic: dict[str, list[dict[str, Any]]] = {}
     for r in results:
         by_topic.setdefault(r.get("topic") or "", []).append(r)
-    names = [t["name"] for t in profile["topics"]] + [n for n in by_topic if n and n not in {t["name"] for t in profile["topics"]}]
+    own = {t["name"]: t for t in own_topics(gdir)}
+    listed = [t["name"] for t in profile["topics"]] + list(own)
+    names = listed + [n for n in by_topic if n and n not in set(listed)]
     weights = {t["name"]: t["weight"] for t in profile["topics"]}
     out = []
     for name in names:
@@ -501,7 +613,8 @@ def mastery(gdir: Path) -> list[dict[str, Any]]:
             ws = [DECAY ** k for k in range(len(rs))][::-1]  # newest weighs 1
             level = round(sum(w * r["score"] / (r["max"] or 1) for w, r in zip(ws, rs)) / sum(ws), 3)
         out.append({"name": name, "weight": weights.get(name, 0), "answered": len(rs), "mastery": level,
-                    "recent": [round(r["score"] / (r["max"] or 1), 2) for r in rs[-8:]]})
+                    "recent": [round(r["score"] / (r["max"] or 1), 2) for r in rs[-8:]],
+                    **({"own": own[name]} if name in own else {})})
     return out
 
 

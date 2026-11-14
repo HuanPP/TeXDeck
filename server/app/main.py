@@ -1822,10 +1822,13 @@ def _run_exam_paper(gen_id: str, focus: str, report: ProgressCallback,
             DeckRequest(template_key="exam", title=meta.title, source_text=source_text), documents, None)
         if drill:
             lang = exam.paper_language(meta.language, profile["title"] + "".join(t["name"] for t in profile["topics"]))
-            profile = exam.drill_profile(profile, drill["topic"], drill["type"], drill["count"], lang)
+            profile = exam.drill_profile(exam.with_own_topics(gdir, profile), drill["topic"], drill["type"],
+                                         drill["count"], lang)
         messages = exam.paper_messages(profile, spec, material, exam.past_blocks(gdir, max_images=8),
                                        exam.earlier_questions(gdir), focus, meta.language, exam.standing(gdir),
                                        exam.DRILL_PROMPT if drill else "")
+        if drill:
+            messages[1]["content"] += exam.own_topic_blocks(gdir, drill["topic"])
         report("Writing the questions with the model", 45)
         client = create_client(on_usage=usage.add)
         paper = _exam_ask_json(client, gdir, "drill" if drill else "paper", messages,
@@ -1991,6 +1994,60 @@ def api_exam_new_drill(gen_id: str, body: DrillBody) -> dict[str, Any]:
         raise HTTPException(400, detail=str(e)) from e
     _start_exam_job(gen_id, lambda report: _run_exam_paper(gen_id, "", report, drill))
     return {"id": gen_id}
+
+
+async def _own_topic_form(gen_id: str, tid: str | None, name: str, note: str, text: str,
+                          files: list[UploadFile]) -> dict[str, Any]:
+    _exam_meta(gen_id)
+    uploads = [(f.filename or "example", await _read_upload_capped(f)) for f in files if f.filename]
+    try:
+        return exam.save_own_topic(store.generation_dir(gen_id), tid, name, note, text, uploads)
+    except exam.ExamError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.post("/api/generations/{gen_id}/exam/topics")
+async def api_exam_add_topic(gen_id: str, name: str = Form(...), note: str = Form(""), text: str = Form(""),
+                             files: list[UploadFile] = File(default=[])) -> dict[str, Any]:
+    """A topic of the student's own: a name, what it covers, example questions (text, PDFs, photos)."""
+    return await _own_topic_form(gen_id, None, name, note, text, files)
+
+
+@app.put("/api/generations/{gen_id}/exam/topics/{tid}")
+async def api_exam_edit_topic(gen_id: str, tid: str, name: str = Form(...), note: str = Form(""),
+                              text: str = Form(""), files: list[UploadFile] = File(default=[])) -> dict[str, Any]:
+    """Change a topic of the student's own; new files join its examples."""
+    return await _own_topic_form(gen_id, tid, name, note, text, files)
+
+
+@app.delete("/api/generations/{gen_id}/exam/topics/{tid}", status_code=204)
+def api_exam_delete_topic(gen_id: str, tid: str) -> Response:
+    _exam_meta(gen_id)
+    try:
+        exam.delete_own_topic(store.generation_dir(gen_id), tid)
+    except exam.ExamError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return Response(status_code=204)
+
+
+@app.get("/api/generations/{gen_id}/exam/topics/{tid}/files/{name}")
+def api_exam_topic_file(gen_id: str, tid: str, name: str) -> FileResponse:
+    _exam_meta(gen_id)
+    try:
+        path = exam.own_topic_file(store.generation_dir(gen_id), tid, name)
+    except exam.ExamError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return FileResponse(path, content_disposition_type="inline", filename=name)
+
+
+@app.delete("/api/generations/{gen_id}/exam/topics/{tid}/files/{name}", status_code=204)
+def api_exam_delete_topic_file(gen_id: str, tid: str, name: str) -> Response:
+    _exam_meta(gen_id)
+    try:
+        exam.delete_own_topic(store.generation_dir(gen_id), tid, name)
+    except exam.ExamError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return Response(status_code=204)
 
 
 @app.post("/api/generations/{gen_id}/exam/papers/{pid}/results")

@@ -298,3 +298,45 @@ def test_two_column_options_grow_with_tall_maths() -> None:
     assert "tabular" not in tex
     assert tex.count(r"\parbox[t]{0.48\linewidth}") == 4 and tex.count(r"\par ") == 2
     assert r"\setlength{\lineskip}" in exam.PREAMBLE
+
+
+def test_own_topics_list_drill_with_their_examples_and_keep_answers_on_rename(
+        client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_xelatex_ok: dict[str, int]) -> None:
+    gid = _create(client, monkeypatch)
+    base = f"/api/generations/{gid}/exam/topics"
+    pdf = _pdf_bytes("Example: a block slides down a ramp. Find its speed at the bottom. " * 4)
+    r = client.post(base, data={"name": "Ramps", "note": "Inclined planes", "text": "例：斜面上的物块……"},
+                    files=[("files", ("ramp.pdf", pdf, "application/pdf"))])
+    assert r.status_code == 200, r.text
+    topic = r.json()
+    assert topic["files"] == ["example-01.pdf"]
+    assert client.post(base, data={"name": "Depth"}).status_code == 400  # the profile has it
+    row = next(m for m in client.get(f"/api/generations/{gid}/exam").json()["mastery"] if m["name"] == "Ramps")
+    assert row["weight"] == 0 and row["own"]["note"] == "Inclined planes"
+
+    questions = [{"stem": f"Ramp {i}: compute.", "answer": "x", "topic": "Ramps"} for i in range(6)]
+    fake = FakeLlm([json.dumps({"title": "Ramps", "sections": [{"title": "s", "questions": questions}]})])
+    monkeypatch.setattr("app.main.create_client", lambda on_usage=None: fake)
+    _run_exam_paper(gid, "", lambda _s, _p: None, {"topic": "Ramps", "type": "calc", "count": 6})
+    sent = " ".join(b.get("text", "") for b in fake.calls[0][1]["content"])
+    assert "Example questions the student gave" in sent and "斜面上的物块" in sent and "a block slides down" in sent
+    assert '"note": "Inclined planes"' in sent
+
+    pid = client.get(f"/api/generations/{gid}/exam").json()["papers"][0]["id"]
+    qid = client.get(f"/api/generations/{gid}/exam/papers/{pid}").json()["sections"][0]["questions"][0]["id"]
+    client.post(f"/api/generations/{gid}/exam/papers/{pid}/results", json={"qid": qid, "score": 10})
+    assert client.put(f"{base}/{topic['id']}", data={"name": "Slopes", "note": "", "text": ""}).status_code == 200
+    rows = {m["name"]: m for m in client.get(f"/api/generations/{gid}/exam").json()["mastery"]}
+    assert rows["Slopes"]["answered"] == 1 and "Ramps" not in rows
+
+    assert client.delete(f"{base}/{topic['id']}/files/example-01.pdf").status_code == 204
+    assert client.delete(f"{base}/{topic['id']}").status_code == 204
+    assert "own" not in {m["name"]: m for m in client.get(f"/api/generations/{gid}/exam").json()["mastery"]}.get("Slopes", {})
+
+
+def _pdf_bytes(text: str) -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    doc.new_page().insert_textbox(fitz.Rect(72, 72, 540, 700), text, fontsize=11)
+    return doc.tobytes()
