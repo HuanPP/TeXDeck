@@ -614,16 +614,13 @@ export default function Generation() {
       {notes ? (
         <div className={`flex flex-wrap items-center justify-between gap-2 ${succeeded ? "relative left-1/2 w-[calc(100vw-2rem)] -translate-x-1/2 px-1" : ""}`}>
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <Link to={home} className="shrink-0 text-xs text-[var(--color-primary)] no-underline hover:underline">
-              ← Notebooks
-            </Link>
+            {!succeeded && (
+              <Link to={home} className="shrink-0 text-xs text-[var(--color-primary)] no-underline hover:underline">
+                ← Notebooks
+              </Link>
+            )}
             <h1 className="min-w-0 truncate text-base" title={displayTitle(meta)}>{displayTitle(meta)}</h1>
             <StatusBadge status={busy ? "running" : meta.status} />
-            <span className="hidden truncate text-xs text-slate-400 xl:inline"
-              title={meta.source_names.join(", ")}>
-              {(meta.pdf_pages || meta.frame_count) > 0 ? `${meta.pdf_pages || meta.frame_count} pages` : ""}
-              {llmCalls > 0 ? ` · ${meta.llm_model || "LLM"} · ${fmtTokens(meta.llm_prompt_tokens)} in / ${fmtTokens(meta.llm_completion_tokens)} out` : ""}
-            </span>
           </div>
           {succeeded ? (
             <div className="relative shrink-0">
@@ -866,6 +863,16 @@ export default function Generation() {
             notesMarks={textMarks}
             onQueueNote={busy ? undefined : queueNote}
             onNotesPageChange={setPage} />
+        </div>
+      )}
+      {succeeded && notes && (
+        // The way back and the run's details sit under the workspace, out of the way.
+        <div className="relative left-1/2 flex w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 px-1 text-xs text-slate-400">
+          <Link to={home} className="shrink-0 text-[var(--color-primary)] no-underline hover:underline">← Notebooks</Link>
+          <span className="min-w-0 truncate" title={meta.source_names.join(", ")}>
+            {(meta.pdf_pages || meta.frame_count) > 0 ? `${meta.pdf_pages || meta.frame_count} pages` : ""}
+            {llmCalls > 0 ? ` · ${meta.llm_model || "LLM"} · ${fmtTokens(meta.llm_prompt_tokens)} in / ${fmtTokens(meta.llm_completion_tokens)} out` : ""}
+          </span>
         </div>
       )}
       {quick && (
