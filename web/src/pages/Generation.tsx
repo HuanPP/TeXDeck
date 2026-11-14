@@ -607,15 +607,17 @@ export default function Generation() {
   );
 
   return (
-    <div className={notes && succeeded ? "flex flex-col gap-4 [&>*]:shrink-0" : "space-y-6"}
-      style={notes && succeeded ? { height: "calc(100vh - 8.25rem)" } : undefined}>
+    // A notebook gives the screen to its columns: a slim header line up in the
+    // page's top corner, as wide as the workspace below it.
+    <div className={notes && succeeded ? "-mt-5 flex flex-col gap-2 [&>*]:shrink-0" : "space-y-6"}
+      style={notes && succeeded ? { height: "calc(100vh - 7rem)" } : undefined}>
       {notes ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Link to={home} className="shrink-0 text-sm text-[var(--color-primary)] no-underline hover:underline">
+        <div className={`flex flex-wrap items-center justify-between gap-2 ${succeeded ? "relative left-1/2 w-[calc(100vw-2rem)] -translate-x-1/2 px-1" : ""}`}>
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <Link to={home} className="shrink-0 text-xs text-[var(--color-primary)] no-underline hover:underline">
               ← Notebooks
             </Link>
-            <h1 className="min-w-0 truncate text-xl" title={displayTitle(meta)}>{displayTitle(meta)}</h1>
+            <h1 className="min-w-0 truncate text-base" title={displayTitle(meta)}>{displayTitle(meta)}</h1>
             <StatusBadge status={busy ? "running" : meta.status} />
             <span className="hidden truncate text-xs text-slate-400 xl:inline"
               title={meta.source_names.join(", ")}>
@@ -625,9 +627,9 @@ export default function Generation() {
           </div>
           {succeeded ? (
             <div className="relative shrink-0">
-              <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-sm text-slate-500 hover:text-slate-800"
+              <button type="button" className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs text-slate-500 hover:text-slate-800"
                 aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
-                <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5" />
+                <Download className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3 w-3" />
               </button>
               {moreOpen && <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />}
               {moreOpen && (
