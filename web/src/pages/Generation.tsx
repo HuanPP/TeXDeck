@@ -503,7 +503,7 @@ export default function Generation() {
     <div className="flex flex-col gap-4 p-4">
     <div>
       <p className="text-xs text-slate-500">Current page</p>
-      <h2 className="mt-1 text-lg">
+      <h2 className="mt-1 truncate text-lg" title={frame?.title ? `Page ${page} · ${frame.title}` : undefined}>
         Page {page}{frame?.title ? ` · ${frame.title}` : ""}
       </h2>
       {frame?.tex && (
@@ -527,12 +527,8 @@ export default function Generation() {
     {frame && frame.index !== 0 && !notes && (
       <div className="border-t border-[var(--color-border)] pt-4">
         <p className="text-xs text-slate-500">Speaker notes</p>
-        {frame.notes ? (
-          <p className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-            {frame.notes}
-          </p>
-        ) : (
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+        {frame.notes ? <SpeakerNotes key={frame.index} text={frame.notes} /> : (
+          <p className="mt-2 h-[7.25rem] text-xs leading-relaxed text-slate-500">
             No notes for this slide. Ask for them below (e.g. "Write speaker notes for this
             slide"), or add them to every slide with Whole deck. Notes also go into the PPTX.
           </p>
@@ -877,6 +873,36 @@ export default function Generation() {
       )}
 
       {!notes && <Link to={home} className="text-sm text-[var(--color-primary)] underline">← Back to home</Link>}
+    </div>
+  );
+}
+
+// Four lines at most, so the edit form below stays put from slide to slide;
+// longer notes fold out in place.
+function SpeakerNotes({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const check = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return (
+    <div className="mt-2">
+      <p ref={ref} className={`whitespace-pre-wrap text-sm leading-relaxed text-slate-700 ${open ? "" : "h-24 overflow-hidden"}`}
+        style={open ? undefined : { WebkitMaskImage: overflows ? "linear-gradient(to bottom, black 70%, transparent)" : undefined }}>
+        {text}
+      </p>
+      {/* Always laid out (h-4 + mt-1), so short and long notes take the same room. */}
+      <button type="button" className={`mt-1 block h-4 text-xs leading-4 text-[var(--color-primary)] hover:underline ${overflows || open ? "" : "invisible"}`}
+        onClick={() => setOpen((o) => !o)} aria-expanded={open} tabIndex={overflows || open ? undefined : -1}>
+        {open ? "Show less" : "Show all"}
+      </button>
     </div>
   );
 }
