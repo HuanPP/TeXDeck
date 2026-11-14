@@ -20,6 +20,12 @@ const TONES = {
 type Result = { score: number; max: number; correct: boolean; feedback?: string; reference: string };
 type Item = { q: ExamQuestion; section: string; passage: string };
 
+// An option that is one formula reads like a printed answer choice: full-size
+// fractions and exponents, not the shrunk inline ones.
+const option = (text: string) => {
+  const m = /^\$([^$]+)\$$/.exec(text.trim());
+  return m ? `$\\displaystyle ${m[1]}$` : text;
+};
 const md = (text: string) => text.replace(/\{\{(\d+)\}\}/g, (_, n: string) => ` **(${n})**\\_\\_\\_\\_ `).replace(/(?<!\n)\n(?!\n)/g, "  \n");
 
 // Fill-in answers: same text after Unicode folding, case, spaces and trailing
@@ -36,8 +42,8 @@ export function sameAnswer(given: string, accepted: string): boolean {
 }
 
 function referenceOf(q: ExamQuestion): string {
-  if (q.mode === "single") return `**${q.answer as string}.** ${q.options?.[LETTERS.indexOf(q.answer as string)] ?? ""}`;
-  if (q.mode === "multiple") return (q.answer as string[]).map((l) => `**${l}.** ${q.options?.[LETTERS.indexOf(l)] ?? ""}`).join("  \n");
+  if (q.mode === "single") return `**${q.answer as string}.** ${option(q.options?.[LETTERS.indexOf(q.answer as string)] ?? "")}`;
+  if (q.mode === "multiple") return (q.answer as string[]).map((l) => `**${l}.** ${option(q.options?.[LETTERS.indexOf(l)] ?? "")}`).join("  \n");
   if (q.mode === "truefalse") return q.answer ? "**True**" : "**False**";
   if (q.mode === "fill") return (q.answer as string[][]).map((alts, i) => `(${i + 1}) ${alts.join(" / ")}`).join("  \n");
   const parts = q.parts?.map((p) => `${p.stem}\n\n${p.answer}`).join("\n\n") ?? "";
@@ -310,7 +316,7 @@ export default function ExamPractice({ id, pid, exam, only: asked, resume, onExi
                   className={`flex items-start gap-3 rounded-xl border-2 px-4 py-3 text-left transition ${optionClass(l)}`}
                   onClick={() => setChoice((c) => (q.mode === "multiple" ? (c.includes(l) ? c.filter((x) => x !== l) : [...c, l].sort()) : [l]))}>
                   <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-current text-xs">{l}</span>
-                  <span className="min-w-0 flex-1"><ChatMarkdown text={o} /></span>
+                  <span className="min-w-0 flex-1"><ChatMarkdown text={option(o)} /></span>
                 </button>
               );
             })}
