@@ -15,7 +15,7 @@ const STYLES: Record<TaskStatus, string> = {
 
 export default function StatusBadge({ status }: { status: TaskStatus }) {
   return (
-    <span className={`inline-flex items-center border px-2 py-0.5 text-xs ${STYLES[status]}`}>
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap border px-2 py-0.5 text-xs ${STYLES[status]}`}>
       {LABELS[status]}
     </span>
   );

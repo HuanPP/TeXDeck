@@ -661,10 +661,10 @@ export default function Generation() {
           )}
         </div>
       ) : (
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-2xl">{displayTitle(meta)}</h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex min-w-0 items-baseline gap-3">
+            <h1 className="min-w-0 break-words text-2xl">{displayTitle(meta)}</h1>
             <StatusBadge status={busy ? "running" : meta.status} />
           </div>
           <p className="text-sm text-slate-500">
@@ -685,7 +685,7 @@ export default function Generation() {
             </p>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {succeeded && (
             <>
               <a className="btn-secondary text-sm" href={pdfUrl(id)} download>
