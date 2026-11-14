@@ -244,3 +244,31 @@ def test_pptx_endpoint_caches_and_rebuilds(client: TestClient) -> None:
     assert "Palatino" in client.get("/api/fonts").json()
 
     assert client.get("/api/generations/20000101-000000-0000/deck.pptx").status_code == 404
+
+
+def test_get_generation_reports_a_running_job(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A polling page asks whether an edit is still under way; an image upload
+    # rewrites meta before the edit starts, so updated_at cannot tell it.
+    from app import tasks
+    from app.store import new_generation
+
+    meta = new_generation(
+        title="Deck", template_key="navy", template_name="Navy",
+        instruction="", source_kind="text", source_names=[],
+    )
+    assert client.get(f"/api/generations/{meta.id}").json()["job_running"] is False
+    monkeypatch.setattr(tasks, "is_running", lambda gen_id: gen_id == meta.id)
+    assert client.get(f"/api/generations/{meta.id}").json()["job_running"] is True
+
+
+def test_downloads_are_named_after_the_title(client: TestClient) -> None:
+    from app.store import generation_dir, new_generation
+
+    meta = new_generation(
+        title='A/B: "x"?', template_key="navy", template_name="Navy",
+        instruction="", source_kind="text", source_names=[],
+    )
+    (generation_dir(meta.id) / "main.tex").write_text("% deck\n", encoding="utf-8")
+    r = client.get(f"/api/generations/{meta.id}/tex")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == "attachment; filename*=utf-8''A_B_%20_x_.tex"

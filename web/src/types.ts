@@ -2,6 +2,7 @@ export type TaskStatus = "running" | "succeeded" | "failed" | "review"; // revie
 
 export type GenerationMeta = {
   id: string;
+  job_running?: boolean; // a generation or edit job is live on the server
   title: string;
   author: string;
   institute: string;

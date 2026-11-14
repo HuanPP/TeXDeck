@@ -1257,7 +1257,9 @@ async def api_create_generation(
 
 @app.get("/api/generations/{gen_id}")
 def api_get_generation(gen_id: str) -> dict[str, Any]:
-    return asdict(_load(gen_id))
+    # job_running tells a polling page whether an edit is still under way; meta
+    # alone cannot (an image upload rewrites it before the edit even starts).
+    return {**asdict(_load(gen_id)), "job_running": tasks.is_running(gen_id)}
 
 
 @app.delete("/api/generations/{gen_id}", status_code=204)

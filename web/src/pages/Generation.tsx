@@ -287,8 +287,8 @@ export default function Generation() {
               await loadFrames();
               setPdfBust(Date.now());
             }
-          } else if (!metaUpdated || fresh.updated_at === metaUpdated) {
-            return; // edit still running: meta is only rewritten when it finishes
+          } else if (fresh.job_running) {
+            return; // edit still running
           } else if (!(fresh.error || "").trim()) {
             await loadFrames();
             setPdfBust(Date.now());
@@ -309,7 +309,7 @@ export default function Generation() {
       })();
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [id, metaStatus, metaUpdated, editing, progressRunning, loadMeta, loadFrames]);
+  }, [id, metaStatus, editing, progressRunning, loadMeta, loadFrames]);
 
   // The frames API returns a synctex-resolved PDF `page` per frame (index and
   // page diverge with section splash pages, \pause, allowframebreaks…).
@@ -847,8 +847,8 @@ export default function Generation() {
       )}
 
       {succeeded && !notes && (
-        <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[1fr_320px]">
-          <section className="app-surface flex min-h-[60vh] min-w-0 flex-col p-3">
+        <div className="grid items-start gap-4 lg:grid-cols-[1fr_320px]">
+          <section className="app-surface flex min-w-0 flex-col p-3">
             <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage}
               onTextClick={busy ? undefined : handleTextClick}
               marks={textMarks}

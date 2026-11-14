@@ -223,7 +223,11 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
       </div>
       <Document file={file} options={PDF_OPTIONS} onLoadSuccess={handleDocumentLoad} className="flex min-h-0 flex-1 flex-col"
         onLoadError={(err) => setLoadError(err.message)}
-        loading={<div className="p-12 text-center text-slate-500">Rendering PDF…</div>}>
+        loading={
+          // Hold a slide's height while a recompiled PDF loads, so the page does not jump.
+          <div className="flex items-center justify-center bg-slate-100 text-slate-500"
+            style={{ minHeight: Math.round(pageWidth * 9 / 16) + 32 }}>Rendering PDF…</div>
+        }>
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
           {numPages > 0 && (
             <div className={`relative mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick ? " deck-editable" : ""}`}
