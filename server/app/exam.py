@@ -355,10 +355,21 @@ def parse_json(reply: str) -> Any:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < start:
         raise ExamError("The model did not answer with JSON")
+    text = text[start:end + 1]
     try:
-        return json.loads(text[start:end + 1])
+        return json.loads(text)
     except ValueError as exc:
-        raise ExamError(f"The model's JSON does not parse: {exc}") from exc
+        # Models write LaTeX in JSON strings without doubling the backslash
+        # (`\alpha`, `\{`). A backslash that starts no valid JSON escape can only
+        # be meant literally, so double it and try again.
+        repaired = _BAD_ESCAPE.sub(lambda m: m.group(0) if m.group(1) else "\\\\", text)
+        try:
+            return json.loads(repaired)
+        except ValueError:
+            raise ExamError(f"The model's JSON does not parse: {exc}") from exc
+
+
+_BAD_ESCAPE = re.compile(r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\')
 
 
 # ---- a paper -----------------------------------------------------------------------
@@ -895,12 +906,18 @@ def _grade(gdir: Path, grade_id: str, q: dict[str, Any], part: int | None, answe
            marking: str) -> None:
     target = q["parts"][part] if part is not None else q
     try:
-        reply = create_client().complete(grade_messages(q, part, answer, photo, marking))
-        data = parse_json(reply)
+        client = create_client()
+        messages = grade_messages(q, part, answer, photo, marking)
+        try:
+            data = parse_json(client.complete(messages))
+        except ExamError:  # an unreadable reply: ask once more before giving up
+            data = parse_json(client.complete(messages))
         update = {"status": "done", "score": _num(data.get("score"), 0, target["points"], 0),
                   "feedback": _text(data.get("feedback"), 3000)}
-    except (LlmError, ExamError) as exc:
+    except LlmError as exc:
         update = {"status": "error", "feedback": str(exc)}
+    except ExamError:
+        update = {"status": "error", "feedback": "The AI's marking came back garbled twice. Try again, or mark it yourself."}
     except Exception as exc:  # noqa: BLE001 - a grade must always end
         update = {"status": "error", "feedback": f"Could not grade: {exc}"}
     with _lock:

@@ -55,6 +55,13 @@ def _paper() -> dict[str, Any]:
     ]}
 
 
+def test_json_with_undoubled_latex_backslashes_still_parses() -> None:
+    reply = r'{"score": 9.5, "feedback": "Gave $y = F(x, \{W_i\}) + x$ and \alpha.\nMissing the 1x1 layers."}'
+    data = exam.parse_json(reply)
+    assert data["feedback"] == "Gave $y = F(x, \\{W_i\\}) + x$ and \\alpha.\nMissing the 1x1 layers."
+    assert exam.parse_json(r'{"a": "\\beta \"q\" \u00e9"}') == {"a": '\\beta "q" é'}
+
+
 def test_spec_drops_empty_rows_and_keeps_the_description() -> None:
     spec = exam.clean_spec(_spec())
     assert [(r["type"], r["count"]) for r in spec["types"]] == [("single", 2), ("fill", 1), ("calc", 1)]
