@@ -850,6 +850,7 @@ export default function Generation() {
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_320px]">
           <section className="app-surface flex min-w-0 flex-col p-3">
             <PdfViewer file={pdfUrl(id, pdfBust)} onPageChange={setPage}
+              busy={busy ? progress?.stage || "Working…" : null}
               onTextClick={busy ? undefined : handleTextClick}
               marks={textMarks}
               markedPages={new Set([...pending.texts.map((t) => t.page), ...pending.pages.map((r) => r.page)])} />

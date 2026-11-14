@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 // The worker must be the same pdfjs-dist build react-pdf runs, or every PDF
 // fails with "API version does not match Worker version". package.json pins
@@ -43,6 +44,8 @@ type Props = {
   marks?: PageMark[];
   // Pages with queued changes get a dot on their thumbnail.
   markedPages?: Set<number>;
+  // A job is changing this PDF: shown over the page, which stays readable.
+  busy?: string | null;
 };
 
 type Piece = { s: HTMLElement; r: DOMRect };
@@ -103,8 +106,12 @@ export function lineAround(span: HTMLElement): { text: string; before: string; a
   return { ...line, before: neighbour(all, line.rect, h, -1), after: neighbour(all, line.rect, h, 1) };
 }
 
-export default function PdfViewer({ file, onPageChange, onTextClick, marks = [], markedPages }: Props) {
-  const [numPages, setNumPages] = useState(0);
+export default function PdfViewer({ file, onPageChange, onTextClick, marks = [], markedPages, busy }: Props) {
+  // Double buffer: the PDF on screen (`shown`) stays put while a recompiled
+  // `file` loads in a hidden layer, and is swapped out only once the new
+  // current page has painted. An edit therefore never blanks the preview.
+  const [shown, setShown] = useState(file);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [pageNumber, setPageNumber] = useState(1);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -117,11 +124,13 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
   pageNumberRef.current = pageNumber;
 
   useEffect(() => {
-    // New file (initial load or post-edit recompile): keep the current page
-    // (clamped in handleDocumentLoad) instead of jumping back to page 1.
-    setNumPages(0);
+    // First file, or no file: show it directly. A later file loads hidden.
+    if (!file || !shown) setShown(file);
     setLoadError(null);
   }, [file]);
+
+  const incoming = file && shown && file !== shown ? file : null;
+  const numPages = shown ? counts[shown] ?? 0 : 0;
 
   // Measure the always-mounted root: the scroll area lives inside <Document>,
   // which renders nothing until the PDF has loaded.
@@ -173,17 +182,29 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  function handleDocumentLoad(pdf: { numPages: number }) {
-    setNumPages(pdf.numPages);
-    const target = Math.min(pageNumberRef.current, pdf.numPages);
-    if (target !== pageNumberRef.current) {
-      // Old page no longer exists (deck shrank): clamp and tell the sidebar.
+  // The old page may no longer exist (deck shrank): clamp and tell the sidebar.
+  function clampTo(count: number) {
+    const target = Math.min(pageNumberRef.current, count);
+    if (count && target !== pageNumberRef.current) {
       setPageNumber(target);
       onPageChange?.(target);
     }
   }
 
-  if (!file) {
+  function handleDocumentLoad(url: string, pdf: { numPages: number }) {
+    setCounts((c) => ({ ...c, [url]: pdf.numPages }));
+    if (url === shown) clampTo(pdf.numPages);
+  }
+
+  function swapTo(url: string, error?: string) {
+    if (url !== incoming) return;
+    setShown(url);
+    setCounts((c) => ({ [url]: c[url] ?? 0 }));
+    clampTo(counts[url] ?? 0);
+    if (error) setLoadError(error);
+  }
+
+  if (!file && !shown) {
     return <div className="flex h-full items-center justify-center text-sm text-slate-500">No PDF yet</div>;
   }
   if (loadError) {
@@ -198,6 +219,82 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
     ? Math.min(MAX_FIT_WIDTH, Math.max(240, containerWidth - 34))
     : 620;
   const pageWidth = Math.round(Math.min(fitWidth * zoom, MAX_PAGE_WIDTH));
+  const status = busy || (incoming ? "Refreshing preview…" : null);
+
+  function layer(url: string, hidden: boolean) {
+    const count = counts[url] ?? 0;
+    const current = Math.min(pageNumber, count);
+    return (
+      <div key={url} aria-hidden={hidden || undefined}
+        className={hidden
+          ? "pointer-events-none invisible absolute inset-x-0 top-0"
+          : `flex min-h-0 flex-1 flex-col transition-opacity ${status ? "opacity-60" : ""}`}>
+        <Document file={url} options={PDF_OPTIONS} className="flex min-h-0 flex-1 flex-col"
+          onLoadSuccess={(pdf) => handleDocumentLoad(url, pdf)}
+          onLoadError={(err) => (hidden ? swapTo(url, err.message) : setLoadError(err.message))}
+          loading={hidden ? null : (
+            // Hold a slide's height while the first PDF loads.
+            <div className="flex items-center justify-center bg-slate-100 text-slate-500"
+              style={{ minHeight: Math.round(pageWidth * 9 / 16) + 32 }}>Rendering PDF…</div>
+          )}>
+          <div ref={hidden ? undefined : scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
+            {count > 0 && (
+              <div className={`relative mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick && !status ? " deck-editable" : ""}`}
+                onClick={(e) => {
+                  if (!onTextClick || hidden) return;
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed) return; // selecting to copy, not editing
+                  const span = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span");
+                  if (!span || !(span.textContent ?? "").trim()) return;
+                  const line = lineAround(span);
+                  const page = e.currentTarget.getBoundingClientRect();
+                  const box = {
+                    x: (line.rect.left - page.left) / page.width,
+                    y: (line.rect.top - page.top) / page.height,
+                    w: line.rect.width / page.width,
+                    h: line.rect.height / page.height,
+                  };
+                  onTextClick({ ...line, box, page: current });
+                }}>
+                <Page pageNumber={current} width={pageWidth} renderTextLayer renderAnnotationLayer
+                  onRenderSuccess={hidden ? () => swapTo(url) : undefined} />
+                {!hidden && marks.filter((m) => m.page === current).map((m, i) => (
+                  <div key={i} title={m.label} aria-hidden="true"
+                    className="pointer-events-none absolute z-10 rounded-sm bg-amber-300/40 outline outline-2 outline-amber-500"
+                    style={{
+                      left: `${m.box.x * 100}%`, top: `${m.box.y * 100}%`,
+                      width: `${m.box.w * 100}%`, height: `${m.box.h * 100}%`,
+                    }} />
+                ))}
+              </div>
+            )}
+          </div>
+          {count > 1 && (
+            <div ref={hidden ? undefined : stripRef} className="relative mt-3 flex shrink-0 gap-2 overflow-x-auto pb-1"
+              aria-label="Pages">
+              {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+                <button key={n} type="button" onClick={() => goToPage(n)} tabIndex={hidden ? -1 : undefined}
+                  ref={hidden ? undefined : (el) => { if (el) thumbRefs.current.set(n, el); else thumbRefs.current.delete(n); }}
+                  aria-label={`Page ${n}`} aria-current={n === pageNumber ? "page" : undefined}
+                  className={`shrink-0 border-2 bg-white p-0.5 ${n === pageNumber
+                    ? "border-[var(--color-primary)]"
+                    : "border-transparent opacity-80 hover:border-slate-300 hover:opacity-100"}`}>
+                  <Page pageNumber={n} width={THUMB_WIDTH} renderTextLayer={false} renderAnnotationLayer={false}
+                    loading={<div className="bg-slate-100" style={{ width: THUMB_WIDTH, height: THUMB_WIDTH * 9 / 16 }} />} />
+                  <span className="flex items-center justify-center gap-1 pt-0.5 font-mono text-[10px] text-slate-500">
+                    {markedPages?.has(n) && (
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="has changes" />
+                    )}
+                    {n}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Document>
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0 w-full flex-col">
@@ -221,68 +318,17 @@ export default function PdfViewer({ file, onPageChange, onTextClick, marks = [],
           disabled={zoom >= MAX_ZOOM}
           onClick={() => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}>+</button>
       </div>
-      <Document file={file} options={PDF_OPTIONS} onLoadSuccess={handleDocumentLoad} className="flex min-h-0 flex-1 flex-col"
-        onLoadError={(err) => setLoadError(err.message)}
-        loading={
-          // Hold a slide's height while a recompiled PDF loads, so the page does not jump.
-          <div className="flex items-center justify-center bg-slate-100 text-slate-500"
-            style={{ minHeight: Math.round(pageWidth * 9 / 16) + 32 }}>Rendering PDF…</div>
-        }>
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
-          {numPages > 0 && (
-            <div className={`relative mx-auto w-fit border border-[var(--color-border)] bg-white shadow-sm${onTextClick ? " deck-editable" : ""}`}
-              onClick={(e) => {
-                if (!onTextClick) return;
-                const selection = window.getSelection();
-                if (selection && !selection.isCollapsed) return; // selecting to copy, not editing
-                const span = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span");
-                if (!span || !(span.textContent ?? "").trim()) return;
-                const line = lineAround(span);
-                const page = e.currentTarget.getBoundingClientRect();
-                const box = {
-                  x: (line.rect.left - page.left) / page.width,
-                  y: (line.rect.top - page.top) / page.height,
-                  w: line.rect.width / page.width,
-                  h: line.rect.height / page.height,
-                };
-                onTextClick({ ...line, box, page: Math.min(pageNumber, numPages) });
-              }}>
-              <Page pageNumber={Math.min(pageNumber, numPages)} width={pageWidth}
-                renderTextLayer renderAnnotationLayer />
-              {marks.filter((m) => m.page === Math.min(pageNumber, numPages)).map((m, i) => (
-                <div key={i} title={m.label} aria-hidden="true"
-                  className="pointer-events-none absolute z-10 rounded-sm bg-amber-300/40 outline outline-2 outline-amber-500"
-                  style={{
-                    left: `${m.box.x * 100}%`, top: `${m.box.y * 100}%`,
-                    width: `${m.box.w * 100}%`, height: `${m.box.h * 100}%`,
-                  }} />
-              ))}
-            </div>
-          )}
-        </div>
-        {numPages > 1 && (
-          <div ref={stripRef} className="relative mt-3 flex shrink-0 gap-2 overflow-x-auto pb-1"
-            aria-label="Pages">
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
-              <button key={n} type="button" onClick={() => goToPage(n)}
-                ref={(el) => { if (el) thumbRefs.current.set(n, el); else thumbRefs.current.delete(n); }}
-                aria-label={`Page ${n}`} aria-current={n === pageNumber ? "page" : undefined}
-                className={`shrink-0 border-2 bg-white p-0.5 ${n === pageNumber
-                  ? "border-[var(--color-primary)]"
-                  : "border-transparent opacity-80 hover:border-slate-300 hover:opacity-100"}`}>
-                <Page pageNumber={n} width={THUMB_WIDTH} renderTextLayer={false} renderAnnotationLayer={false}
-                  loading={<div className="bg-slate-100" style={{ width: THUMB_WIDTH, height: THUMB_WIDTH * 9 / 16 }} />} />
-                <span className="flex items-center justify-center gap-1 pt-0.5 font-mono text-[10px] text-slate-500">
-                  {markedPages?.has(n) && (
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="has changes" />
-                  )}
-                  {n}
-                </span>
-              </button>
-            ))}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {shown && layer(shown, false)}
+        {incoming && layer(incoming, true)}
+        {status && (
+          <div role="status" aria-live="polite"
+            className="pointer-events-none absolute left-1/2 top-6 z-20 flex -translate-x-1/2 items-center gap-2 border border-[var(--color-border)] bg-white/95 px-3 py-1.5 text-sm text-slate-700 shadow-md">
+            <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
+            {status}
           </div>
         )}
-      </Document>
+      </div>
     </div>
   );
 }
