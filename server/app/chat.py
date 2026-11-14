@@ -3,7 +3,10 @@
 A thread starts when text quoted from the source PDF or the notes is put into
 the question box (or with a plain question); follow-ups stay in that thread.
 Threads that quote something get a number, drawn next to the quoted text.
-They live in threads.json beside the generation. Answers run in a background
+Each thread belongs to a session (a page of the conversation list); a new
+session leaves earlier threads and their marks in place, and numbers keep
+counting so every mark stays unique. They live in threads.json beside the
+generation. Answers run in a background
 thread, so a slow model never holds an HTTP request open.
 """
 
@@ -111,8 +114,9 @@ def clean_anchor(raw: dict[str, Any], sources: int, notes_stamp: int) -> dict[st
 
 
 def ask(gdir: Path, question: str, thread_id: str | None, anchors: list[dict[str, Any]],
-        sources: int) -> dict[str, Any]:
-    """Record the question and an empty answer, then answer in the background."""
+        sources: int, session: int | None = None) -> dict[str, Any]:
+    """Record the question and an empty answer, then answer in the background.
+    session: where a new thread goes (default: the latest session)."""
     question = question.strip()
     if not question:
         raise ChatError("Write a question")
@@ -136,8 +140,10 @@ def ask(gdir: Path, question: str, thread_id: str | None, anchors: list[dict[str
             if quotes and not thread["number"]:
                 thread["number"] = 1 + max((t["number"] for t in threads), default=0)
         else:
+            latest = max((_session_of(t) for t in threads), default=1)
             thread = {
                 "id": uuid.uuid4().hex[:10],
+                "session": session if session and session >= 1 else latest,
                 "number": 1 + max((t["number"] for t in threads), default=0) if quotes else 0,
                 "anchors": quotes,
                 "messages": [],
@@ -161,16 +167,8 @@ def delete(gdir: Path, thread_id: str) -> None:
         _save(gdir, data)
 
 
-def clear(gdir: Path) -> int:
-    """Start a new session: the conversation goes, numbering starts again at 1.
-    The last cleared session is kept in threads.cleared.json, in case."""
-    with _lock:
-        data = load(gdir)
-        if data["threads"]:
-            backup = gdir / "threads.cleared.json"
-            backup.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        _save(gdir, {"threads": []})
-        return len(data["threads"])
+def _session_of(thread: dict[str, Any]) -> int:
+    return int(thread.get("session") or 1)  # threads from before sessions: the first
 
 
 def threads_for_view(gdir: Path) -> list[dict[str, Any]]:
@@ -193,7 +191,7 @@ def threads_for_view(gdir: Path) -> list[dict[str, Any]]:
             for m in t["messages"]:
                 if m["status"] == "pending" and time.time() - m["at"] > 1800:
                     m.update(status="error", content="No answer arrived; ask again.")
-        return data["threads"]
+        return [{**t, "session": _session_of(t)} for t in data["threads"]]
 
 
 def _relocate(anchor: dict[str, Any], pdf: fitz.Document) -> None:

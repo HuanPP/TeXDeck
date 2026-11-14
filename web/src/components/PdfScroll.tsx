@@ -63,7 +63,7 @@ type Props = {
   // Text selected (null when the selection goes away).
   onSelect?: (selection: PageSelection | null) => void;
   underlines?: Underline[];
-  onUnderlineClick?: (key: string) => void;
+  onUnderlineClick?: (key: string, at: { x: number; y: number }) => void; // at: the click, in the viewport
   // The dragged box stays drawn while the parent still holds that selection.
   showArea?: boolean;
   shades?: Shade[];
@@ -368,7 +368,7 @@ export default function PdfScroll({
                           className={`absolute z-20 flex h-4 min-w-4 -translate-x-full -translate-y-1/2 items-center justify-center rounded-full px-1 font-sans text-[10px] leading-none text-white shadow ${u.active ? "bg-indigo-700" : "bg-indigo-500 hover:bg-indigo-700"}`}
                           style={{ left: `${u.rects[0].x * 100}%`, top: `${u.rects[0].y * 100}%` }}
                           onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); onUnderlineClick?.(u.key); }}
+                          onClick={(e) => { e.stopPropagation(); onUnderlineClick?.(u.key, { x: e.clientX, y: e.clientY }); }}
                           onDoubleClick={(e) => e.stopPropagation()}>
                           {u.number}
                         </button>

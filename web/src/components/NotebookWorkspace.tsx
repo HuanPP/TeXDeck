@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, MessageSquareText } from "lucide-react";
+import { ChevronLeft, ChevronRight, MessageSquareText, Trash2 } from "lucide-react";
 import {
-  askQuestion, clearThreads, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl, threadImageUrl,
+  askQuestion, deleteThread, getSourceMap, listThreads, pdfUrl, sourcePdfUrl, sourceTextUrl, threadImageUrl,
   type ChatAnchor, type ChatThread, type SourceAnchor, type SourceMap,
 } from "../api";
 import LearnRail, { learntShades } from "./LearnRail";
@@ -96,6 +96,9 @@ export default function NotebookWorkspace({
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [quotes, setQuotes] = useState<ChatAnchor[]>([]);
   const [cardsNow, setCards] = useState<Card[]>([]);
+  const [viewSession, setViewSession] = useState<number | null>(null); // null: the latest
+  // A mark's menu (open / delete), at the click.
+  const [markMenu, setMarkMenu] = useState<{ id: string; x: number; y: number; confirm: boolean } | null>(null);
   const useCount = useRef(0);
   const [selection, setSelection] = useState<(ChatAnchor & { at: { x: number; y: number } }) | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -214,7 +217,7 @@ export default function NotebookWorkspace({
   async function ask(question: string, thread: string | null) {
     setChatError(null);
     try {
-      const made = await askQuestion(id, question, thread, quotes);
+      const made = await askQuestion(id, question, thread, quotes, session);
       setQuotes([]);
       setThreads((all) => [...all.filter((t) => t.id !== made.id), made]);
     } catch (e) {
@@ -254,16 +257,10 @@ export default function NotebookWorkspace({
     window.addEventListener("pointerup", up);
   }
 
-  async function newSession() {
-    setCards([]);
-    setThreads([]);
-    setQuotes([]);
-    try {
-      await clearThreads(id);
-    } catch (e) {
-      setChatError(e instanceof Error ? e.message : String(e));
-    }
-    void loadThreads();
+  function removeThread(threadId: string) {
+    closeCard(threadId);
+    setThreads((all) => all.filter((x) => x.id !== threadId));
+    void deleteThread(id, threadId).catch(() => loadThreads());
   }
 
   function goTo(a: ChatAnchor) {
@@ -414,6 +411,12 @@ export default function NotebookWorkspace({
   const sources = map?.sources ?? sourceNames.map((name, i) => ({ index: i + 1, name, pages: 0 }));
   const current = sources.find((s) => s.index === doc);
   const splitter = "w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-[var(--color-primary)]/30";
+  // Sessions: pages of the conversation list. Marks from all of them stay drawn.
+  const sessions = [...new Set(threads.map((t) => t.session))].sort((a, b) => a - b).map((n) => {
+    const mine = threads.filter((t) => t.session === n);
+    return { n, count: mine.length, at: Math.max(...mine.map((t) => t.created_at)) };
+  });
+  const session = viewSession ?? sessions.at(-1)?.n ?? 1;
   // Cards whose thread still exists, the latest-used last.
   const live = cardsNow
     .map((c) => ({ ...c, thread: threads.find((t) => t.id === c.id) }))
@@ -483,7 +486,7 @@ export default function NotebookWorkspace({
               label={current?.name ?? "Source"}
               hint={linked ? "Double-click a page to find its notes" : undefined}
               onDoubleClick={linked ? (page) => sourceToNotes(page) : undefined}
-              onSelect={select("source")} underlines={underlines("source")} onUnderlineClick={openFromText}
+              onSelect={select("source")} underlines={underlines("source")} onUnderlineClick={(key, at) => setMarkMenu({ id: key, ...at, confirm: false })}
               shades={shades.source(doc)}
               showArea={selection?.where === "source" && Boolean(selection.area)} />
           )}
@@ -504,7 +507,7 @@ export default function NotebookWorkspace({
           onTextClick={sideTab === "edit" ? onNotesTextClick : undefined}
           marks={sideTab === "edit" ? notesMarks : undefined}
           onPageChange={(p) => { setNotesPage(p); onNotesPageChange?.(p); }}
-          onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={openFromText}
+          onSelect={select("notes")} underlines={underlines("notes")} onUnderlineClick={(key, at) => setMarkMenu({ id: key, ...at, confirm: false })}
           shades={shades.notes}
           showArea={selection?.where === "notes" && Boolean(selection.area)} />
         </div>
@@ -534,12 +537,9 @@ export default function NotebookWorkspace({
                   onAddToNotes={onQueueNote ? addToNotes : undefined}
                   onRemoveQuote={(i) => setQuotes((q) => q.filter((_, j) => j !== i))}
                   onAsk={ask} focused={focused} openIds={openIds} onOpenThread={openCard} onGoTo={goTo}
-                  onClear={newSession} topCard={card(SIDE_TOP)} bottomCard={card(SIDE_TOP + 1)}
-                  onDelete={(t) => {
-                    closeCard(t);
-                    setThreads((all) => all.filter((x) => x.id !== t));
-                    void deleteThread(id, t).catch(() => loadThreads());
-                  }} />
+                  session={session} sessions={sessions} onSession={setViewSession}
+                  topCard={card(SIDE_TOP)} bottomCard={card(SIDE_TOP + 1)}
+                  onDelete={removeThread} />
               )}
             </div>
           </aside>
@@ -575,6 +575,40 @@ export default function NotebookWorkspace({
           )}
         </div>
       )}
+      {markMenu && (() => {
+        const t = threads.find((x) => x.id === markMenu.id);
+        if (!t) return null;
+        const label = t.number ? `question ${t.number}` : "this question";
+        return (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setMarkMenu(null)} />
+            <div role="menu" className="fixed z-50 w-56 border border-[var(--color-border)] bg-white py-1 font-sans text-xs shadow-lg"
+              style={{ left: Math.min(markMenu.x + 6, window.innerWidth - 232), top: Math.min(markMenu.y + 6, window.innerHeight - 90) }}>
+              {markMenu.confirm ? (
+                <div className="space-y-2 px-3 py-2">
+                  <p className="text-slate-600">Delete {label}: its mark and its conversation?</p>
+                  <div className="flex gap-3">
+                    <button type="button" className="text-red-600 hover:underline"
+                      onClick={() => { removeThread(t.id); setMarkMenu(null); }}>Delete</button>
+                    <button type="button" className="text-slate-500 hover:underline" onClick={() => setMarkMenu(null)}>Keep</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+                    onClick={() => { openFromText(t.id); setMarkMenu(null); }}>
+                    <MessageSquareText className="h-3.5 w-3.5" /> Open {label}
+                  </button>
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-red-600 hover:bg-red-50"
+                    onClick={() => setMarkMenu({ ...markMenu, confirm: true })}>
+                    <Trash2 className="h-3.5 w-3.5" /> Delete {label}…
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        );
+      })()}
       {selection && (
         <button type="button" aria-label="Ask AI about the selection" onMouseDown={(e) => e.preventDefault()} onClick={quoteSelection}
           className="fixed z-40 inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1.5 font-sans text-xs text-white shadow-lg hover:bg-indigo-700"

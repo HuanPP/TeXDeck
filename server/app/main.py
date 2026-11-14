@@ -122,6 +122,7 @@ class AskBody(BaseModel):
     question: str
     thread: str | None = None  # continue this thread; None starts one
     anchors: list[dict[str, Any]] = []  # quotes: where, doc, page, text, rects
+    session: int | None = None  # a new thread's session; None: the latest
 
 
 class ProgressBody(BaseModel):
@@ -1463,18 +1464,10 @@ def api_ask(gen_id: str, body: AskBody) -> dict[str, Any]:
     _require_model()
     try:
         thread = chat.ask(store.generation_dir(gen_id), body.question, body.thread, body.anchors,
-                          len(meta.source_names))
+                          len(meta.source_names), body.session)
     except chat.ChatError as e:
         raise HTTPException(400, detail=str(e)) from e
     return thread
-
-
-@app.delete("/api/generations/{gen_id}/threads", status_code=204)
-def api_clear_threads(gen_id: str) -> Response:
-    """New session: clear the notebook's conversation."""
-    _load(gen_id)
-    chat.clear(store.generation_dir(gen_id))
-    return Response(status_code=204)
 
 
 @app.get("/api/generations/{gen_id}/progress")

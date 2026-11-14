@@ -22,7 +22,9 @@ type Props = {
   focusKey: number; // bumps when a quote is added, to focus the box
   imageUrl: (name: string) => string; // an area quote's crop
   onAddToNotes?: (thread: ChatThread, answerId: string) => void;
-  onClear: () => Promise<void>; // New session
+  session: number; // the session on show; new questions go into it
+  sessions: { n: number; count: number; at: number }[]; // every session, oldest first
+  onSession: (n: number) => void; // show a session (n past the last: a new, empty one)
   topCard?: ReactNode; // cards placed on this column's halves
   bottomCard?: ReactNode;
 };
@@ -133,17 +135,18 @@ function Messages({ thread, ...view }: { thread: ChatThread } & View) {
 
 export default function NotebookChat({
   threads, quotes, onRemoveQuote, onAsk, focused, openIds, onOpenThread, onGoTo, onDelete, error, focusKey, imageUrl, onAddToNotes,
-  onClear, topCard, bottomCard,
+  session, sessions, onSession, topCard, bottomCard,
 }: Props) {
   const [text, setText] = useState("");
   const [fresh, setFresh] = useState(false); // "New topic": the next question starts a thread
   const [sending, setSending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLTextAreaElement | null>(null);
   const open = threads.find((t) => t.id === focused) ?? null;
-  const last = threads[threads.length - 1] ?? null;
+  const shown = threads.filter((t) => t.session === session);
+  const last = shown[shown.length - 1] ?? null;
+  const newest = sessions.at(-1)?.n ?? 1;
   const multiDoc = threads.some((t) => t.anchors.some((a) => a.doc > 1));
   const view: View = { multiDoc, onGoTo, imageUrl, onAddToNotes };
   // Where the next question goes: quotes start a thread; otherwise it follows
@@ -151,7 +154,7 @@ export default function NotebookChat({
   const target = quotes.length || fresh ? null : (open ?? last);
   const waiting = target?.messages.some((m) => m.status === "pending") ?? false;
 
-  const tail = threads.map((t) => `${t.id}:${t.messages.length}:${t.messages.at(-1)?.status}`).join(",");
+  const tail = shown.map((t) => `${t.id}:${t.messages.length}:${t.messages.at(-1)?.status}`).join(",");
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -174,15 +177,29 @@ export default function NotebookChat({
 
   return (
     <div className="notebook-chat flex h-full min-h-0 flex-col">
+      {(sessions.length > 1 || session > newest) && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 py-1 text-[11px] text-slate-500">
+          <label htmlFor="chat-session">Session</label>
+          <select id="chat-session" value={session} onChange={(e) => onSession(Number(e.target.value))}
+            className="min-w-0 flex-1 truncate border border-[var(--color-border)] bg-white px-1 py-0.5 text-[11px] text-slate-600">
+            {session > newest && <option value={session}>{session} · new</option>}
+            {[...sessions].reverse().map((s) => (
+              <option key={s.n} value={s.n}>
+                {s.n} · {s.count} {s.count === 1 ? "conversation" : "conversations"} · {new Date(s.at * 1000).toLocaleDateString()}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {topCard}
       <div ref={listRef} className={`min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 ${TEXT_SIZE}`}>
-        {threads.length === 0 && (
+        {shown.length === 0 && (
           <div className="space-y-2 pt-6 text-center text-sm text-slate-500">
             <p>Select text in the source or the notes and press Ask, or just type a question.</p>
             <p className="text-xs text-slate-400">Answers use the source and the notes. Quoted passages get a number you can come back to.</p>
           </div>
         )}
-        {threads.map((t) => (
+        {shown.map((t) => (
           <article key={t.id} className={`group space-y-2 border-l-2 pl-2.5 ${openIds.has(t.id) ? "border-indigo-500" : target?.id === t.id ? "border-slate-300" : "border-transparent"}`}>
             <div className="flex items-center gap-2">
               {t.number > 0 && <Badge n={t.number} onClick={() => onOpenThread(t.id)} />}
@@ -232,29 +249,18 @@ export default function NotebookChat({
                 ? `Follow-up${target.number ? ` in ${target.number}` : " to the last question"}`
                 : "New question"}
           </span>
-          {confirmClear ? (
-            <span className="flex items-center gap-1.5">
-              <button type="button" className="text-red-600 hover:underline"
-                onClick={() => { setConfirmClear(false); setFresh(false); void onClear(); }}>
-                Clear {threads.length} {threads.length === 1 ? "conversation" : "conversations"}
-              </button>
-              <button type="button" className="hover:text-slate-700 hover:underline" onClick={() => setConfirmClear(false)}>Keep</button>
-            </span>
-          ) : (
-            <>
-              {target && (
-                <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setFresh(true)}
-                  title="Ask the next question apart from the earlier ones">
-                  <MessageSquarePlus className="h-3.5 w-3.5" /> New topic
-                </button>
-              )}
-              {threads.length > 0 && (
-                <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setConfirmClear(true)}
-                  title="Clear this conversation and start again (numbers restart at 1)">
-                  <Eraser className="h-3.5 w-3.5" /> New session
-                </button>
-              )}
-            </>
+          {target && (
+            <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => setFresh(true)}
+              title="Ask the next question apart from the earlier ones">
+              <MessageSquarePlus className="h-3.5 w-3.5" /> New topic
+            </button>
+          )}
+          {shown.length > 0 && (
+            <button type="button" className="inline-flex items-center gap-1 hover:text-slate-700"
+              onClick={() => { setFresh(false); onSession(newest + 1); }}
+              title="Start an empty conversation list; earlier sessions and their marks stay (pick them under Session)">
+              <Eraser className="h-3.5 w-3.5" /> New session
+            </button>
           )}
         </div>
         {error && <p role="alert" className="text-xs text-red-600">{error}</p>}

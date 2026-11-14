@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 from typing import Any
 
@@ -141,11 +143,19 @@ def test_an_area_quote_is_one_box(gdir: Path) -> None:
         chat.ask(gdir, "Why?", None, [{**_quote(), "area": True, "rects": []}], sources=1)
 
 
-def test_a_new_session_clears_the_conversation_and_restarts_numbers(gdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_new_session_keeps_earlier_threads_and_numbers(gdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chat, "create_client", lambda: _FakeClient())
-    chat.ask(gdir, "Why?", None, [_quote()], 1)
-    chat.ask(gdir, "And this?", None, [_quote(page=2, text="Shortcut")], 1)
-    assert chat.clear(gdir) == 2
-    assert chat.load(gdir)["threads"] == []
-    assert (gdir / "threads.cleared.json").is_file()
-    assert chat.ask(gdir, "Again", None, [_quote()], 1)["number"] == 1
+    first = chat.ask(gdir, "Why?", None, [_quote()], 1)
+    assert first["session"] == 1
+    second = chat.ask(gdir, "And this?", None, [_quote(page=2, text="Shortcut")], 1, session=2)
+    assert second["session"] == 2 and second["number"] == 2  # numbers keep counting
+    assert chat.ask(gdir, "More?", None, [], 1)["session"] == 2  # the latest by default
+    follow = chat.ask(gdir, "Follow-up", first["id"], [], 1, session=2)
+    assert follow["session"] == 1  # a follow-up stays where its thread is
+    assert [t["session"] for t in chat.threads_for_view(gdir)] == [1, 2, 2]
+
+
+def test_threads_from_before_sessions_are_the_first(gdir: Path) -> None:
+    (gdir / chat.THREADS_FILE).write_text(json.dumps({"threads": [
+        {"id": "a", "number": 1, "anchors": [], "messages": [], "created_at": 1}]}), encoding="utf-8")
+    assert chat.threads_for_view(gdir)[0]["session"] == 1

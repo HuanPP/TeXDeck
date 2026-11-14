@@ -233,20 +233,19 @@ export type ChatAnchor = {
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; content: string; status: "pending" | "done" | "error"; at: number;
 };
-export type ChatThread = { id: string; number: number; anchors: ChatAnchor[]; messages: ChatMessage[]; created_at: number };
+// session: the page of the conversation list it is on; its marks show in every session.
+export type ChatThread = { id: string; number: number; session: number; anchors: ChatAnchor[]; messages: ChatMessage[]; created_at: number };
 export const listThreads = (id: string) =>
   requestJson<{ threads: ChatThread[] }>(`/api/generations/${id}/threads`).then((r) => r.threads);
-export const askQuestion = (id: string, question: string, thread: string | null, anchors: ChatAnchor[]) =>
+export const askQuestion = (id: string, question: string, thread: string | null, anchors: ChatAnchor[], session: number) =>
   requestJson<ChatThread>(`/api/generations/${id}/threads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, thread, anchors }),
+    body: JSON.stringify({ question, thread, anchors, session }),
   });
 export const threadImageUrl = (id: string, name: string) => `/api/generations/${id}/threads/images/${name}`;
 export const deleteThread = (id: string, thread: string) =>
   requestJson<void>(`/api/generations/${id}/threads/${thread}`, { method: "DELETE" });
-export const clearThreads = (id: string) =>
-  requestJson<void>(`/api/generations/${id}/threads`, { method: "DELETE" });
 // Learn: the parts of the notes marked as learnt (keys from the heading titles).
 export const getProgress = (id: string) =>
   requestJson<{ done: string[] }>(`/api/generations/${id}/progress`).then((r) => r.done);
