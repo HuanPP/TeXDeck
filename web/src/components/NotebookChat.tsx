@@ -1,20 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, Eraser, GripVertical, MessageSquarePlus, NotebookPen, PanelRightClose, Trash2, X } from "lucide-react";
 import type { ChatAnchor, ChatThread } from "../api";
 import ChatMarkdown from "./ChatMarkdown";
 
 // The notebook's AI column. Every question belongs to a thread: one started by
 // quoting text gets a number, drawn by that text. Opening a number shows that
-// thread on its own: on top of this column, or (dragged by its grip) over any
-// half-column of the notebook; see NotebookWorkspace.
+// thread on its own card: several can be open, each over a half-column of the
+// notebook (the halves of this column split it); see NotebookWorkspace.
 
 type Props = {
   threads: ChatThread[];
   quotes: ChatAnchor[]; // waiting in the box for the next question
   onRemoveQuote: (index: number) => void;
   onAsk: (question: string, thread: string | null) => Promise<void>;
-  openThread: string | null;
-  onOpenThread: (id: string | null) => void;
+  focused: string | null; // the card used last: follow-ups go to it
+  openIds: Set<string>; // threads that have a card open
+  onOpenThread: (id: string) => void;
   onGoTo: (anchor: ChatAnchor) => void;
   onDelete: (id: string) => void;
   error: string | null;
@@ -22,8 +23,8 @@ type Props = {
   imageUrl: (name: string) => string; // an area quote's crop
   onAddToNotes?: (thread: ChatThread, answerId: string) => void;
   onClear: () => Promise<void>; // New session
-  docked: "top" | "bottom" | null; // where the open thread splits this column (null: it is elsewhere)
-  onGripDown: (e: React.PointerEvent) => void; // start dragging the open thread away
+  topCard?: ReactNode; // cards placed on this column's halves
+  bottomCard?: ReactNode;
 };
 
 export type View = { multiDoc: boolean; onGoTo: (a: ChatAnchor) => void; imageUrl: (name: string) => string;
@@ -62,8 +63,9 @@ export const TEXT_SIZE = "text-[13px] leading-relaxed";
 const OPEN_SIZE = "text-[12.5px] leading-relaxed";
 
 // The opened thread: its header (grip to move it, close) and its messages.
-export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, fill, bottom }: {
+export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, onUse, fill, bottom }: {
   thread: ChatThread; view: View; onClose: () => void; onGripDown: (e: React.PointerEvent) => void;
+  onUse?: () => void; // any press on the card: it becomes the one follow-ups go to
   onDockBack?: () => void; // shown when it floats over another column
   fill?: boolean; // floating: takes the whole box
   bottom?: boolean; // in the lower half of the side panel
@@ -73,7 +75,7 @@ export function OpenThread({ thread, view, onClose, onGripDown, onDockBack, fill
   const n = thread.messages.filter((m) => m.role === "user").length;
   return (
     <section className={`notebook-chat flex min-h-0 flex-col bg-indigo-50/60 ${fill ? "h-full" : bottom ? "basis-1/2 border-t-2 border-indigo-200" : "basis-1/2 border-b-2 border-indigo-200"}`}
-      aria-label="Opened question">
+      aria-label="Opened question" onPointerDownCapture={onUse}>
       <div className="flex shrink-0 items-center gap-1.5 px-1.5 py-1.5">
         <button type="button" className="cursor-grab touch-none p-1 text-slate-400 hover:text-indigo-600 active:cursor-grabbing"
           aria-label="Drag to place this question over another part of the notebook"
@@ -130,8 +132,8 @@ function Messages({ thread, ...view }: { thread: ChatThread } & View) {
 }
 
 export default function NotebookChat({
-  threads, quotes, onRemoveQuote, onAsk, openThread, onOpenThread, onGoTo, onDelete, error, focusKey, imageUrl, onAddToNotes,
-  onClear, docked, onGripDown,
+  threads, quotes, onRemoveQuote, onAsk, focused, openIds, onOpenThread, onGoTo, onDelete, error, focusKey, imageUrl, onAddToNotes,
+  onClear, topCard, bottomCard,
 }: Props) {
   const [text, setText] = useState("");
   const [fresh, setFresh] = useState(false); // "New topic": the next question starts a thread
@@ -140,7 +142,7 @@ export default function NotebookChat({
   const [confirmClear, setConfirmClear] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLTextAreaElement | null>(null);
-  const open = threads.find((t) => t.id === openThread) ?? null;
+  const open = threads.find((t) => t.id === focused) ?? null;
   const last = threads[threads.length - 1] ?? null;
   const multiDoc = threads.some((t) => t.anchors.some((a) => a.doc > 1));
   const view: View = { multiDoc, onGoTo, imageUrl, onAddToNotes };
@@ -172,9 +174,7 @@ export default function NotebookChat({
 
   return (
     <div className="notebook-chat flex h-full min-h-0 flex-col">
-      {open && docked === "top" && (
-        <OpenThread thread={open} view={view} onClose={() => onOpenThread(null)} onGripDown={onGripDown} />
-      )}
+      {topCard}
       <div ref={listRef} className={`min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 ${TEXT_SIZE}`}>
         {threads.length === 0 && (
           <div className="space-y-2 pt-6 text-center text-sm text-slate-500">
@@ -183,7 +183,7 @@ export default function NotebookChat({
           </div>
         )}
         {threads.map((t) => (
-          <article key={t.id} className={`group space-y-2 border-l-2 pl-2.5 ${t.id === openThread ? "border-indigo-500" : target?.id === t.id ? "border-slate-300" : "border-transparent"}`}>
+          <article key={t.id} className={`group space-y-2 border-l-2 pl-2.5 ${openIds.has(t.id) ? "border-indigo-500" : target?.id === t.id ? "border-slate-300" : "border-transparent"}`}>
             <div className="flex items-center gap-2">
               {t.number > 0 && <Badge n={t.number} onClick={() => onOpenThread(t.id)} />}
               <span className="flex-1" />
@@ -205,9 +205,7 @@ export default function NotebookChat({
           </article>
         ))}
       </div>
-      {open && docked === "bottom" && (
-        <OpenThread thread={open} view={view} bottom onClose={() => onOpenThread(null)} onGripDown={onGripDown} />
-      )}
+      {bottomCard}
       <form className="shrink-0 space-y-2 border-t border-[var(--color-border)] p-2.5"
         onSubmit={(e) => { e.preventDefault(); void send(); }}>
         {quotes.length > 0 && (

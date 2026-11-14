@@ -23,9 +23,15 @@ type Cols = { left: number; right: number; rightOpen: boolean };
 type Box = { left: number; top: number; width: number; height: number };
 // Where an opened question sits: the top or bottom half of a column (source
 // 0-1, notes 2-3, side panel 4-5). In the side panel it splits the conversation;
-// elsewhere it covers that half. The top of the side panel is the default.
+// elsewhere it covers that half. The slot a card was last dropped on is where
+// the next one opens.
 type Dock = number;
 const SIDE_TOP = 4;
+// One card per half-column. Opening a seventh closes the card used longest
+// ago and takes its place: stacking would hide cards under others, and
+// refusing would make the reader go and close one first.
+type Card = { id: string; slot: Dock; used: number };
+const FILL_ORDER = [SIDE_TOP, SIDE_TOP + 1, 3, 1, 2, 0];
 
 function loadDock(): Dock {
   const n = Number(localStorage.getItem(DOCK_KEY) ?? SIDE_TOP);
@@ -89,7 +95,8 @@ export default function NotebookWorkspace({
   const [sideTab, setSideTab] = useState<"ai" | "edit">("ai");
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [quotes, setQuotes] = useState<ChatAnchor[]>([]);
-  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [cardsNow, setCards] = useState<Card[]>([]);
+  const useCount = useRef(0);
   const [selection, setSelection] = useState<(ChatAnchor & { at: { x: number; y: number } }) | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState(0);
@@ -102,7 +109,7 @@ export default function NotebookWorkspace({
   const [dock, setDockState] = useState<Dock>(loadDock);
   const [units, setUnits] = useState<Box[]>([]); // the six half-columns, in workspace coordinates
   const [learnt, setLearnt] = useState<Set<string>>(new Set());
-  const [dragging, setDragging] = useState<{ x: number; y: number; over: number | null } | null>(null);
+  const [dragging, setDragging] = useState<{ id: string; x: number; y: number; over: number | null } | null>(null);
   const sourceSec = useRef<HTMLElement | null>(null);
   const notesSec = useRef<HTMLElement | null>(null);
   const sideSec = useRef<HTMLElement | null>(null);
@@ -210,7 +217,6 @@ export default function NotebookWorkspace({
       const made = await askQuestion(id, question, thread, quotes);
       setQuotes([]);
       setThreads((all) => [...all.filter((t) => t.id !== made.id), made]);
-      if (openThread && openThread !== made.id) setOpenThread(null);
     } catch (e) {
       setChatError(e instanceof Error ? e.message : String(e));
       throw e;
@@ -219,7 +225,7 @@ export default function NotebookWorkspace({
 
   // Drag the opened question by its grip: it snaps to the half-column under the
   // pointer, and stays there when dropped.
-  function startThreadDrag(e: React.PointerEvent) {
+  function startThreadDrag(e: React.PointerEvent, cardId: string) {
     e.preventDefault();
     measure();
     const root = rootRef.current?.getBoundingClientRect();
@@ -228,7 +234,7 @@ export default function NotebookWorkspace({
       const x = ev.clientX - root.left;
       const y = ev.clientY - root.top;
       const i = unitsRef.current.findIndex((b) => x >= b.left && x < b.left + b.width && y >= b.top && y < b.top + b.height);
-      return { x, y, over: i < 0 ? null : i };
+      return { id: cardId, x, y, over: i < 0 ? null : i };
     };
     setDragging(at(e));
     const move = (ev: PointerEvent) => setDragging(at(ev));
@@ -239,7 +245,7 @@ export default function NotebookWorkspace({
       const { over } = at(ev);
       setDragging(null);
       if (over !== null) {
-        setDock(over);
+        moveCard(cardId, over);
         if (over >= SIDE_TOP) setSideTab("ai");
       }
     };
@@ -249,7 +255,7 @@ export default function NotebookWorkspace({
   }
 
   async function newSession() {
-    setOpenThread(null);
+    setCards([]);
     setThreads([]);
     setQuotes([]);
     try {
@@ -296,8 +302,46 @@ export default function NotebookWorkspace({
     setStatus(onQueueNote(notesPage, lines.filter(Boolean).join("\n"), `Add to notes: ${question.content.slice(0, 120)}`));
   }
 
+  // Open a thread's card (or, when it is open, make it the one in use).
+  function openCard(threadId: string) {
+    const used = ++useCount.current;
+    const cards = cardsNow.filter((c) => threads.some((t) => t.id === c.id)); // deleted threads free their slot
+    if (cards.some((c) => c.id === threadId)) {
+      setCards(cards.map((c) => (c.id === threadId ? { ...c, used } : c)));
+      return;
+    }
+    const taken = new Set(cards.map((c) => c.slot));
+    const free = [dock, ...FILL_ORDER].find((slot) => !taken.has(slot));
+    if (free !== undefined) {
+      setCards([...cards, { id: threadId, slot: free, used }]);
+      return;
+    }
+    const oldest = cards.reduce((a, b) => (a.used <= b.used ? a : b));
+    const n = threads.find((t) => t.id === oldest.id)?.number;
+    setStatus(`Six questions are open at most: closed ${n ? `question ${n}` : "the one used longest ago"} to make room`);
+    setCards(cards.map((c) => (c === oldest ? { id: threadId, slot: oldest.slot, used } : c)));
+  }
+
+  const touchCard = (cardId: string) => {
+    const used = ++useCount.current;
+    setCards((all) => all.map((c) => (c.id === cardId ? { ...c, used } : c)));
+  };
+
+  // Drop a card on a slot; a card already there swaps into the one it left.
+  function moveCard(cardId: string, slot: Dock) {
+    const used = ++useCount.current;
+    setDock(slot);
+    setCards((all) => {
+      const from = all.find((c) => c.id === cardId)?.slot;
+      if (from === undefined) return all;
+      return all.map((c) => (c.id === cardId ? { ...c, slot, used } : c.slot === slot ? { ...c, slot: from } : c));
+    });
+  }
+
+  const closeCard = (cardId: string) => setCards((all) => all.filter((c) => c.id !== cardId));
+
   function openFromText(threadId: string) {
-    setOpenThread(threadId);
+    openCard(threadId);
     setSideTab("ai");
     if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
   }
@@ -306,7 +350,7 @@ export default function NotebookWorkspace({
     .filter((a) => a.where === where && !a.gone && (where === "notes" || a.doc === doc))
     .map((a) => ({
       key: t.id, page: a.page, rects: a.rects, number: t.number, area: a.area,
-      active: t.id === openThread, title: t.messages[0]?.content ?? "",
+      active: openIds.has(t.id), title: t.messages[0]?.content ?? "",
     })));
 
   const anchors = map?.anchors ?? [];
@@ -370,21 +414,36 @@ export default function NotebookWorkspace({
   const sources = map?.sources ?? sourceNames.map((name, i) => ({ index: i + 1, name, pages: 0 }));
   const current = sources.find((s) => s.index === doc);
   const splitter = "w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-[var(--color-primary)]/30";
-  const opened = threads.find((t) => t.id === openThread) ?? null;
-  // Halves of a collapsed side panel fall back to the notes' halves.
-  const place = units[dock] ? dock : dock - 2;
-  const inSide = place >= SIDE_TOP && !dragging;
+  // Cards whose thread still exists, the latest-used last.
+  const live = cardsNow
+    .map((c) => ({ ...c, thread: threads.find((t) => t.id === c.id) }))
+    .filter((c): c is Card & { thread: ChatThread } => Boolean(c.thread))
+    .sort((a, b) => a.used - b.used);
+  const openIds = new Set(live.map((c) => c.id));
+  const focused = live.at(-1)?.id ?? null;
+  const draggedThread = dragging ? live.find((c) => c.id === dragging.id)?.thread ?? null : null;
+  // Where each card shows: its own slot, or with the side panel collapsed the
+  // same half of the notes column when that is free; otherwise it waits.
+  const shown = new Map<number, Card & { thread: ChatThread }>();
+  for (const c of live) if (units[c.slot]) shown.set(c.slot, c);
+  for (const c of live) if (!units[c.slot] && units[c.slot - 2] && !shown.has(c.slot - 2)) shown.set(c.slot - 2, c);
   const shades = learntShades(anchors, learnt, notesPages);
-  // The opened question in the source (0) or notes (1) column: that column's
-  // own content keeps the other half. (The side panel splits the same way.)
-  const split = (col: number, bottom: boolean) => opened && !dragging && place === col * 2 + (bottom ? 1 : 0) && (
-    <OpenThread thread={opened} view={view} bottom={bottom} onClose={() => setOpenThread(null)} onGripDown={startThreadDrag}
-      onDockBack={() => {
-        setDock(SIDE_TOP);
-        setSideTab("ai");
-        if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
-      }} />
-  );
+  const card = (slot: number) => {
+    const c = shown.get(slot);
+    if (!c || dragging?.id === c.id) return null;
+    return (
+      <OpenThread key={c.id} thread={c.thread} view={view} bottom={slot % 2 === 1}
+        onClose={() => closeCard(c.id)} onGripDown={(e) => startThreadDrag(e, c.id)} onUse={() => touchCard(c.id)}
+        onDockBack={slot < SIDE_TOP ? () => {
+          moveCard(c.id, SIDE_TOP);
+          setSideTab("ai");
+          if (!cols.rightOpen) setCols({ ...cols, rightOpen: true });
+        } : undefined} />
+    );
+  };
+  // A card in the source (0) or notes (1) column: that column's own content
+  // keeps the other half. (The side panel splits the same way.)
+  const split = (col: number, bottom: boolean) => card(col * 2 + (bottom ? 1 : 0));
   const view: View = {
     multiDoc: threads.some((t) => t.anchors.some((a) => a.doc > 1)), onGoTo: goTo,
     imageUrl: (name) => threadImageUrl(id, name), onAddToNotes: onQueueNote ? addToNotes : undefined,
@@ -412,7 +471,7 @@ export default function NotebookWorkspace({
             ))}
           </div>
         )}
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {sourceKind === "text" ? (
             <div className="h-full overflow-auto p-5">
               <pre className="whitespace-pre-wrap break-words font-[inherit] text-sm leading-relaxed text-slate-700">
@@ -434,7 +493,7 @@ export default function NotebookWorkspace({
       <div className={splitter} onPointerDown={drag("left")} role="separator" aria-label="Resize source column" />
       <section ref={notesSec} className="flex min-w-0 flex-1 flex-col border border-[var(--color-border)] bg-white" aria-label="Notes">
         {split(1, false)}
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-hidden">
         <PdfScroll ref={notesRef} file={pdfUrl(id, pdfBust)} label={title}
           hint={linked
             ? "Double-click a part to see its source page"
@@ -474,11 +533,10 @@ export default function NotebookWorkspace({
                   imageUrl={(name) => threadImageUrl(id, name)}
                   onAddToNotes={onQueueNote ? addToNotes : undefined}
                   onRemoveQuote={(i) => setQuotes((q) => q.filter((_, j) => j !== i))}
-                  onAsk={ask} openThread={openThread} onOpenThread={setOpenThread} onGoTo={goTo}
-                  onClear={newSession} docked={inSide ? (place === SIDE_TOP ? "top" : "bottom") : null}
-                  onGripDown={startThreadDrag}
+                  onAsk={ask} focused={focused} openIds={openIds} onOpenThread={openCard} onGoTo={goTo}
+                  onClear={newSession} topCard={card(SIDE_TOP)} bottomCard={card(SIDE_TOP + 1)}
                   onDelete={(t) => {
-                    if (openThread === t) setOpenThread(null);
+                    closeCard(t);
                     setThreads((all) => all.filter((x) => x.id !== t));
                     void deleteThread(id, t).catch(() => loadThreads());
                   }} />
@@ -492,14 +550,14 @@ export default function NotebookWorkspace({
           <ChevronLeft className="h-4 w-4" />
         </button>
       )}
-      {opened && dragging && dragging.over !== null && (() => {
+      {draggedThread && dragging && dragging.over !== null && (() => {
         const box = units[dragging.over];
         if (!box) return null;
         return (
           <div className="pointer-events-none absolute z-20 border-2 border-indigo-500 bg-white opacity-95 shadow-xl"
             style={{ left: box.left, top: box.top, width: box.width, height: box.height,
               transition: "left 0.16s ease-out, top 0.16s ease-out, width 0.16s ease-out, height 0.16s ease-out" }}>
-            <OpenThread thread={opened} view={view} fill onClose={() => undefined} onGripDown={() => undefined} />
+            <OpenThread thread={draggedThread} view={view} fill onClose={() => undefined} onGripDown={() => undefined} />
           </div>
         );
       })()}
@@ -512,7 +570,7 @@ export default function NotebookWorkspace({
           {dragging.over === null && (
             <div className="absolute rounded-full bg-indigo-600 px-3 py-1 text-xs text-white shadow-lg"
               style={{ left: dragging.x + 12, top: dragging.y + 12 }}>
-              {opened?.number ? `Question ${opened.number}` : "Question"}
+              {draggedThread?.number ? `Question ${draggedThread.number}` : "Question"}
             </div>
           )}
         </div>
