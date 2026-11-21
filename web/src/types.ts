@@ -112,5 +112,8 @@ export type ModelStatus = {
     login_error: string;
     model: string;
   };
-  api: { configured: boolean; base_url: string; model: string; key_hint: string; saved: boolean };
+  api: { configured: boolean; base_url: string; model: string; key_hint: string; saved: boolean; protocol?: ApiProtocol };
 };
+
+// How the API key is spoken to (and which agent Papering runs on it).
+export type ApiProtocol = "openai" | "anthropic";

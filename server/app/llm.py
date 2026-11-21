@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 import openai
 
 from . import agy, auth, chatgpt, claude_code
@@ -193,6 +194,73 @@ class AgyClient:
             raise LlmError(str(exc)) from exc
 
 
+class AnthropicClient:
+    """Same complete() contract as LlmClient, for an Anthropic-compatible API key
+    (the Messages API at <base_url>/v1/messages)."""
+
+    def __init__(self, api: "ApiConfig", on_usage: UsageCallback | None = None) -> None:
+        self._api = api
+        self._on_usage = on_usage
+        self.model = api.model
+
+    @staticmethod
+    def to_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        system: list[str] = []
+        out: list[dict[str, Any]] = []
+        for message in messages:
+            content = message["content"]
+            parts = [{"type": "text", "text": content}] if isinstance(content, str) else content
+            if message["role"] == "system":
+                system += [p.get("text", "") for p in parts if p.get("type") == "text"]
+                continue
+            blocks: list[dict[str, Any]] = []
+            for part in parts:
+                if part.get("type") == "text" and part.get("text", "").strip():
+                    blocks.append({"type": "text", "text": part["text"]})
+                elif part.get("type") == "image_url":
+                    header, _, data = part["image_url"]["url"].partition(",")
+                    media = header[len("data:"):].split(";", 1)[0] or "image/png"
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": data}})
+            if blocks:
+                out.append({"role": message["role"], "content": blocks})
+        return "\n\n".join(s for s in system if s.strip()), out
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        on_usage: UsageCallback | None = None,
+    ) -> str:
+        system, body = self.to_messages(messages)
+        payload: dict[str, Any] = {"model": self.model, "max_tokens": settings.llm_max_tokens,
+                                   "messages": body, "temperature": temperature}
+        if system:
+            payload["system"] = system
+        headers = {"x-api-key": self._api.api_key, "authorization": f"Bearer {self._api.api_key}",
+                   "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        url = self._api.base_url.rstrip("/") + "/v1/messages"
+        try:
+            response = httpx.post(url, json=payload, headers=headers, timeout=settings.llm_timeout_seconds)
+        except httpx.HTTPError as exc:
+            raise LlmError(f"Connection failed: {exc}") from exc
+        if response.status_code in (401, 403):
+            raise LlmError(f"Authentication failed: {response.text[:300]}")
+        if response.status_code == 429:
+            raise LlmError(f"Rate limited: {response.text[:300]}")
+        if response.status_code >= 400:
+            raise LlmError(f"Request rejected (HTTP {response.status_code}): {response.text[:300]}")
+        data = response.json()
+        usage = data.get("usage") or {}
+        callback = on_usage if on_usage is not None else self._on_usage
+        if callback is not None:
+            callback(int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0))
+        text = "".join(b.get("text", "") for b in data.get("content") or [] if b.get("type") == "text")
+        if not text.strip():
+            raise LlmError("Model returned empty content")
+        return text
+
+
 # --------------------------------------------------------------------------
 # Which model to use. The page picks one of three providers; the choice and
 # any API key entered on the page live in settings.model_state_file, or with
@@ -241,6 +309,9 @@ class ApiConfig:
     base_url: str
     model: str
     saved: bool  # entered on the page (and removable there), not only from .env
+    # "openai" (Chat Completions) or "anthropic" (Messages). Papering's agent
+    # runs Codex on the first and Claude Code on the second.
+    protocol: str = "openai"
 
 
 def _server_api_key() -> str:
@@ -255,19 +326,22 @@ def api_config() -> ApiConfig:
         base_url=str(saved.get("base_url") or settings.llm_base_url),
         model=str(saved.get("model") or settings.llm_model),
         saved=bool(saved),
+        protocol="anthropic" if saved.get("protocol") == "anthropic" else "openai",
     )
 
 
-def save_api_config(api_key: str, base_url: str, model: str) -> None:
+def save_api_config(api_key: str, base_url: str, model: str, protocol: str = "openai") -> None:
     """Store an API key from the page and switch to it; a blank key keeps the current one."""
     api_key, base_url, model = api_key.strip(), base_url.strip(), model.strip()
+    if protocol not in ("openai", "anthropic"):
+        raise LlmError("Unknown API protocol")
     if not api_key:
         api_key = api_config().api_key
     if not (api_key and base_url and model):
         raise LlmError("API key, base URL and model are all required")
     with _state_lock:
         data = _read_state()
-        data["api"] = {"api_key": api_key, "base_url": base_url, "model": model}
+        data["api"] = {"api_key": api_key, "base_url": base_url, "model": model, "protocol": protocol}
         data["provider"] = "api"
         _write_state(data)
 
@@ -393,6 +467,7 @@ def model_status() -> dict[str, Any]:
             "model": api.model,
             "key_hint": _key_hint(api.api_key),
             "saved": api.saved,
+            "protocol": api.protocol,
         },
     }
 
@@ -430,7 +505,7 @@ def ensure_model_ready() -> None:
 
 def create_client(
     on_usage: UsageCallback | None = None,
-) -> LlmClient | ChatGptClient | ClaudeCodeClient | AgyClient:
+) -> LlmClient | ChatGptClient | ClaudeCodeClient | AgyClient | AnthropicClient:
     provider = active_provider()
     if provider == "agy":
         return AgyClient(on_usage=on_usage)
@@ -448,6 +523,8 @@ def create_client(
     api = api_config()
     if not api.api_key:
         raise LlmError("No model connected: click the model button at the top and connect one")
+    if api.protocol == "anthropic":
+        return AnthropicClient(api, on_usage=on_usage)
     client = openai.OpenAI(
         api_key=api.api_key,
         base_url=api.base_url,

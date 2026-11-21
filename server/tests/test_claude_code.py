@@ -238,7 +238,7 @@ def test_switching_providers(auto_mode, tmp_path: Path) -> None:
     }).json()
     assert saved["provider"] == "api" and saved["model"] == "vision-1"
     assert saved["api"] == {"configured": True, "base_url": "https://example.com/v1", "model": "vision-1",
-                            "key_hint": "\u2022\u2022\u2022\u20221234", "saved": True}
+                            "key_hint": "\u2022\u2022\u2022\u20221234", "saved": True, "protocol": "openai"}
     assert "sk-secret" not in json.dumps(saved)
     assert (settings.model_state_file.stat().st_mode & 0o777) == 0o600
 

@@ -300,7 +300,7 @@ export const selectProvider = (provider: Provider) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider }),
   });
-export const saveApiKey = (input: { api_key: string; base_url: string; model: string }) =>
+export const saveApiKey = (input: { api_key: string; base_url: string; model: string; protocol: "openai" | "anthropic" }) =>
   requestJson<ModelStatus>("/api/model/api", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

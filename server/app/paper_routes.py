@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, paper, store
+from . import auth, paper, paper_agent, store
 from .store import GenerationMeta
 
 router = APIRouter()
@@ -246,15 +246,94 @@ async def watch(websocket: WebSocket, gen_id: str) -> None:
         while True:
             files = await run_in_threadpool(paper.fingerprint, gen_id)
             build = _build(gen_id)
-            state = {"files": files, "build": build}
+            agent = {"running": paper_agent.running(gen_id), "version": paper_agent.version(gen_id)}
+            state = {"files": files, "build": build, "agent": agent}
             if state != last:
                 await websocket.send_json(state)
                 last = state
             # Waiting on receive (not sleep) notices a closed page even while
             # nothing changes; the page never sends anything.
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=0.5 if build["running"] else 1.0)
+                busy = build["running"] or agent["running"]
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.5 if busy else 1.0)
             except asyncio.TimeoutError:
                 pass
     except (WebSocketDisconnect, RuntimeError):
         return
+
+
+# ---- Agent ----
+
+
+def _agent(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return fn(*args, **kwargs)
+    except paper_agent.AgentError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+
+
+@router.get("/api/papers/{gen_id}/agent")
+def agent_state(gen_id: str) -> dict[str, Any]:
+    _paper(gen_id)
+    return {
+        **paper_agent.options(),
+        "sessions": paper_agent.list_sessions(gen_id),
+        "running": paper_agent.running(gen_id),
+        "version": paper_agent.version(gen_id),
+    }
+
+
+@router.get("/api/papers/{gen_id}/agent/sessions/{sid}")
+def agent_transcript(gen_id: str, sid: str) -> dict[str, Any]:
+    _paper(gen_id)
+    return {"items": _agent(paper_agent.transcript, gen_id, sid), "version": paper_agent.version(gen_id)}
+
+
+class AgentBody(BaseModel):
+    kind: str
+    prompt: str
+    session: str = ""
+    context: dict[str, Any] = {}
+
+
+@router.post("/api/papers/{gen_id}/agent", status_code=202)
+def agent_start(gen_id: str, body: AgentBody) -> dict[str, str]:
+    _paper(gen_id)
+    sid = _agent(paper_agent.start, gen_id, body.kind, body.prompt, body.session, body.context)
+    return {"session": sid}
+
+
+@router.post("/api/papers/{gen_id}/agent/stop", status_code=204)
+def agent_stop(gen_id: str) -> Response:
+    _paper(gen_id)
+    paper_agent.stop(gen_id)
+    return Response(status_code=204)
+
+
+@router.delete("/api/papers/{gen_id}/agent/sessions/{sid}", status_code=204)
+def agent_delete_session(gen_id: str, sid: str) -> Response:
+    _paper(gen_id)
+    _agent(paper_agent.delete_session, gen_id, sid)
+    return Response(status_code=204)
+
+
+@router.post("/api/agent/codex/login")
+def codex_login() -> dict[str, Any]:
+    return _agent(paper_agent.start_codex_login)
+
+
+@router.get("/api/agent/codex/login")
+def codex_login_state() -> dict[str, Any]:
+    return {**paper_agent.codex_login_state(), "signed_in": paper_agent.codex_signed_in()}
+
+
+@router.delete("/api/agent/codex/login", status_code=204)
+def codex_login_cancel() -> Response:
+    paper_agent.cancel_codex_login()
+    return Response(status_code=204)
+
+
+@router.delete("/api/agent/codex", status_code=204)
+def codex_sign_out() -> Response:
+    paper_agent.sign_out_codex()
+    return Response(status_code=204)

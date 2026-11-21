@@ -55,3 +55,34 @@ export const assetUrl = (id: string, path: string) => `${base(id)}/asset?${q(pat
 export const zipUrl = (id: string) => `${base(id)}/project.zip`;
 export const watchUrl = (id: string) =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/papers/${id}`;
+
+// ---- Agent ----
+
+export type AgentKind = "claude" | "codex" | "agy" | "api";
+export type AgentOption = { label: string; available: boolean; reason: string; signed_in: boolean; model: string; protocol?: string };
+export type CodexLogin = { active: boolean; url?: string; code?: string; error?: string; signed_in?: boolean };
+export type AgentSession = { id: string; agent: AgentKind; cli_id: string; title: string; created_at: number; updated_at: number };
+export type AgentState = {
+  agents: Record<AgentKind, AgentOption>; default: AgentKind; codex_login: CodexLogin;
+  sessions: AgentSession[]; running: string; version: number;
+};
+export type AgentItem =
+  | { kind: "user"; text: string; at: number }
+  | { kind: "text"; text: string; streaming?: boolean }
+  | { kind: "tool"; key: string; name: string; detail: string; status: "running" | "done" | "error" | "stopped"; output?: string }
+  | { kind: "notice" | "error"; text: string }
+  | { kind: "done"; seconds: number; usage: { input: number; output: number } };
+export type AgentContext = { path?: string; line?: number; selection?: string };
+
+export const getAgent = (id: string) => requestJson<AgentState>(`${base(id)}/agent`);
+export const getTranscript = (id: string, sid: string) =>
+  requestJson<{ items: AgentItem[]; version: number }>(`${base(id)}/agent/sessions/${sid}`);
+export const startAgent = (id: string, kind: AgentKind, prompt: string, session: string, context: AgentContext) =>
+  requestJson<{ session: string }>(`${base(id)}/agent`, json("POST", { kind, prompt, session, context }));
+export const stopAgent = (id: string) => requestJson<void>(`${base(id)}/agent/stop`, { method: "POST" });
+export const deleteAgentSession = (id: string, sid: string) =>
+  requestJson<void>(`${base(id)}/agent/sessions/${sid}`, { method: "DELETE" });
+export const startCodexLogin = () => requestJson<CodexLogin>("/api/agent/codex/login", { method: "POST" });
+export const codexLoginState = () => requestJson<CodexLogin>("/api/agent/codex/login");
+export const cancelCodexLogin = () => requestJson<void>("/api/agent/codex/login", { method: "DELETE" });
+export const signOutCodex = () => requestJson<void>("/api/agent/codex", { method: "DELETE" });

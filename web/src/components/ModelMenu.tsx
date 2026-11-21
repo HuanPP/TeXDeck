@@ -19,6 +19,7 @@ import {
   submitAgyCode,
   submitClaudeCode,
 } from "../api";
+import type { ApiProtocol } from "../types";
 import { modelReady, useModel } from "../model";
 import type { Provider } from "../types";
 
@@ -84,7 +85,7 @@ export default function ModelMenu() {
   const { status, loadError, setStatus, panelOpen, setPanelOpen } = useModel();
   const [login, setLogin] = useState<Login | null>(null);
   const [pasted, setPasted] = useState("");
-  const [apiForm, setApiForm] = useState<{ api_key: string; base_url: string; model: string } | null>(null);
+  const [apiForm, setApiForm] = useState<{ api_key: string; base_url: string; model: string; protocol: ApiProtocol } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [chatgptModels, setChatgptModels] = useState<{ value: string; label: string }[]>([]);
@@ -381,13 +382,13 @@ export default function ModelMenu() {
                 : apiForm ? null
                   : connectBtn(() => {
                     closeForms();
-                    setApiForm({ api_key: "", base_url: api.base_url, model: api.model });
+                    setApiForm({ api_key: "", base_url: api.base_url, model: api.model, protocol: api.protocol ?? "openai" });
                   }, "Add key")}
             links={api.configured && !apiForm && (
               <>
                 <button type="button" className={linkBtn} disabled={busy} onClick={() => {
                   closeForms();
-                  setApiForm({ api_key: "", base_url: api.base_url, model: api.model });
+                  setApiForm({ api_key: "", base_url: api.base_url, model: api.model, protocol: api.protocol ?? "openai" });
                 }}>
                   Edit
                 </button>
@@ -408,6 +409,19 @@ export default function ModelMenu() {
                     autoComplete="off"
                     placeholder={api.configured ? "Leave blank to keep the current key" : "sk-..."}
                     onChange={(e) => setApiForm({ ...apiForm, api_key: e.target.value })} />
+                </label>
+                <label className="block text-slate-600">
+                  Protocol
+                  <select className="input-field mt-1 text-xs" value={apiForm.protocol}
+                    onChange={(e) => setApiForm({ ...apiForm, protocol: e.target.value as ApiProtocol })}>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="anthropic">Anthropic-compatible</option>
+                  </select>
+                  <span className="mt-1 block text-[11px] leading-snug text-slate-400">
+                    {apiForm.protocol === "anthropic"
+                      ? "Messages API at <base URL>/v1/messages. The Papering agent runs Claude Code on it."
+                      : "Chat Completions. The Papering agent runs Codex on it, which needs the Responses API: for DeepSeek, Kimi or GLM use their Anthropic-compatible URL instead."}
+                  </span>
                 </label>
                 <label className="block text-slate-600">
                   Base URL

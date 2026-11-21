@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     agy_model: str = ""  # an id from `agy models`; "" leaves the CLI default
     agy_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
     bwrap_command: str = "bwrap"
+    # Papering's agent (app.paper_agent). Codex: the npm launcher or the binary.
+    codex_command: str = "codex"
+    # How Codex talks to an OpenAI-compatible API key. Codex dropped "chat"
+    # (Chat Completions), so the endpoint must offer the Responses API.
+    codex_api_wire: str = "responses"
     # agy's own home without accounts (with accounts: accounts/<name>/agy). Never
     # the real home: its settings may let the agent run commands unasked.
     agy_home: Path = REPO_ROOT / "server" / ".agy-home"

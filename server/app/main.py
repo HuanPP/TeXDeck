@@ -46,7 +46,7 @@ from .edit import (
     text_span,
     title_block,
 )
-from . import agy, auth, chatgpt, claude_code, custom_templates, paper_routes
+from . import agy, auth, chatgpt, claude_code, custom_templates, paper_agent, paper_routes
 from .custom_templates import CustomTemplateError, TemplateNotFound
 from .llm import (
     LlmError,
@@ -161,6 +161,7 @@ class ApiKeyBody(BaseModel):
     api_key: str = ""
     base_url: str
     model: str
+    protocol: str = "openai"  # or "anthropic"
 
 
 # Hard cap on PDFs per generation; the combined 200-page cap is enforced in pdf.load_pdfs.
@@ -906,7 +907,7 @@ def api_agy_models() -> dict[str, list[dict[str, str]]]:
 @app.put("/api/model/api")
 def api_save_api_key(body: ApiKeyBody) -> dict[str, Any]:
     try:
-        save_api_config(body.api_key, body.base_url, body.model)
+        save_api_config(body.api_key, body.base_url, body.model, body.protocol)
     except LlmError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return model_status()
@@ -1265,7 +1266,7 @@ def api_get_generation(gen_id: str) -> dict[str, Any]:
 @app.delete("/api/generations/{gen_id}", status_code=204)
 def api_delete_generation(gen_id: str) -> Response:
     _load(gen_id)
-    if tasks.is_running(gen_id):
+    if tasks.is_running(gen_id) or paper_agent.running(gen_id):
         raise HTTPException(409, detail="Cannot delete while a job is running for this generation")
     try:
         store.delete_generation(gen_id)

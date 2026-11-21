@@ -47,6 +47,9 @@ _TOKEN = _CLI_DIR / "antigravity-oauth-token"
 # Conversation records hold the user's material; drop them once a run is old.
 _HISTORY_DIRS = ("conversations", "brain", "implicit", "annotations")
 _HISTORY_MAX_AGE_SECONDS = 3600
+# Conversations a Papering agent session continues (JSON list of ids, in the
+# agy home); pruning skips them until the session is deleted.
+KEEP_FILE = "texdeck-keep.json"
 
 _PREAMBLE = (
     "TeXDeck uses you as a plain text generator. Do not run commands, create or edit "
@@ -225,11 +228,17 @@ def parse_result(stdout: str) -> dict[str, Any] | None:
 
 def _prune_history() -> None:
     cutoff = time.time() - _HISTORY_MAX_AGE_SECONDS
+    try:
+        keep = set(json.loads((home() / KEEP_FILE).read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        keep = set()
     for name in _HISTORY_DIRS:
         folder = home() / _CLI_DIR / name
         if not folder.is_dir():
             continue
         for entry in folder.iterdir():
+            if entry.name.split(".", 1)[0] in keep:
+                continue
             try:
                 if entry.stat().st_mtime < cutoff:
                     shutil.rmtree(entry) if entry.is_dir() else entry.unlink()

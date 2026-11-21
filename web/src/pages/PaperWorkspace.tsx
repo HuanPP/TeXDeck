@@ -11,6 +11,7 @@ import {
   FolderUp, Pencil, RefreshCw, Search, Star, Trash2, Upload,
 } from "lucide-react";
 import PdfScroll, { type PdfScrollHandle } from "../components/PdfScroll";
+import PaperAgent from "../components/PaperAgent";
 import {
   ENGINES, compile, deleteFile, forwardSync, getBuild, getProject, inverseSync, newFile, pdfUrl, readSource,
   renameFile, saveSettings, saveSource, uploadFiles, watchUrl, zipUrl, assetUrl,
@@ -239,6 +240,7 @@ export default function PaperWorkspace() {
   const [auto, setAuto] = useState(() => localStorage.getItem(AUTO_KEY) !== "off");
   const [changes, setChanges] = useState(0); // bumps when files change on disk or are saved
   const [assetVersion, setAssetVersion] = useState(0);
+  const [agent, setAgent] = useState<{ running: string; version: number }>({ running: "", version: 0 });
   const source = useSource(id, path);
   const view = useRef<EditorView | null>(null);
   const pdf = useRef<PdfScrollHandle>(null);
@@ -273,7 +275,8 @@ export default function PaperWorkspace() {
       socket = new WebSocket(watchUrl(id));
       socket.onopen = () => { setLive(true); retry = 0; };
       socket.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data) as { files: string; build: PaperBuild };
+        const msg = JSON.parse(ev.data) as { files: string; build: PaperBuild; agent: { running: string; version: number } };
+        setAgent(msg.agent);
         if (msg.files !== lastFiles) {
           if (lastFiles) { void refresh(); void reloadSource.current(); setChanges((c) => c + 1); setAssetVersion((v) => v + 1); }
           lastFiles = msg.files;
@@ -308,13 +311,15 @@ export default function PaperWorkspace() {
     finally { busy.current = false; setCompiling(false); }
   }, [id, source, changes]);
 
-  // Auto-compile once the files have settled: after a save, an upload or the agent's edits.
+  // Auto-compile once the files have settled: after a save, an upload, or the
+  // agent's edits (once it has finished, not after every file it touches).
   useEffect(() => {
-    if (!auto || !project || compiled.current === changes || source.dirty || source.saving || compiling || build?.running) return;
+    if (!auto || !project || compiled.current === changes || source.dirty || source.saving || compiling || build?.running
+      || agent.running) return;
     if (changes === 0 && build?.pdf) { compiled.current = 0; return; } // opened with a PDF already there
     const t = window.setTimeout(() => void runCompile(), 850);
     return () => window.clearTimeout(t);
-  }, [auto, project, changes, source.dirty, source.saving, compiling, build?.running, build?.pdf, runCompile]);
+  }, [auto, project, changes, source.dirty, source.saving, compiling, build?.running, build?.pdf, runCompile, agent.running]);
 
   // After a save, count it as a change so auto-compile picks it up.
   const wasSaving = useRef(false);
@@ -332,6 +337,18 @@ export default function PaperWorkspace() {
     editor.focus();
     setJump(null);
   }, [jump, source.current?.path]);
+
+  // What the agent is told the user is looking at.
+  const agentContext = () => {
+    const editor = view.current;
+    if (!editor || !source.current) return { path };
+    const sel = editor.state.selection.main;
+    return {
+      path,
+      line: editor.state.doc.lineAt(sel.head).number,
+      selection: sel.empty ? "" : editor.state.sliceDoc(sel.from, sel.to),
+    };
+  };
 
   const openFile = async (next: string) => {
     if (next !== path && !(await source.save())) return false;
@@ -423,13 +440,14 @@ export default function PaperWorkspace() {
           <Download className="h-4 w-4" /> Zip
         </a>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className={`grid min-h-0 flex-1 ${left === "agent" ? "grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]"}`}>
         <aside className="flex min-h-0 flex-col border-r border-[var(--color-border)]">
           <div className="flex shrink-0 border-b border-[var(--color-border)] text-xs">
             {([["files", "Files", Folder], ["agent", "Agent", Bot]] as const).map(([key, label, Icon]) => (
               <button key={key} type="button" aria-pressed={left === key} onClick={() => setLeft(key)}
                 className={`flex flex-1 items-center justify-center gap-1.5 py-2 ${left === key ? "border-b-2 border-[var(--color-primary)] text-[var(--color-heading)]" : "text-slate-500 hover:text-slate-800"}`}>
                 <Icon className="h-3.5 w-3.5" /> {label}
+                {key === "agent" && agent.running && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-label="working" />}
               </button>
             ))}
           </div>
@@ -446,7 +464,8 @@ export default function PaperWorkspace() {
               <FileTree project={project} selected={path} onOpen={(p) => void openFile(p)} onAction={onTreeAction} />
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">The agent arrives in the next step.</div>
+            <PaperAgent id={id} version={agent.version} running={agent.running} context={agentContext}
+              onOpenFile={(p, line) => void openFile(p).then((ok) => { if (ok && line) setJump({ path: p, line }); })} />
           )}
         </aside>
 
