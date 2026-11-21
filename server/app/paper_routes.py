@@ -289,6 +289,13 @@ def agent_transcript(gen_id: str, sid: str) -> dict[str, Any]:
     return {"items": _agent(paper_agent.transcript, gen_id, sid), "version": paper_agent.version(gen_id)}
 
 
+@router.get("/api/papers/{gen_id}/agent/sessions/{sid}/snips/{name}")
+def agent_snip(gen_id: str, sid: str, name: str) -> FileResponse:
+    _paper(gen_id)
+    path = _agent(paper_agent.snip_file, gen_id, sid, name)
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+
 class AgentBody(BaseModel):
     kind: str
     prompt: str

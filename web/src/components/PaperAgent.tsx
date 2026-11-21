@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, History, Loader2, Plus, Send, Square, Trash2, Wrench, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileText, History, Loader2, Plus, Send, Square, Trash2, Wrench, X } from "lucide-react";
 import ChatMarkdown from "./ChatMarkdown";
 import { useAsk } from "./AskDialog";
 import { useModel } from "../model";
 import {
   cancelCodexLogin, codexLoginState, deleteAgentSession, getAgent, getTranscript, startAgent, startCodexLogin, stopAgent,
-  type AgentContext, type AgentItem, type AgentKind, type AgentSession, type AgentState, type CodexLogin,
+  quoteLabel, snipUrl, type AgentContext, type AgentItem, type AgentKind, type AgentSession, type AgentState, type CodexLogin, type Quote,
 } from "../paperApi";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -132,6 +132,34 @@ function ToolRow({ item }: { item: ToolItem }) {
 
 type ToolItem = Extract<AgentItem, { kind: "tool" }>;
 
+// A quoted passage as a card: where it came from and its first line; the whole
+// text opens on click. In the composer it has a remove button.
+function QuoteCard({ label, text, image, onRemove }: { label: string; text: string; image?: string; onRemove?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const first = text.split("\n").find((l) => l.trim())?.trim() ?? "";
+  const more = text.trim().split("\n").length;
+  return (
+    <div className="border border-[var(--color-border)] border-l-2 border-l-sky-400 bg-white text-[11.5px]">
+      <div className="flex min-w-0 items-center gap-1.5 px-2 py-1">
+        <button type="button" aria-expanded={open} title={open ? "Hide" : "Show"}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left" onClick={() => setOpen((o) => !o)}>
+          {image ? <img src={image} alt="" className="h-5 max-w-12 shrink-0 border border-[var(--color-border)] object-cover" />
+            : <FileText className="h-3 w-3 shrink-0 text-sky-600" />}
+          <span className="shrink-0 font-medium text-slate-700">{label}</span>
+          {!open && !image && <span className="min-w-0 truncate text-slate-400">{first}</span>}
+          {!open && !image && more > 1 && <span className="shrink-0 text-slate-400">+{more - 1} lines</span>}
+        </button>
+        {onRemove && (
+          <button type="button" aria-label={`Remove ${label}`} title="Remove"
+            className="shrink-0 p-0.5 text-slate-400 hover:text-slate-800" onClick={onRemove}><X className="h-3 w-3" /></button>
+        )}
+      </div>
+      {open && image && <img src={image} alt={label} className="block max-h-64 w-full border-t border-[var(--color-border)] bg-white object-contain" />}
+      {open && text && !image && <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-[var(--color-border)] bg-slate-50 px-2 py-1.5 font-mono text-[10.5px] text-slate-600">{text}</pre>}
+    </div>
+  );
+}
+
 // Two or more tool calls in a row fold into one line ("5 steps · shell 3, edit 1").
 // While the agent is still in that run of calls it stays open; afterwards it folds,
 // unless the user opened or closed it themselves.
@@ -167,8 +195,8 @@ const FILE_LINK = /\]\((?:file:\/\/)?\/work\/([^)#\s]+)(?:#L(\d+)(?:-L?\d+)?)?\)
 const linkFiles = (text: string) => text.replace(FILE_LINK, (_, path: string, line?: string) =>
   `](#open:${path}${line ? `:${line}` : ""})`);
 
-function Transcript({ items, running, onOpenFile }: {
-  items: AgentItem[]; running: boolean; onOpenFile: (path: string, line?: number) => void;
+function Transcript({ items, running, onOpenFile, imageUrl }: {
+  items: AgentItem[]; running: boolean; onOpenFile: (path: string, line?: number) => void; imageUrl: (name: string) => string;
 }) {
   return (
     <div className="space-y-2.5" onClick={(e) => {
@@ -182,7 +210,12 @@ function Transcript({ items, running, onOpenFile }: {
       {items.map((item, i) => {
         switch (item.kind) {
           case "user":
-            return <div key={i} className="ml-6 whitespace-pre-wrap bg-sky-50 px-3 py-2 text-[13px] text-slate-800">{item.text}</div>;
+            return (
+              <div key={i} className="ml-6 space-y-1.5 bg-sky-50 px-3 py-2">
+                {item.quotes?.map((q, j) => <QuoteCard key={j} label={q.label} text={q.text} image={q.image && imageUrl(q.image)} />)}
+                <div className="whitespace-pre-wrap text-[13px] text-slate-800">{item.text}</div>
+              </div>
+            );
           case "text":
             return <div key={i} className="notebook-chat text-[13px]"><ChatMarkdown text={linkFiles(item.text)} /></div>;
           case "tool": {
@@ -256,8 +289,9 @@ function CodexSignIn({ onDone }: { onDone: () => void }) {
   );
 }
 
-export default function PaperAgent({ id, version, running, context, onOpenFile }: {
+export default function PaperAgent({ id, version, running, context, quotes, onQuotes, onOpenFile }: {
   id: string; version: number; running: string; context: () => AgentContext;
+  quotes: Quote[]; onQuotes: (quotes: Quote[]) => void;
   onOpenFile: (path: string, line?: number) => void;
 }) {
   const { setPanelOpen } = useModel();
@@ -272,6 +306,15 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   const scroller = useRef<HTMLDivElement>(null);
   const [ask, askDialog] = useAsk();
   const stick = useRef(true);
+  const input = useRef<HTMLTextAreaElement>(null);
+  // A passage just added: type the request right away.
+  const quoteCount = useRef(0);
+  const loaded = state !== null;
+  useEffect(() => {
+    if (!input.current) return; // still loading: wait for the box
+    if (quotes.length > quoteCount.current) input.current.focus();
+    quoteCount.current = quotes.length;
+  }, [quotes.length, loaded]);
 
   const load = useCallback(async () => {
     try {
@@ -310,9 +353,10 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
     setSending(true);
     setError("");
     try {
-      const r = await startAgent(id, chosen, text, session === "new" ? "" : session, context(),
+      const r = await startAgent(id, chosen, text, session === "new" ? "" : session, { ...context(), quotes },
         chosen === "api" || model === "default" ? "" : model);
       setPrompt("");
+      onQuotes([]);
       stick.current = true;
       setSession(r.session);
       await load();
@@ -374,11 +418,11 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
               </div>
             )
         ) : items.length ? (
-          <Transcript items={items} running={here} onOpenFile={onOpenFile} />
+          <Transcript items={items} running={here} onOpenFile={onOpenFile} imageUrl={(name) => snipUrl(id, session, name)} />
         ) : (
           <div className="space-y-2 text-xs leading-relaxed text-slate-500">
             <p>Ask the agent to write or change the project: it edits the files directly, and the PDF updates when it is done.</p>
-            <p className="text-slate-400">It sees which file you have open, your cursor line and any text you selected, and the last compile error.</p>
+            <p className="text-slate-400">It sees which file you have open, your cursor line and the last compile error. Select text in the editor or the PDF and choose Add to chat to point it at a passage, or use Snip to send a region of the PDF as an image.</p>
           </div>
         )}
       </div>
@@ -386,7 +430,13 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
       {error && <p role="alert" className="shrink-0 bg-red-50 px-3 py-1 text-xs text-red-700">{error}</p>}
       <form className="shrink-0 p-2" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         <div className="border border-[var(--color-border)] bg-white focus-within:border-[var(--color-primary)]">
-          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
+          {quotes.length > 0 && (
+            <div className="max-h-60 space-y-1 overflow-y-auto px-1.5 pt-1.5">
+              {quotes.map((q, i) => <QuoteCard key={i} label={quoteLabel(q)} text={q.text} image={q.source === "pdf" ? q.image : undefined}
+                onRemove={() => onQuotes(quotes.filter((_, j) => j !== i))} />)}
+            </div>
+          )}
+          <textarea ref={input} value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
             placeholder={busy && !here ? "The agent is working in another session…" : "Ask the agent… (Enter to send, Shift+Enter for a new line)"}
             aria-label="Message to the agent"
             className="block w-full resize-none border-0 bg-transparent px-2.5 pt-2 text-[13px] outline-none"

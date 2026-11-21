@@ -70,12 +70,20 @@ export type AgentState = {
   sessions: AgentSession[]; running: string; version: number;
 };
 export type AgentItem =
-  | { kind: "user"; text: string; at: number }
+  | { kind: "user"; text: string; at: number; quotes?: { label: string; text: string; image?: string }[] }
   | { kind: "text"; text: string; streaming?: boolean }
   | { kind: "tool"; key: string; name: string; detail: string; status: "running" | "done" | "error" | "stopped"; output?: string }
   | { kind: "notice" | "error"; text: string }
   | { kind: "done"; seconds: number; usage: { input: number; output: number } };
-export type AgentContext = { path?: string; line?: number; selection?: string };
+// A passage the user added to the next message, from the editor or the PDF.
+export type Quote =
+  | { source: "tex"; path: string; from: number; to: number; text: string }
+  | { source: "pdf"; page: number; text: string; path?: string; line?: number; image?: string }; // image: a PNG data URL
+export type AgentContext = { path?: string; line?: number; quotes?: Quote[] };
+export const quoteLabel = (q: Quote) => q.source === "tex"
+  ? `${q.path}:${q.from}${q.to > q.from ? `-${q.to}` : ""}`
+  : `PDF p.${q.page}${q.image ? " snip" : ""}${q.path && q.line ? ` (near ${q.path}:${q.line})` : ""}`;
+export const snipUrl = (id: string, sid: string, name: string) => `${base(id)}/agent/sessions/${sid}/snips/${name}`;
 
 export const getAgent = (id: string) => requestJson<AgentState>(`${base(id)}/agent`);
 export const getTranscript = (id: string, sid: string) =>

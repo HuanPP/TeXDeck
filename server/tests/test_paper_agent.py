@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import sys
 import time
 from pathlib import Path
@@ -147,14 +148,25 @@ def test_run_resume_and_sessions(fake_cli: list[str]) -> None:
     assert [i["kind"] for i in items] == ["user", "text", "done"]
     session = paper_agent.list_sessions(gid)[0]
     assert session["cli_id"] == "sess-9" and session["title"] == "first request"
-    assert paper_agent.start(gid, "claude", "second", sid=sid) == sid
+    quote = {"source": "tex", "path": "main.tex", "from": 3, "to": 3, "text": "a line", "extra": "dropped"}
+    assert paper_agent.start(gid, "claude", "second", sid=sid, context={"quotes": [quote]}) == sid
     _wait(gid)
     assert fake_cli == ["", "sess-9"]  # the second run resumes the CLI session
+    assert paper_agent.transcript(gid, sid)[3]["quotes"] == [{"label": "main.tex:3", "text": "a line"}]
     assert [i["kind"] for i in paper_agent.transcript(gid, sid)][-3:] == ["user", "text", "done"]
     with pytest.raises(paper_agent.AgentError):
         paper_agent.start(gid, "codex", "other agent", sid=sid)
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 20
+    snip = {"source": "pdf", "page": 2, "text": "", "image": "data:image/png;base64," + base64.b64encode(png).decode()}
+    bad = {"source": "pdf", "page": 2, "text": "", "image": "data:image/png;base64,bm90IGEgcG5n"}
+    paper_agent.start(gid, "claude", "third", sid=sid, context={"quotes": [snip, bad]})
+    _wait(gid)
+    quotes = paper_agent.transcript(gid, sid)[-3]["quotes"]
+    assert len(quotes) == 1 and quotes[0]["label"] == "PDF p.2 snip"
+    assert paper_agent.snip_file(gid, sid, quotes[0]["image"]).read_bytes() == png
     paper_agent.delete_session(gid, sid)
     assert paper_agent.list_sessions(gid) == []
+    assert not (paper_agent._dir(gid) / "snips" / sid).exists()
 
 
 def test_one_run_per_project_and_stop(fake_cli: list[str]) -> None:
@@ -169,7 +181,15 @@ def test_one_run_per_project_and_stop(fake_cli: list[str]) -> None:
     assert {"kind": "error", "text": "Stopped"} in items
 
 
-def test_context_mentions_selection_and_build_error(artifact_root: Path) -> None:
+def test_context_mentions_quotes_and_build_error(artifact_root: Path) -> None:
     gid = paper.create("Ctx", owner="").id
-    text = paper_agent._context(gid, {"path": "main.tex", "line": 12, "selection": "Some words"})
-    assert "main.tex open, cursor at line 12" in text and "Some words" in text
+    text = paper_agent._context(gid, {"path": "main.tex", "line": 12, "quotes": [
+        {"source": "tex", "path": "main.tex", "from": 24, "to": 32, "text": "Some words"},
+        {"source": "pdf", "page": 2, "path": "sec.tex", "line": 7, "text": "Rendered words"},
+        {"source": "pdf", "page": 1, "text": "   "},
+        "junk",
+    ]})
+    assert "main.tex open, cursor at line 12" in text
+    assert '<quote from="main.tex:24-32">\nSome words\n</quote>' in text
+    assert '<quote from="PDF p.2 (near sec.tex:7)">\nRendered words\n</quote>' in text
+    assert text.count("<quote") == 2

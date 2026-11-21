@@ -7,7 +7,7 @@ import { openSearchPanel } from "@codemirror/search";
 import { Annotation, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import {
-  ArrowLeft, Bot, ChevronDown, ChevronRight, Crosshair, Download, File as FileIcon, FilePlus, Folder, FolderPlus,
+  ArrowLeft, Bot, ChevronDown, MessageSquarePlus, Scissors, ChevronRight, Crosshair, Download, File as FileIcon, FilePlus, Folder, FolderPlus,
   FolderUp, Pencil, RefreshCw, Search, Star, Trash2, Upload,
 } from "lucide-react";
 import PdfScroll, { type PdfScrollHandle } from "../components/PdfScroll";
@@ -15,8 +15,8 @@ import PaperAgent from "../components/PaperAgent";
 import { useAsk } from "../components/AskDialog";
 import {
   ENGINES, compile, deleteFile, forwardSync, getBuild, getProject, inverseSync, newFile, pdfUrl, readSource,
-  renameFile, saveSettings, saveSource, uploadFiles, watchUrl, zipUrl, assetUrl,
-  type Engine, type PaperBuild, type PaperProject, type PaperSource,
+  renameFile, saveSettings, saveSource, uploadFiles, watchUrl, zipUrl, assetUrl, quoteLabel,
+  type Engine, type Quote, type PaperBuild, type PaperProject, type PaperSource,
 } from "../paperApi";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -383,16 +383,124 @@ export default function PaperWorkspace() {
     setJump(null);
   }, [jump, source.current?.path]);
 
-  // What the agent is told the user is looking at.
+  // What the agent is told the user is looking at; passages go in only when added.
   const agentContext = () => {
     const editor = view.current;
     if (!editor || !source.current) return { path };
-    const sel = editor.state.selection.main;
-    return {
-      path,
-      line: editor.state.doc.lineAt(sel.head).number,
-      selection: sel.empty ? "" : editor.state.sliceDoc(sel.from, sel.to),
+    return { path, line: editor.state.doc.lineAt(editor.state.selection.main.head).number };
+  };
+
+  // Selecting text in the editor or the PDF offers "Add to chat" beside the
+  // selection; the passage becomes a card above the agent's message box.
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [offer, setOffer] = useState<{ x: number; y: number; origin: Element; take: () => Promise<Quote> } | null>(null);
+  const offerBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const check = (e: Event) => {
+      if (offerBtn.current?.contains(e.target as Node)) return;
+      window.setTimeout(() => {
+        const editor = view.current;
+        if (editor?.hasFocus) {
+          const sel = editor.state.selection.main;
+          const at = sel.empty ? null : editor.coordsAtPos(sel.head);
+          if (!at || !editor.state.sliceDoc(sel.from, sel.to).trim()) return setOffer(null);
+          const doc = editor.state.doc;
+          const end = doc.lineAt(sel.to);
+          const quote: Quote = {
+            source: "tex", path, text: editor.state.sliceDoc(sel.from, sel.to),
+            from: doc.lineAt(sel.from).number, to: end.from === sel.to && sel.to > sel.from ? end.number - 1 : end.number,
+          };
+          return setOffer({ x: at.left, y: sel.head >= sel.anchor ? at.bottom : at.top - 30, origin: editor.scrollDOM,
+            take: async () => quote });
+        }
+        const s = window.getSelection();
+        const range = s && !s.isCollapsed && s.rangeCount ? s.getRangeAt(0) : null;
+        const pageEl = range?.startContainer.parentElement?.closest<HTMLElement>("[data-page]");
+        const text = s?.toString().trim() ?? "";
+        if (!range || !pageEl || !text || !pageEl.closest('section[aria-label="PDF preview"]')) return setOffer(null);
+        const rects = [...range.getClientRects()].filter((r) => r.width > 0);
+        if (!rects.length) return setOffer(null);
+        const first = rects[0], last = rects[rects.length - 1];
+        const page = Number(pageEl.dataset.page);
+        setOffer({
+          x: last.right, y: last.bottom, origin: pageEl,
+          take: async () => {
+            const at = await sourceAt(page, pageEl, first.left, first.top + first.height / 2);
+            return { source: "pdf", page, text, ...(at ? { path: at.path, line: at.line } : {}) };
+          },
+        });
+      }, 0);
     };
+    const scrolled = (e: Event) => setOffer((o) => (o && (e.target as Node).contains?.(o.origin) ? null : o));
+    document.addEventListener("mouseup", check);
+    document.addEventListener("keyup", check);
+    document.addEventListener("scroll", scrolled, true);
+    return () => {
+      document.removeEventListener("mouseup", check);
+      document.removeEventListener("keyup", check);
+      document.removeEventListener("scroll", scrolled, true);
+    };
+  }, [id, path]);
+  const pushQuote = (q: Quote) => {
+    setQuotes((qs) => (q.source === "pdf" && q.image ? [...qs, q]
+      : qs.some((x) => x.text === q.text && quoteLabel(x) === quoteLabel(q)) ? qs : [...qs, q]).slice(-12));
+    setLeft("agent");
+    if (!wide) setPane("side");
+  };
+  const addQuote = async () => {
+    const o = offer;
+    setOffer(null);
+    if (!o) return;
+    pushQuote(await o.take());
+    window.getSelection()?.removeAllRanges();
+  };
+  // Where a point of a page comes from in the source, if SyncTeX knows.
+  const sourceAt = async (page: number, pageEl: Element, x: number, y: number) => {
+    const size = pdf.current?.pageSize(page);
+    const box = pageEl.getBoundingClientRect();
+    if (!size) return null;
+    return inverseSync(id, page, ((x - box.left) / box.width) * size.w, ((y - box.top) / box.height) * size.h).catch(() => null);
+  };
+
+  // Snip: drag a rectangle over a PDF page; the region goes to the chat as an
+  // image, with the text under it and where it comes from in the source.
+  const [snipping, setSnipping] = useState(false);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; page: HTMLElement } | null>(null);
+  useEffect(() => {
+    if (!snipping) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { setSnipping(false); setDrag(null); } };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [snipping]);
+  const finishSnip = async (d: { x0: number; y0: number; x1: number; y1: number; page: HTMLElement }) => {
+    setDrag(null);
+    const box = d.page.getBoundingClientRect();
+    const r = {
+      left: Math.max(Math.min(d.x0, d.x1), box.left), right: Math.min(Math.max(d.x0, d.x1), box.right),
+      top: Math.max(Math.min(d.y0, d.y1), box.top), bottom: Math.min(Math.max(d.y0, d.y1), box.bottom),
+    };
+    const canvas = d.page.querySelector("canvas");
+    if (!canvas || r.right - r.left < 8 || r.bottom - r.top < 8) return; // a click, not a drag
+    setSnipping(false);
+    const c = canvas.getBoundingClientRect();
+    const scale = canvas.width / c.width;
+    const sw = (r.right - r.left) * scale, sh = (r.bottom - r.top) * scale;
+    const shrink = Math.min(1, 2000 / Math.max(sw, sh));
+    const out = document.createElement("canvas");
+    out.width = Math.round(sw * shrink);
+    out.height = Math.round(sh * shrink);
+    const g = out.getContext("2d")!;
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, out.width, out.height);
+    g.drawImage(canvas, (r.left - c.left) * scale, (r.top - c.top) * scale, sw, sh, 0, 0, out.width, out.height);
+    const text = [...d.page.querySelectorAll<HTMLElement>(".textLayer span")].filter((span) => {
+      const b = span.getBoundingClientRect();
+      const x = b.left + b.width / 2, y = b.top + b.height / 2;
+      return b.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    }).map((span) => span.textContent ?? "").join(" ").replace(/\s+/g, " ").trim().slice(0, 4000);
+    const page = Number(d.page.dataset.page);
+    const at = await sourceAt(page, d.page, (r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    pushQuote({ source: "pdf", page, text, image: out.toDataURL("image/png"), ...(at ? { path: at.path, line: at.line } : {}) });
   };
 
   const openFile = async (next: string) => {
@@ -485,6 +593,17 @@ export default function PaperWorkspace() {
     <div className="ml-[calc(50%-50vw+1rem)] flex w-[calc(100vw-2rem)] flex-col border border-[var(--color-border)] bg-white"
       style={{ height: "calc(100vh - 8rem)" }}>
       {askDialog}
+      {drag && (
+        <div className="pointer-events-none fixed z-50 border-2 border-sky-500 bg-sky-400/10"
+          style={{ left: Math.min(drag.x0, drag.x1), top: Math.min(drag.y0, drag.y1), width: Math.abs(drag.x1 - drag.x0), height: Math.abs(drag.y1 - drag.y0) }} />
+      )}
+      {offer && (
+        <button ref={offerBtn} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void addQuote()}
+          className="fixed z-50 flex items-center gap-1 border border-[var(--color-border)] bg-white px-2 py-1 text-xs text-slate-700 shadow-md hover:bg-sky-50 hover:text-slate-900"
+          style={{ left: Math.max(8, Math.min(offer.x - 40, window.innerWidth - 120)), top: Math.max(8, Math.min(offer.y + 6, window.innerHeight - 36)) }}>
+          <MessageSquarePlus className="h-3.5 w-3.5 text-sky-600" /> Add to chat
+        </button>
+      )}
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5 text-sm">
         <Link to="/paper" className="flex items-center gap-1 text-slate-500 no-underline hover:text-slate-900">
           <ArrowLeft className="h-4 w-4" /> Projects
@@ -540,6 +659,7 @@ export default function PaperWorkspace() {
             </>
           ) : (
             <PaperAgent id={id} version={agent.version} running={agent.running} context={agentContext}
+              quotes={quotes} onQuotes={setQuotes}
               onOpenFile={(p, line) => void openFile(p).then((ok) => { if (ok) setPane("editor"); if (ok && line) setJump({ path: p, line }); })} />
           )}
         </aside>
@@ -618,6 +738,11 @@ export default function PaperWorkspace() {
             </select>
             <button type="button" aria-pressed={showLog} className={`${toolBtn} ${showLog ? "text-slate-900" : ""}`} disabled={!build?.log}
               onClick={() => setShowLog((v) => !v)}>Log</button>
+            <button type="button" aria-pressed={snipping} disabled={!pdfFile || showLog}
+              title={snipping ? "Drag over the PDF to snip a region into the chat (Esc to cancel)" : "Snip a region of the PDF into the chat"}
+              className={`${toolBtn} ${snipping ? "bg-sky-100 text-sky-800" : ""}`} onClick={() => setSnipping((v) => !v)}>
+              <Scissors className="h-4 w-4" /> Snip
+            </button>
             <span className="flex-1" />
             {build?.pdf && (
               <a href={`${pdfUrl(id, build.pdf)}`} download className={`${toolBtn} no-underline`} title="Download the PDF">
@@ -639,7 +764,25 @@ export default function PaperWorkspace() {
             <pre ref={(el) => { if (el && !el.dataset.scrolled) { el.scrollTop = el.scrollHeight; el.dataset.scrolled = "1"; } }}
               className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap bg-slate-900 p-3 font-mono text-[11px] text-slate-100">{build.log}</pre>
           ) : (
-            <div className="min-h-0 flex-1 bg-slate-100">
+            <div className={`min-h-0 flex-1 bg-slate-100${snipping ? " cursor-crosshair select-none [&_.textLayer]:pointer-events-none" : ""}`}
+              onMouseDownCapture={(e) => {
+                if (!snipping || e.button !== 0) return;
+                const page = (e.target as HTMLElement).closest<HTMLElement>("[data-page]");
+                if (!page) return;
+                e.preventDefault();
+                e.stopPropagation();
+                let d = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, page };
+                setDrag(d);
+                const move = (m: MouseEvent) => { d = { ...d, x1: m.clientX, y1: m.clientY }; setDrag(d); };
+                const up = () => {
+                  window.removeEventListener("mousemove", move);
+                  window.removeEventListener("mouseup", up);
+                  void finishSnip(d);
+                };
+                window.addEventListener("mousemove", move);
+                window.addEventListener("mouseup", up);
+              }}
+              onDoubleClickCapture={(e) => { if (snipping) e.stopPropagation(); }}>
               {pdfFile ? (
                 <PdfScroll ref={pdf} file={pdfFile} label={leaf(project.settings.main).replace(/\.tex$/i, ".pdf")} keepScroll
                   hint="Double-click the PDF to jump to its source line" onDoubleClick={(p, y, x, size) => void fromPdf(p, y, x, size)} />

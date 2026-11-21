@@ -21,6 +21,8 @@ session in `<gen>/agent/` for the page.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextvars
 import json
 import os
@@ -318,6 +320,7 @@ def delete_session(gen_id: str, sid: str) -> None:
     gone = next((s for s in sessions if s.get("id") == sid), None)
     _save_sessions(gen_id, [s for s in sessions if s.get("id") != sid])
     _session_file(gen_id, sid).unlink(missing_ok=True)
+    shutil.rmtree(_snip_dir(gen_id, sid), ignore_errors=True)
     if gone and gone.get("agent") == "agy" and gone.get("cli_id"):
         _forget_agy_conversation(str(gone["cli_id"]))
 
@@ -386,7 +389,85 @@ def _instructions(gen_id: str) -> str:
                                stem=Path(conf["main"]).stem)
 
 
-def _context(gen_id: str, context: dict[str, Any]) -> str:
+MAX_QUOTES = 12
+MAX_QUOTE_CHARS = 4000
+MAX_SNIP_BYTES = 4 * 1024 * 1024
+_SNIPS_IN_JAIL = "/snips"
+_PNG_DATA = "data:image/png;base64,"
+
+
+def _snip_dir(gen_id: str, sid: str) -> Path:
+    _session_file(gen_id, sid)  # validates sid
+    return _dir(gen_id) / "snips" / sid
+
+
+def snip_file(gen_id: str, sid: str, name: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{12}\.png", name):
+        raise AgentError("Unknown image")
+    path = _snip_dir(gen_id, sid) / name
+    if not path.is_file():
+        raise AgentError("Unknown image")
+    return path
+
+
+def _png(data: Any) -> bytes | None:
+    """The bytes of a `data:image/png;base64,...` URL, or None."""
+    if not isinstance(data, str) or not data.startswith(_PNG_DATA) or len(data) > MAX_SNIP_BYTES * 4 // 3 + 100:
+        return None
+    try:
+        raw = base64.b64decode(data[len(_PNG_DATA):], validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw if raw.startswith(b"\x89PNG\r\n\x1a\n") and len(raw) <= MAX_SNIP_BYTES else None
+
+
+def _quotes(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Passages the user added to the message from the editor or the PDF: each
+    {label, text, source, path?, from?, to?, page?, png?}, with label made here.
+    A PDF passage may be a snipped region: png bytes, text optional."""
+    out: list[dict[str, Any]] = []
+    raw = context.get("quotes")
+    for q in raw if isinstance(raw, list) else []:
+        if not isinstance(q, dict) or len(out) >= MAX_QUOTES:
+            continue
+        text = str(q.get("text") or "").strip()[:MAX_QUOTE_CHARS]
+        png = _png(q.get("image")) if q.get("source") == "pdf" else None
+        if not text and png is None:
+            continue
+        path = str(q.get("path") or "")[:300]
+        num = lambda key: int(q[key]) if isinstance(q.get(key), int) and q[key] > 0 else 0  # noqa: E731
+        if q.get("source") == "pdf":
+            page, line = num("page"), num("line")
+            label = (f"PDF p.{page}" if page else "PDF") + (" snip" if png is not None else "")
+            if path and line:
+                label += f" (near {path}:{line})"
+            out.append({"source": "pdf", "label": label, "text": text, "page": page,
+                        **({"path": path, "line": line} if path and line else {}),
+                        **({"png": png} if png is not None else {})})
+        else:
+            first, last = num("from"), num("to")
+            label = path or "selection"
+            if first:
+                label += f":{first}" + (f"-{last}" if last > first else "")
+            out.append({"source": "tex", "label": label, "text": text, "path": path, "from": first, "to": max(first, last)})
+    return out
+
+
+def _save_snips(gen_id: str, sid: str, quotes: list[dict[str, Any]]) -> None:
+    """Write snipped images beside the session (outside the project) and replace
+    their bytes with a file name; the jail sees them read-only at /snips."""
+    for q in quotes:
+        png = q.pop("png", None)
+        if png is None:
+            continue
+        folder = _snip_dir(gen_id, sid)
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        name = secrets.token_hex(6) + ".png"
+        (folder / name).write_bytes(png)
+        q["image"] = name
+
+
+def _context(gen_id: str, context: dict[str, Any], quotes: list[dict[str, Any]] | None = None) -> str:
     """What the user is looking at, prepended to each request."""
     lines = []
     path = str(context.get("path") or "")
@@ -395,9 +476,19 @@ def _context(gen_id: str, context: dict[str, Any]) -> str:
         if context.get("line"):
             where += f", cursor at line {int(context['line'])}"
         lines.append(where + ".")
-    selection = str(context.get("selection") or "").strip()
-    if selection:
-        lines.append(f"They selected:\n<selection>\n{selection[:4000]}\n</selection>")
+    quotes = _quotes(context) if quotes is None else quotes
+    if quotes:
+        lines.append("They attached these passages to the request (source lines are as of now; PDF text is from the "
+                     "last build, so find its source before editing):")
+        for q in quotes:
+            if q.get("image"):
+                lines.append(f'<snip from="{q["label"]}" image="{_SNIPS_IN_JAIL}/{q["image"]}">\n'
+                             + (f"Text in the region: {q['text']}\n" if q["text"] else "") + "</snip>")
+            else:
+                lines.append(f'<quote from="{q["label"]}">\n{q["text"]}\n</quote>')
+        if any(q.get("image") for q in quotes):
+            lines.append("A snip is a screenshot of a region of the compiled PDF; open the image file to see it "
+                         "before you answer.")
     build = paper.build_state(gen_id)
     if build.error and not build.running:
         lines.append(f"The last TeXDeck build failed: {build.error}")
@@ -435,13 +526,17 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
             sessions.insert(0, session)
             _save_sessions(gen_id, sessions)
         items = transcript(gen_id, session["id"])
-        items.append({"kind": "user", "text": prompt, "at": _now(), **({"model": model} if model else {})})
+        quotes = _quotes(context or {})
+        _save_snips(gen_id, session["id"], quotes)
+        shown = [{k: q[k] for k in ("label", "text", "image") if k in q} for q in quotes]
+        items.append({"kind": "user", "text": prompt, "at": _now(), **({"model": model} if model else {}),
+                      **({"quotes": shown} if shown else {})})
         run = Run(gen_id=gen_id, sid=session["id"], kind=kind, items=items, cli_id=session.get("cli_id", ""),
                   files_before=paper.fingerprint(gen_id), model=model)
         _runs[gen_id] = run
     _persist(run, force=True)
     full = prompt
-    ctx = _context(gen_id, context or {})
+    ctx = _context(gen_id, context or {}, quotes)
     if ctx:
         full = f"<context>\n{ctx}\n</context>\n\n{prompt}"
     if not run.cli_id and kind != "claude" and not (kind == "api" and api_protocol() == "anthropic"):
@@ -623,9 +718,10 @@ def _finish(run: Run, error: str) -> None:
             paper.compile_project(run.gen_id)
         except paper.PaperError:
             pass
+    # Saved before the run ends, so whoever sees it end reads the whole transcript.
+    _persist(run, force=True)
     with _runs_lock:
         _runs.pop(run.gen_id, None)
-    _persist(run, force=True)
     if run.kind == "agy":
         _remember_agy_conversations(run.gen_id)
 
@@ -641,6 +737,8 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
     gen_id = run.gen_id
     work = paper.root(gen_id)
     engine = _engine(run.kind)
+    snips = _snip_dir(gen_id, run.sid)
+    extra = ["--ro-bind", str(snips), _SNIPS_IN_JAIL] if snips.is_dir() else []
     if engine == "claude":
         binary = claude_binary()
         if binary is None:
@@ -660,7 +758,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
             args += ["--model", model]
         if run.cli_id:
             args += ["--resume", run.cli_id]
-        return jail(binary, home, work, env, home_is_config=is_config) + args, prompt, None
+        return jail(binary, home, work, env, home_is_config=is_config, extra=extra) + args, prompt, None
     if engine == "codex":
         binary = codex_binary()
         if binary is None:
@@ -685,7 +783,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
         if run.cli_id:
             args += [run.cli_id]
         args += ["-"]
-        return jail(binary, codex_home(api=api), work, env) + args, prompt, None
+        return jail(binary, codex_home(api=api), work, env, extra=extra) + args, prompt, None
     binary = agy_binary()
     if binary is None:
         raise AgentError("agy is not installed on the server")
@@ -699,7 +797,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
     if run.cli_id:
         args += ["--conversation", run.cli_id]
     args.append("-p=" + prompt)
-    return jail(binary, agy.home(), work, {}) + args, None, None
+    return jail(binary, agy.home(), work, {}, extra=extra) + args, None, None
 
 
 # --------------------------------------------------------------------------
