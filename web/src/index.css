@@ -125,3 +125,28 @@ p { line-height: 1.7; }
   background: rgb(209 250 229 / 0.45);
   mix-blend-mode: multiply;
 }
+
+/* Papering: CodeMirror's find / replace panel in the app's look. */
+.paper-editor .cm-panels { background: var(--color-surface); border-color: var(--color-border); color: var(--color-on-surface); }
+.paper-editor .cm-panel.cm-search {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 36px 8px 10px; font-size: 12px;
+}
+.paper-editor .cm-panel.cm-search br { flex-basis: 100%; content: ""; }
+.paper-editor .cm-panel.cm-search .cm-textfield {
+  margin: 0; height: 26px; min-width: 12rem; padding: 2px 8px; font-size: 12px; background: #fff;
+  border: 1px solid var(--color-border); border-radius: 0; outline: none;
+}
+.paper-editor .cm-panel.cm-search .cm-textfield:focus { border-color: var(--color-primary); }
+.paper-editor .cm-panel.cm-search .cm-button {
+  margin: 0; height: 26px; padding: 0 10px; font-size: 12px; text-transform: capitalize; color: var(--color-heading);
+  background: #fff; background-image: none; border: 1px solid var(--color-border); border-radius: 0; cursor: pointer;
+}
+.paper-editor .cm-panel.cm-search .cm-button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.paper-editor .cm-panel.cm-search label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; color: #64748b; text-transform: capitalize; }
+.paper-editor .cm-panel.cm-search input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
+.paper-editor .cm-panel.cm-search button[name="close"] {
+  top: 6px; right: 8px; font-size: 18px; line-height: 1; color: #94a3b8; background: none; border: 0; cursor: pointer;
+}
+.paper-editor .cm-panel.cm-search button[name="close"]:hover { color: var(--color-heading); }
+.paper-editor .cm-searchMatch { background-color: rgb(254 240 138 / 0.6); }
+.paper-editor .cm-searchMatch-selected { background-color: rgb(251 191 36 / 0.7); }

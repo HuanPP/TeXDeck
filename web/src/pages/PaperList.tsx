@@ -4,6 +4,7 @@ import { FilePlus2, FileText, Search, Trash2, Upload } from "lucide-react";
 import { deleteGeneration, listGenerations } from "../api";
 import { createPaper } from "../paperApi";
 import type { GenerationMeta } from "../types";
+import { useAsk } from "../components/AskDialog";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const date = (iso: string) => {
@@ -19,12 +20,15 @@ export default function PaperList() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [creating, setCreating] = useState(false);
+  const [ask, askDialog] = useAsk();
 
   const load = () => listGenerations().then((gens) => setItems(gens.filter((g) => g.kind === "paper")), (e) => setError(errMsg(e)));
   useEffect(() => { void load(); }, []);
 
   const remove = async (g: GenerationMeta) => {
-    if (!window.confirm(`Delete "${g.title}" and all its files?`)) return;
+    const ok = await ask({ title: `Delete "${g.title}"?`, message: "The project, its files and its agent sessions will be deleted.",
+      confirm: "Delete", danger: true });
+    if (ok === null) return;
     try {
       await deleteGeneration(g.id);
       await load();
@@ -88,6 +92,7 @@ export default function PaperList() {
           {!query && <button type="button" className="btn-secondary mt-4" onClick={() => setCreating(true)}>Create a project</button>}
         </div>
       )}
+      {askDialog}
       {creating && <NewProject onClose={() => setCreating(false)} onCreated={(id) => navigate(`/paper/${id}`)} />}
     </div>
   );

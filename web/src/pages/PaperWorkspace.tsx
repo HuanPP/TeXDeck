@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import PdfScroll, { type PdfScrollHandle } from "../components/PdfScroll";
 import PaperAgent from "../components/PaperAgent";
+import { useAsk } from "../components/AskDialog";
 import {
   ENGINES, compile, deleteFile, forwardSync, getBuild, getProject, inverseSync, newFile, pdfUrl, readSource,
   renameFile, saveSettings, saveSource, uploadFiles, watchUrl, zipUrl, assetUrl,
@@ -74,7 +75,7 @@ function SourceEditor({ path, text, onChange, onSave, viewRef }: {
       annotations: [external.of(true), Transaction.addToHistory.of(false)],
     });
   }, [text, viewRef]);
-  return <div ref={host} className="h-full min-h-0 overflow-hidden" />;
+  return <div ref={host} className="paper-editor h-full min-h-0 overflow-hidden" />;
 }
 
 type Open = PaperSource & { path: string; base: string }; // base: the text last saved or loaded
@@ -242,6 +243,7 @@ export default function PaperWorkspace() {
   const [assetVersion, setAssetVersion] = useState(0);
   const [agent, setAgent] = useState<{ running: string; version: number }>({ running: "", version: 0 });
   const source = useSource(id, path);
+  const [ask, askDialog] = useAsk();
   const view = useRef<EditorView | null>(null);
   const pdf = useRef<PdfScrollHandle>(null);
   const [jump, setJump] = useState<{ path: string; line: number } | null>(null);
@@ -383,12 +385,15 @@ export default function PaperWorkspace() {
     try { await fn(); await refresh(); setChanges((c) => c + 1); }
     catch (e) { setNotice(errMsg(e)); }
   };
-  const addFile = (directory: boolean) => {
-    const name = window.prompt(directory ? "New folder path" : "New file path", selectedFolder);
-    if (!name?.trim()) return;
+  const addFile = async (directory: boolean) => {
+    const name = await ask({
+      title: directory ? "New folder" : "New file", input: selectedFolder, confirm: "Create",
+      placeholder: directory ? "figures" : "sections/intro.tex",
+    });
+    if (!name) return;
     void act(async () => {
-      await newFile(id, name.trim(), directory);
-      if (!directory) await openFile(name.trim());
+      await newFile(id, name, directory);
+      if (!directory) await openFile(name);
     });
   };
   const upload = (ev: React.ChangeEvent<HTMLInputElement>, folder: boolean) => {
@@ -402,20 +407,27 @@ export default function PaperWorkspace() {
       if (r.errors.length) setNotice(r.errors.join("; "));
     });
   };
-  const onTreeAction = (action: "rename" | "delete" | "main", target: string, directory: boolean) => {
+  const onTreeAction = async (action: "rename" | "delete" | "main", target: string, directory: boolean) => {
     if (!project) return;
     if (action === "main") {
       void act(() => saveSettings(id, { ...project.settings, main: target }));
     } else if (action === "delete") {
-      if (!window.confirm(`Delete ${target}${directory ? " and everything in it" : ""}?`)) return;
+      const ok = await ask({
+        title: `Delete ${leaf(target)}?`, confirm: "Delete", danger: true,
+        message: directory ? `The folder ${target} and everything in it will be deleted.` : `${target} will be deleted.`,
+      });
+      if (ok === null) return;
       void act(async () => { await deleteFile(id, target); if (path === target || path.startsWith(target + "/")) setPath(project.settings.main); });
     } else {
-      const to = window.prompt("New path", target);
-      if (!to?.trim() || to.trim() === target) return;
+      const to = await ask({
+        title: `Rename ${directory ? "folder" : "file"}`, input: target, confirm: "Rename",
+        message: "Include a folder to move it, e.g. sections/intro.tex.",
+      });
+      if (!to || to === target) return;
       void act(async () => {
         if (path === target && !(await source.save())) return;
-        await renameFile(id, target, to.trim());
-        if (path === target) setPath(to.trim());
+        await renameFile(id, target, to);
+        if (path === target) setPath(to);
       });
     }
   };
@@ -430,6 +442,7 @@ export default function PaperWorkspace() {
   return (
     <div className="ml-[calc(50%-50vw+1rem)] flex w-[calc(100vw-2rem)] flex-col border border-[var(--color-border)] bg-white"
       style={{ height: "calc(100vh - 8rem)" }}>
+      {askDialog}
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-3 py-1.5 text-sm">
         <Link to="/paper" className="flex items-center gap-1 text-slate-500 no-underline hover:text-slate-900">
           <ArrowLeft className="h-4 w-4" /> Projects
@@ -456,14 +469,14 @@ export default function PaperWorkspace() {
           {left === "files" ? (
             <>
               <div className="flex shrink-0 items-center gap-0.5 border-b border-[var(--color-border)] px-1.5 py-1">
-                <button type="button" className={toolBtn} title="New file" aria-label="New file" onClick={() => addFile(false)}><FilePlus className="h-4 w-4" /></button>
-                <button type="button" className={toolBtn} title="New folder" aria-label="New folder" onClick={() => addFile(true)}><FolderPlus className="h-4 w-4" /></button>
+                <button type="button" className={toolBtn} title="New file" aria-label="New file" onClick={() => void addFile(false)}><FilePlus className="h-4 w-4" /></button>
+                <button type="button" className={toolBtn} title="New folder" aria-label="New folder" onClick={() => void addFile(true)}><FolderPlus className="h-4 w-4" /></button>
                 <button type="button" className={toolBtn} title="Upload files" aria-label="Upload files" onClick={() => chooser.current?.click()}><Upload className="h-4 w-4" /></button>
                 <button type="button" className={toolBtn} title="Upload a folder" aria-label="Upload a folder" onClick={() => folderChooser.current?.click()}><FolderUp className="h-4 w-4" /></button>
                 <input ref={chooser} hidden type="file" multiple onChange={(e) => upload(e, false)} />
                 <input ref={folderChooser} hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(e) => upload(e, true)} />
               </div>
-              <FileTree project={project} selected={path} onOpen={(p) => void openFile(p)} onAction={onTreeAction} />
+              <FileTree project={project} selected={path} onOpen={(p) => void openFile(p)} onAction={(a, t, d) => void onTreeAction(a, t, d)} />
             </>
           ) : (
             <PaperAgent id={id} version={agent.version} running={agent.running} context={agentContext}
@@ -537,8 +550,9 @@ export default function PaperWorkspace() {
               </a>
             )}
           </div>
+          <div className="relative flex min-h-0 flex-1 flex-col">
           {build && !build.running && !build.ok && build.error && (
-            <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
+            <div role="alert" className="absolute inset-x-3 bottom-3 z-20 flex max-h-32 items-start gap-2 overflow-auto border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700 shadow-lg">
               <span className="min-w-0 flex-1 break-words">
                 <span className="font-mono">{build.error}</span>
                 {build.pdf && <span className="ml-1 text-red-500/80">The PDF below is the last build that worked.</span>}
@@ -561,6 +575,7 @@ export default function PaperWorkspace() {
               )}
             </div>
           )}
+          </div>
         </section>
       </div>
     </div>

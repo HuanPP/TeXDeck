@@ -1,11 +1,72 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Plus, Send, Square, Trash2, Wrench } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Loader2, Plus, Send, Square, Trash2, Wrench } from "lucide-react";
 import ChatMarkdown from "./ChatMarkdown";
+import { useAsk } from "./AskDialog";
 import { useModel } from "../model";
 import {
   cancelCodexLogin, codexLoginState, deleteAgentSession, getAgent, getTranscript, startAgent, startCodexLogin, stopAgent,
-  type AgentContext, type AgentItem, type AgentKind, type AgentState, type CodexLogin,
+  type AgentContext, type AgentItem, type AgentKind, type AgentSession, type AgentState, type CodexLogin,
 } from "../paperApi";
+
+const when = (t: number) => {
+  const d = new Date(t * 1000);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
+// The session picker: full titles (two lines), the agent and when it was last used.
+function SessionMenu({ sessions, current, running, labels, onPick }: {
+  sessions: AgentSession[]; current: string; running: string; labels: Record<string, string>; onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("mousedown", close); window.removeEventListener("keydown", esc); };
+  }, [open]);
+  const shown = sessions.find((x) => x.id === current);
+  return (
+    <div ref={box} className="relative min-w-0 flex-1">
+      <button type="button" aria-haspopup="listbox" aria-expanded={open} aria-label="Agent session" title={shown?.title}
+        className="flex w-full min-w-0 items-center gap-1 border border-[var(--color-border)] bg-white px-2 py-1 text-left hover:border-[var(--color-primary)]"
+        onClick={() => setOpen((o) => !o)}>
+        {shown?.id === running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500" />}
+        <span className="min-w-0 flex-1 truncate">{shown ? shown.title : "New session"}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <ul role="listbox" className="absolute left-0 top-full z-30 mt-1 max-h-80 w-[min(24rem,80vw)] overflow-auto border border-[var(--color-border)] bg-white py-1 shadow-lg">
+          <li role="option" aria-selected={current === "new"}>
+            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+              onClick={() => { onPick("new"); setOpen(false); }}>
+              <Plus className="h-3.5 w-3.5 text-slate-400" /> New session
+            </button>
+          </li>
+          {sessions.map((x) => (
+            <li key={x.id} role="option" aria-selected={x.id === current}>
+              <button type="button" className={`flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50 ${x.id === current ? "bg-sky-50" : ""}`}
+                onClick={() => { onPick(x.id); setOpen(false); }}>
+                <span className="mt-0.5 w-3.5 shrink-0">
+                  {x.id === running ? <span className="mt-1 block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
+                    : x.id === current ? <Check className="h-3.5 w-3.5 text-[var(--color-primary)]" /> : null}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-slate-800">{x.title}</span>
+                  <span className="mt-0.5 block text-[10.5px] text-slate-400">{labels[x.agent] ?? x.agent} · {when(x.updated_at)}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const KIND_KEY = "texdeck.paper.agent";
@@ -127,6 +188,7 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
+  const [ask, askDialog] = useAsk();
   const stick = useRef(true);
 
   const load = useCallback(async () => {
@@ -172,7 +234,10 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   };
 
   const removeSession = async () => {
-    if (!current || !window.confirm("Delete this session's history?")) return;
+    if (!current) return;
+    const ok = await ask({ title: "Delete this session?", message: `"${current.title}" and its history will be deleted. The project's files stay as they are.`,
+      confirm: "Delete", danger: true });
+    if (ok === null) return;
     try {
       await deleteAgentSession(id, current.id);
       setSession("new");
@@ -186,13 +251,10 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-2 py-1.5 text-xs">
-        <select aria-label="Agent session" value={session} onChange={(e) => { stick.current = true; setSession(e.target.value); }}
-          className="min-w-0 flex-1 border border-[var(--color-border)] bg-white px-1 py-0.5">
-          <option value="new">New session</option>
-          {state.sessions.map((s) => (
-            <option key={s.id} value={s.id}>{s.id === running ? "● " : ""}{s.title}</option>
-          ))}
-        </select>
+        {askDialog}
+        <SessionMenu sessions={state.sessions} current={session} running={running}
+          labels={Object.fromEntries(kinds.map((k) => [k, state.agents[k].label]))}
+          onPick={(sid) => { stick.current = true; setSession(sid); }} />
         <button type="button" title="New session" aria-label="New session" className="p-1 text-slate-500 hover:text-slate-900"
           onClick={() => setSession("new")}><Plus className="h-4 w-4" /></button>
         {current && !here && (
@@ -213,6 +275,7 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
             </option>
           ))}
         </select>
+        {current && <span className="shrink-0 text-[10.5px] text-slate-400">fixed for this session</span>}
       </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
