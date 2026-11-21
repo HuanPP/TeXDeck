@@ -111,7 +111,7 @@ function useDismissed(): [Set<string>, (key: string) => void] {
   return [set, dismiss];
 }
 
-function ToolRow({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
+function ToolRow({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(false);
   const color = item.status === "error" ? "text-red-600" : item.status === "running" ? "text-sky-600" : "text-slate-500";
   return (
@@ -125,6 +125,37 @@ function ToolRow({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
       </button>
       {open && item.output && (
         <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap bg-slate-50 p-2 font-mono text-[10.5px] text-slate-600">{item.output}</pre>
+      )}
+    </div>
+  );
+}
+
+type ToolItem = Extract<AgentItem, { kind: "tool" }>;
+
+// Two or more tool calls in a row fold into one line ("5 steps · shell 3, edit 1").
+// While the agent is still in that run of calls it stays open; afterwards it folds,
+// unless the user opened or closed it themselves.
+function ToolGroup({ tools, live }: { tools: ToolItem[]; live: boolean }) {
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const open = choice ?? live;
+  const counts = new Map<string, number>();
+  for (const t of tools) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+  const summary = [...counts].map(([name, n]) => (n > 1 ? `${name} ${n}` : name)).join(", ");
+  const failed = tools.filter((t) => t.status === "error").length;
+  return (
+    <div className="text-[11.5px]">
+      <button type="button" aria-expanded={open} onClick={() => setChoice(!open)}
+        className="flex w-full min-w-0 items-center gap-1.5 text-left text-slate-500 hover:text-slate-800">
+        {live ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-sky-600" /> : <Wrench className="h-3 w-3 shrink-0" />}
+        <span className="shrink-0 font-medium">{tools.length} steps</span>
+        <span className="min-w-0 truncate text-slate-400">{summary}</span>
+        {failed > 0 && <span className="shrink-0 text-red-600">{failed} failed</span>}
+        {open ? <ChevronDown className="ml-auto h-3 w-3 shrink-0" /> : <ChevronRight className="ml-auto h-3 w-3 shrink-0" />}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5 border-l border-[var(--color-border)] pl-2.5">
+          {tools.map((t, i) => <ToolRow key={t.key + i} item={t} />)}
+        </div>
       )}
     </div>
   );
@@ -154,8 +185,19 @@ function Transcript({ items, running, onOpenFile }: {
             return <div key={i} className="ml-6 whitespace-pre-wrap bg-sky-50 px-3 py-2 text-[13px] text-slate-800">{item.text}</div>;
           case "text":
             return <div key={i} className="notebook-chat text-[13px]"><ChatMarkdown text={linkFiles(item.text)} /></div>;
-          case "tool":
-            return <ToolRow key={item.key + i} item={item} />;
+          case "tool": {
+            // Only the first call of a run draws anything; it draws the whole run.
+            // Notices are drawn elsewhere, so they don't break a run.
+            let start = i;
+            while (start > 0 && items[start - 1].kind === "notice") start--;
+            if (start > 0 && items[start - 1].kind === "tool") return null;
+            let end = i;
+            while (end < items.length && (items[end].kind === "tool" || items[end].kind === "notice")) end++;
+            const tools = items.slice(i, end).filter((x): x is ToolItem => x.kind === "tool");
+            if (tools.length === 1) return <ToolRow key={item.key + i} item={item} />;
+            const live = running && (end === items.length || tools.some((t) => t.status === "running"));
+            return <ToolGroup key={`g${i}`} tools={tools} live={live} />;
+          }
           case "notice":
             return null; // shown as a dismissible card instead
           case "error":
