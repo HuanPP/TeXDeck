@@ -106,6 +106,13 @@ def enabled() -> bool:
     return settings.registration or bool(_users())
 
 
+def owns(owner: str) -> bool:
+    """With accounts, a generation belongs to who made it; ones from before
+    accounts existed belong to the admin. Without accounts, everything is shown."""
+    user = current_user.get()
+    return user is None or owner == user or (not owner and is_admin(user))
+
+
 def is_admin(username: str | None) -> bool:
     """The account registered with the bootstrap code; for stores made before
     invites existed, the first account."""

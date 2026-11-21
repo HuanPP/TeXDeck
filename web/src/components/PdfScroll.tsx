@@ -48,13 +48,16 @@ export type Shade = { page: number; y0: number; y1: number; label?: string };
 export type PdfScrollHandle = {
   // Scroll so the point (page, y as a fraction of the page height) sits near the top.
   scrollTo: (page: number, y?: number, flash?: boolean) => void;
+  // Page n (1-based) in PDF points, once the document has loaded.
+  pageSize: (page: number) => { w: number; h: number } | null;
 };
 
 type Props = {
   file: string | null;
   label: string;
   ref?: Ref<PdfScrollHandle>;
-  onDoubleClick?: (page: number, y: number) => void;
+  // y and x are fractions of the page; size is the page in PDF points.
+  onDoubleClick?: (page: number, y: number, x: number, size: { w: number; h: number }) => void;
   // A single click on text (fires only when no double-click follows).
   onTextClick?: (click: TextClick) => void;
   marks?: PageMark[];
@@ -67,11 +70,13 @@ type Props = {
   // The dragged box stays drawn while the parent still holds that selection.
   showArea?: boolean;
   shades?: Shade[];
+  // A new file is the same document recompiled: open it at the old scroll position.
+  keepScroll?: boolean;
 };
 
 export default function PdfScroll({
   file, label, ref, onDoubleClick, onTextClick, marks = [], onPageChange, hint, onSelect, underlines = [], onUnderlineClick,
-  showArea = false, shades = [],
+  showArea = false, shades = [], keepScroll = false,
 }: Props) {
   // Area mode: the next drag draws a box (scanned pages, figures, formulas).
   const [areaMode, setAreaMode] = useState(false);
@@ -101,6 +106,7 @@ export default function PdfScroll({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const clickTimer = useRef(0);
+  const lastTop = useRef(0);
   const pendingScroll = useRef<{ page: number; y: number; flash: boolean } | null>(null);
 
   useEffect(() => {
@@ -145,6 +151,7 @@ export default function PdfScroll({
       }
       doScroll(page, y, withFlash);
     },
+    pageSize: (page) => sizes[page - 1] ?? null,
   }));
 
   // A jump asked for before the document had loaded runs once it has.
@@ -165,6 +172,7 @@ export default function PdfScroll({
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
+    lastTop.current = el.scrollTop;
     setView({ top: el.scrollTop, bottom: el.scrollTop + el.clientHeight });
     const mid = el.scrollTop + el.clientHeight / 3;
     let page = 1;
@@ -221,6 +229,9 @@ export default function PdfScroll({
     }
     setSizes(out);
     setCurrent((c) => Math.min(c, out.length));
+    // A new version of the same document (a recompile) opens where the old one was.
+    const top = lastTop.current;
+    if (keepScroll && top > 0) requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = top; });
   }
 
   if (!file) {
@@ -298,7 +309,7 @@ export default function PdfScroll({
                     window.clearTimeout(clickTimer.current);
                     const box = e.currentTarget.getBoundingClientRect();
                     window.getSelection()?.removeAllRanges();
-                    onDoubleClick(n, (e.clientY - box.top) / box.height);
+                    onDoubleClick(n, (e.clientY - box.top) / box.height, (e.clientX - box.left) / box.width, sizes[n - 1]);
                   }}>
                   {near && (
                     <Page pageNumber={n} width={pageWidth} renderTextLayer renderAnnotationLayer={false}

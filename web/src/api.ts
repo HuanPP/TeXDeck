@@ -43,7 +43,7 @@ async function readError(res: Response): Promise<string> {
 // elsewhere); the sign-in gate listens for this and shows the sign-in page.
 export const SIGNED_OUT_EVENT = "texdeck:signed-out";
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (res.status === 401 && url !== "/api/auth/session") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
   if (!res.ok) throw new Error(await readError(res));

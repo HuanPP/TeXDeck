@@ -46,7 +46,7 @@ from .edit import (
     text_span,
     title_block,
 )
-from . import agy, auth, chatgpt, claude_code, custom_templates
+from . import agy, auth, chatgpt, claude_code, custom_templates, paper_routes
 from .custom_templates import CustomTemplateError, TemplateNotFound
 from .llm import (
     LlmError,
@@ -210,8 +210,7 @@ async def require_sign_in(request: Request, call_next: Any) -> Response:
 def _mine(meta: GenerationMeta) -> bool:
     """With accounts, a deck belongs to who made it; decks from before
     accounts existed belong to the admin."""
-    user = auth.current_user.get()
-    return user is None or meta.owner == user or (not meta.owner and auth.is_admin(user))
+    return auth.owns(meta.owner)
 
 
 def _load(gen_id: str) -> GenerationMeta:
@@ -2183,6 +2182,9 @@ async def ws_generation(websocket: WebSocket, gen_id: str) -> None:
         return
     async for state in tasks.watch(gen_id):
         await websocket.send_json(asdict(state))
+
+
+app.include_router(paper_routes.router)
 
 
 # ---- Optional static frontend (single-container / Docker deployments) ----

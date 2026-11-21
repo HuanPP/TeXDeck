@@ -34,7 +34,7 @@ export type GenerationMeta = {
 };
 
 // Presentation makes slide decks; Learn makes study notes.
-export type Kind = "deck" | "notes" | "exam";
+export type Kind = "deck" | "notes" | "exam" | "paper";
 
 export type FigureItem = {
   file: string; // "figures/fig-01.png"

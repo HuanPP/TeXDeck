@@ -7,6 +7,8 @@ import LearnHub from "./pages/LearnHub";
 import ExamList from "./pages/ExamList";
 import ExamPage from "./pages/ExamPage";
 import ExamPaperPage from "./pages/ExamPaperPage";
+import PaperList from "./pages/PaperList";
+import PaperWorkspace from "./pages/PaperWorkspace";
 import ModelMenu from "./components/ModelMenu";
 import InvitesMenu from "./components/InvitesMenu";
 import MemoryMenu from "./components/MemoryMenu";
@@ -31,6 +33,11 @@ function ExamPaperRoute() {
   return <ExamPaperPage key={`${id}/${pid}`} />;
 }
 
+function PaperRoute() {
+  const { id } = useParams();
+  return <PaperWorkspace key={id} />;
+}
+
 // A fresh editor per template key, like GenerationRoute.
 function TemplateEditorRoute() {
   const { key } = useParams();
@@ -41,6 +48,7 @@ function TemplateEditorRoute() {
 const SECTIONS = [
   { path: "/learn", label: "Learn" },
   { path: "/present", label: "Presentation" },
+  { path: "/paper", label: "Papering" },
 ] as const;
 const LAST_SECTION = "texdeck.section";
 
@@ -118,6 +126,8 @@ export default function App() {
           <Route path="/exam/:id" element={<ExamRoute />} />
           <Route path="/exam/:id/paper/:pid" element={<ExamPaperRoute />} />
           <Route path="/present" element={<Section path="/present"><Home key="deck" kind="deck" /></Section>} />
+          <Route path="/paper" element={<Section path="/paper"><PaperList /></Section>} />
+          <Route path="/paper/:id" element={<PaperRoute />} />
           <Route path="/g/:id" element={<GenerationRoute />} />
           <Route path="/templates/new" element={<TemplateEditor />} />
           <Route path="/templates/:key" element={<TemplateEditorRoute />} />
