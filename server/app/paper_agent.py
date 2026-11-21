@@ -328,6 +328,10 @@ def _bump(gen_id: str) -> None:
     _versions[gen_id] = _versions.get(gen_id, 0) + 1
 
 
+def running_count() -> int:
+    return len(_runs)
+
+
 def running(gen_id: str) -> str:
     """The session id of the run in progress, or ""."""
     run = _runs.get(gen_id)
