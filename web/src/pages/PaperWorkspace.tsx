@@ -25,6 +25,40 @@ const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.last
 const EDITABLE = /\.(tex|bib|bbl|sty|cls|bst|ltx|md|txt|csv|tsv|json|xml|svg|cfg|def|clo|tikz|pgf|lua|r|py|m|dat|log|yaml|yml)$/i;
 const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 const AUTO_KEY = "texdeck.paper.autocompile";
+const COLS_KEY = "texdeck.paper.cols";
+type Cols = { files: number; agent: number; split: number }; // sidebar px per tab; editor share of the rest
+const DEFAULT_COLS: Cols = { files: 240, agent: 400, split: 0.5 };
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+function useWide(query = "(min-width: 1024px)") {
+  const [wide, setWide] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = () => setWide(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, [query]);
+  return wide;
+}
+
+// A vertical bar between two columns; dragging it reports the pointer's x.
+function Splitter({ onDrag, label }: { onDrag: (x: number) => void; label: string }) {
+  return (
+    <div role="separator" aria-orientation="vertical" aria-label={label} title="Drag to resize"
+      className="group relative z-10 -mx-1 w-2 cursor-col-resize touch-none select-none"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        const move = (ev: PointerEvent) => onDrag(ev.clientX);
+        const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+      }}>
+      <div className="mx-auto h-full w-px bg-[var(--color-border)] transition-colors group-hover:w-0.5 group-hover:bg-[var(--color-primary)]" />
+    </div>
+  );
+}
 
 // --------------------------------------------------------------------------
 // Editor
@@ -233,6 +267,13 @@ export default function PaperWorkspace() {
   const [loadError, setLoadError] = useState("");
   const [path, setPath] = useState("");
   const [left, setLeft] = useState<"files" | "agent">("files");
+  const wide = useWide();
+  const [pane, setPane] = useState<"side" | "editor" | "pdf">("editor"); // narrow screens: one column at a time
+  const [cols, setCols] = useState<Cols>(() => {
+    try { return { ...DEFAULT_COLS, ...JSON.parse(localStorage.getItem(COLS_KEY) ?? "{}") }; } catch { return DEFAULT_COLS; }
+  });
+  const grid = useRef<HTMLDivElement>(null);
+  const saveCols = (next: Cols) => { setCols(next); localStorage.setItem(COLS_KEY, JSON.stringify(next)); };
   const [notice, setNotice] = useState("");
   const [live, setLive] = useState(false);
   const [build, setBuild] = useState<PaperBuild | null>(null);
@@ -368,6 +409,7 @@ export default function PaperWorkspace() {
       const at = await forwardSync(id, path, line);
       const size = pdf.current?.pageSize(at.page);
       pdf.current?.scrollTo(at.page, size ? Math.max(0, at.y - 30) / size.h : 0, true);
+      setPane("pdf");
       setNotice("");
     } catch (e) { setNotice(errMsg(e)); }
   };
@@ -375,7 +417,7 @@ export default function PaperWorkspace() {
   const fromPdf = async (page: number, yFrac: number, xFrac: number, size: { w: number; h: number }) => {
     try {
       const at = await inverseSync(id, page, xFrac * size.w, yFrac * size.h);
-      if (await openFile(at.path)) setJump(at);
+      if (await openFile(at.path)) { setJump(at); setPane("editor"); }
     } catch (e) { setNotice(errMsg(e)); }
   };
 
@@ -455,9 +497,26 @@ export default function PaperWorkspace() {
           <Download className="h-4 w-4" /> Zip
         </a>
       </header>
-      <div className={`grid min-h-0 flex-1 ${left === "agent" ? "grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]"}`}>
-        <aside className="flex min-h-0 flex-col border-r border-[var(--color-border)]">
-          <div className="flex shrink-0 border-b border-[var(--color-border)] text-xs">
+      {!wide && (
+        <nav className="flex shrink-0 border-b border-[var(--color-border)] text-xs" aria-label="Panes">
+          {([["files", "Files"], ["agent", "Agent"], ["editor", "Editor"], ["pdf", "PDF"]] as const).map(([key, label]) => {
+            const on = key === "files" || key === "agent" ? pane === "side" && left === key : pane === key;
+            return (
+              <button key={key} type="button" aria-pressed={on}
+                className={`flex-1 py-2 ${on ? "border-b-2 border-[var(--color-primary)] text-[var(--color-heading)]" : "text-slate-500"}`}
+                onClick={() => { if (key === "files" || key === "agent") { setLeft(key); setPane("side"); } else setPane(key); }}>
+                {label}{key === "agent" && agent.running ? " •" : ""}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+      <div ref={grid} className="grid min-h-0 flex-1"
+        style={{ gridTemplateColumns: wide
+          ? `${left === "agent" ? cols.agent : cols.files}px 0.5rem minmax(0,${cols.split}fr) 0.5rem minmax(0,${1 - cols.split}fr)`
+          : "minmax(0,1fr)" }}>
+        <aside className={`min-h-0 flex-col ${wide || pane === "side" ? "flex" : "hidden"}`}>
+          <div className={`shrink-0 border-b border-[var(--color-border)] text-xs ${wide ? "flex" : "hidden"}`}>
             {([["files", "Files", Folder], ["agent", "Agent", Bot]] as const).map(([key, label, Icon]) => (
               <button key={key} type="button" aria-pressed={left === key} onClick={() => setLeft(key)}
                 className={`flex flex-1 items-center justify-center gap-1.5 py-2 ${left === key ? "border-b-2 border-[var(--color-primary)] text-[var(--color-heading)]" : "text-slate-500 hover:text-slate-800"}`}>
@@ -476,15 +535,23 @@ export default function PaperWorkspace() {
                 <input ref={chooser} hidden type="file" multiple onChange={(e) => upload(e, false)} />
                 <input ref={folderChooser} hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(e) => upload(e, true)} />
               </div>
-              <FileTree project={project} selected={path} onOpen={(p) => void openFile(p)} onAction={(a, t, d) => void onTreeAction(a, t, d)} />
+              <FileTree project={project} selected={path} onOpen={(p) => void openFile(p).then((ok) => ok && setPane("editor"))}
+                onAction={(a, t, d) => void onTreeAction(a, t, d)} />
             </>
           ) : (
             <PaperAgent id={id} version={agent.version} running={agent.running} context={agentContext}
-              onOpenFile={(p, line) => void openFile(p).then((ok) => { if (ok && line) setJump({ path: p, line }); })} />
+              onOpenFile={(p, line) => void openFile(p).then((ok) => { if (ok) setPane("editor"); if (ok && line) setJump({ path: p, line }); })} />
           )}
         </aside>
+        {wide && (
+          <Splitter label="Resize the sidebar" onDrag={(x) => {
+            const box = grid.current!.getBoundingClientRect();
+            const max = left === "agent" ? 720 : 480;
+            saveCols({ ...cols, [left]: Math.round(clamp(x - box.left, left === "agent" ? 300 : 170, Math.min(max, box.width * 0.5))) });
+          }} />
+        )}
 
-        <section className="flex min-h-0 flex-col border-r border-[var(--color-border)]" aria-label="Editor">
+        <section className={`min-h-0 flex-col ${wide || pane === "editor" ? "flex" : "hidden"}`} aria-label="Editor">
           <div className="flex shrink-0 items-center gap-1 border-b border-[var(--color-border)] px-2 py-1 text-xs">
             <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-slate-600" title={path}>
               <FileIcon className="h-3.5 w-3.5 shrink-0" /> {path}
@@ -527,8 +594,16 @@ export default function PaperWorkspace() {
             {source.saving ? "Saving…" : source.dirty ? "Unsaved changes" : source.current ? "Saved" : " "}
           </footer>
         </section>
+        {wide && (
+          <Splitter label="Resize the editor and the PDF" onDrag={(x) => {
+            const box = grid.current!.getBoundingClientRect();
+            const side = left === "agent" ? cols.agent : cols.files;
+            const rest = box.width - side - 16;
+            saveCols({ ...cols, split: clamp((x - box.left - side - 8) / rest, 0.2, 0.8) });
+          }} />
+        )}
 
-        <section className="flex min-h-0 flex-col" aria-label="PDF preview">
+        <section className={`min-h-0 flex-col ${wide || pane === "pdf" ? "flex" : "hidden"}`} aria-label="PDF preview">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-2 py-1 text-xs">
             <button type="button" className="btn-primary px-3 py-1 text-xs" disabled={running || !!source.conflict} onClick={() => void runCompile()}>
               {running ? "Compiling…" : "Recompile"}
