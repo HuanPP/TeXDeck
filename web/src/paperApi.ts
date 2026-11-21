@@ -7,7 +7,7 @@ export const ENGINES = ["xelatex", "pdflatex", "lualatex"] as const;
 export type Engine = (typeof ENGINES)[number];
 export type PaperSettings = { engine: Engine; main: string };
 export type PaperEntry = { path: string; directory: boolean; size?: number };
-export type PaperBuild = { running: boolean; ok: boolean; error: string; pdf: string; finished_at: number; log?: string };
+export type PaperBuild = { running: boolean; ok: boolean; error: string; pdf: string; finished_at: number; log?: string; stale?: boolean };
 export type PaperSource = { text: string; revision: string };
 export type PaperProject = { meta: GenerationMeta; settings: PaperSettings; entries: PaperEntry[]; build: PaperBuild };
 

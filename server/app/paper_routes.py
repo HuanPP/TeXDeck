@@ -72,7 +72,7 @@ def get_paper(gen_id: str) -> dict[str, Any]:
         "meta": asdict(meta),
         "settings": paper.load_settings(gen_id),
         "entries": _call(paper.entries, gen_id),
-        "build": _build(gen_id),
+        "build": {**_build(gen_id), "stale": paper.stale(gen_id)},
     }
 
 

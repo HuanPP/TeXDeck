@@ -174,7 +174,10 @@ def options() -> dict[str, Any]:
     entry("api", base or ("" if api_binary else f"{'Claude Code' if api.protocol == 'anthropic' else 'Codex'} is not installed on the server"),
           bool(api.api_key), api.model)
     out["api"]["protocol"] = api.protocol
+    # The agent matching the model in use, else the first one that is connected.
     preferred = {"chatgpt": "codex", "claude-code": "claude", "agy": "agy", "api": "api"}.get(llm.active_provider(), "claude")
+    if not out[preferred]["available"]:
+        preferred = next((k for k in KINDS if out[k]["available"]), preferred)
     return {"agents": out, "default": preferred, "codex_login": codex_login_state()}
 
 
@@ -312,6 +315,7 @@ class Run:
     cli_id: str = ""
     usage: dict[str, int] = field(default_factory=lambda: {"input": 0, "output": 0})
     saved_at: float = 0.0
+    files_before: str = ""
 
 
 _runs: dict[str, Run] = {}
@@ -344,7 +348,7 @@ The main file is {main}, built with {engine}. TeXDeck recompiles the project by 
   latexmk -{engine_flag} -interaction=nonstopmode -halt-on-error -outdir=/tmp/build {main}
 and read /tmp/build/{stem}.log. Never write build output into the project, and never create hidden files or folders in it.
 
-Keep the user's packages, macros and style; change only what the request needs. Write in the language of the surrounding text unless asked otherwise. The project has no internet access to private or local addresses, and nothing outside {work} is the user's.
+Keep the user's packages, macros and style; change only what the request needs. Work from the project's files: do not search the web (the text of the user's unpublished paper must not leave this machine in search queries) unless the user asks you to look something up, and do not inspect git history or processes. Write in the language of the surrounding text unless asked otherwise. The project has no internet access to private or local addresses, and nothing outside {work} is the user's.
 
 When you are done, reply with a short summary of what you changed (files and sections), in the language the user wrote to you in."""
 
@@ -402,7 +406,8 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
             _save_sessions(gen_id, sessions)
         items = transcript(gen_id, session["id"])
         items.append({"kind": "user", "text": prompt, "at": _now()})
-        run = Run(gen_id=gen_id, sid=session["id"], kind=kind, items=items, cli_id=session.get("cli_id", ""))
+        run = Run(gen_id=gen_id, sid=session["id"], kind=kind, items=items, cli_id=session.get("cli_id", ""),
+                  files_before=paper.fingerprint(gen_id))
         _runs[gen_id] = run
     _persist(run, force=True)
     full = prompt
@@ -582,6 +587,12 @@ def _finish(run: Run, error: str) -> None:
                 session["cli_id"] = run.cli_id
             session["updated_at"] = _now()
     _save_sessions(run.gen_id, sessions)
+    # Build what the agent wrote even when no page is open to ask for it.
+    if paper.fingerprint(run.gen_id) != run.files_before:
+        try:
+            paper.compile_project(run.gen_id)
+        except paper.PaperError:
+            pass
     with _runs_lock:
         _runs.pop(run.gen_id, None)
     _persist(run, force=True)

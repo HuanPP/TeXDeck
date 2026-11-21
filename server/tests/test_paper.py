@@ -146,3 +146,22 @@ def test_compile_in_sandbox_and_synctex(artifact_root: Path) -> None:
                       src["revision"])
     state = paper.compile_project(meta.id)
     assert not state.ok and "not found" in state.error
+
+
+def test_stale_until_the_pdf_is_newer(artifact_root: Path) -> None:
+    meta = paper.create("Stale", owner="")
+    assert paper.stale(meta.id)  # never built
+    pdf = paper.output_pdf(meta.id)
+    pdf.write_bytes(b"%PDF")
+    os.utime(pdf, (2_000_000_000, 2_000_000_000))
+    assert not paper.stale(meta.id)
+    os.utime(paper.root(meta.id) / "main.tex", (2_000_000_100, 2_000_000_100))
+    assert paper.stale(meta.id)
+
+
+def test_main_without_documentclass_is_explained(artifact_root: Path) -> None:
+    meta = paper.create("Main", owner="")
+    paper.new_file(meta.id, "second.tex")
+    paper.save_settings(meta.id, "xelatex", "second.tex")
+    state = paper.compile_project(meta.id)
+    assert not state.ok and "second.tex has no \\documentclass" in state.error

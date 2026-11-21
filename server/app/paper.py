@@ -453,6 +453,20 @@ def build_state(gen_id: str) -> BuildState:
     return saved
 
 
+def stale(gen_id: str) -> bool:
+    """A source file is newer than the PDF (edited while nobody compiled)."""
+    pdf = output_pdf(gen_id)
+    if not pdf.is_file():
+        return True
+    built = pdf.stat().st_mtime
+    for dirpath, dirnames, filenames in os.walk(root(gen_id)):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for name in filenames:
+            if not name.startswith(".") and os.lstat(os.path.join(dirpath, name)).st_mtime > built:
+                return True
+    return False
+
+
 def _set_build(gen_id: str, state: BuildState) -> None:
     with _builds_lock:
         _builds[gen_id] = state
@@ -511,6 +525,16 @@ def compile_project(gen_id: str) -> BuildState:
     main = resolve(gen_id, conf["main"])
     if not main.is_file():
         raise PaperError("The main file is missing; choose one in Settings")
+    try:
+        head = main.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        head = ""
+    if "\\documentclass" not in head:
+        state = BuildState(pdf=previous.pdf, error=f"{conf['main']} has no \\documentclass, so it cannot be built "
+                           "as the main file. Pick the file that starts the document with the star in Files.",
+                           finished_at=time.time())
+        _set_build(gen_id, state)
+        return BuildState(**asdict(state))
     _set_build(gen_id, BuildState(running=True, pdf=previous.pdf, log=previous.log))
     state = BuildState(pdf=previous.pdf)
     try:

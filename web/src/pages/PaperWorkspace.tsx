@@ -316,7 +316,9 @@ export default function PaperWorkspace() {
   useEffect(() => {
     if (!auto || !project || compiled.current === changes || source.dirty || source.saving || compiling || build?.running
       || agent.running) return;
-    if (changes === 0 && build?.pdf) { compiled.current = 0; return; } // opened with a PDF already there
+    // Opened with an up-to-date PDF: nothing to do. (Stale: sources changed while
+    // no page was open, e.g. an upload elsewhere; build them.)
+    if (changes === 0 && build?.pdf && !project.build.stale) { compiled.current = 0; return; }
     const t = window.setTimeout(() => void runCompile(), 850);
     return () => window.clearTimeout(t);
   }, [auto, project, changes, source.dirty, source.saving, compiling, build?.running, build?.pdf, runCompile, agent.running]);
@@ -537,12 +539,16 @@ export default function PaperWorkspace() {
           </div>
           {build && !build.running && !build.ok && build.error && (
             <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
-              <span className="min-w-0 flex-1 break-words font-mono">{build.error}</span>
+              <span className="min-w-0 flex-1 break-words">
+                <span className="font-mono">{build.error}</span>
+                {build.pdf && <span className="ml-1 text-red-500/80">The PDF below is the last build that worked.</span>}
+              </span>
               {build.log && <button type="button" className="shrink-0 underline" onClick={() => setShowLog(true)}>Log</button>}
             </div>
           )}
           {showLog && build?.log ? (
-            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap bg-slate-900 p-3 font-mono text-[11px] text-slate-100">{build.log}</pre>
+            <pre ref={(el) => { if (el && !el.dataset.scrolled) { el.scrollTop = el.scrollHeight; el.dataset.scrolled = "1"; } }}
+              className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap bg-slate-900 p-3 font-mono text-[11px] text-slate-100">{build.log}</pre>
           ) : (
             <div className="min-h-0 flex-1 bg-slate-100">
               {pdfFile ? (
