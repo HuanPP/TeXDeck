@@ -9,7 +9,10 @@ export type PaperSettings = { engine: Engine; main: string };
 export type PaperEntry = { path: string; directory: boolean; size?: number };
 export type PaperBuild = { running: boolean; ok: boolean; error: string; pdf: string; finished_at: number; log?: string; stale?: boolean };
 export type PaperSource = { text: string; revision: string };
-export type PaperProject = { meta: GenerationMeta; settings: PaperSettings; entries: PaperEntry[]; build: PaperBuild };
+export type PaperProject = {
+  meta: GenerationMeta; settings: PaperSettings; entries: PaperEntry[]; build: PaperBuild;
+  compiler: "latexmk" | "tectonic" | ""; // tectonic: the desktop app's own XeTeX, whatever the engine
+};
 
 const base = (id: string) => `/api/papers/${id}`;
 const q = (path: string) => `path=${encodeURIComponent(path)}`;

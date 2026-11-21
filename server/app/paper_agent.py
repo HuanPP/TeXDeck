@@ -26,12 +26,12 @@ import binascii
 import contextvars
 import json
 import os
-import pty
 import re
 import secrets
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -92,12 +92,20 @@ def _native(command: str | None) -> Path | None:
     return path
 
 
+def _runnable(command: str | None) -> Path | None:
+    """In the jail, the native file behind `command`; on this machine (no jail),
+    the command as found, npm's script shims included."""
+    if command is None:
+        return None
+    return _native(command) if paper.sandboxed() else Path(command)
+
+
 def claude_binary() -> Path | None:
-    return _native(claude_code.find_command())
+    return _runnable(claude_code.find_command())
 
 
 def codex_binary() -> Path | None:
-    return _native(_which(settings.codex_command, Path.home() / ".local" / "bin" / "codex"))
+    return _runnable(_which(settings.codex_command, Path.home() / ".local" / "bin" / "codex"))
 
 
 def agy_binary() -> Path | None:
@@ -106,7 +114,7 @@ def agy_binary() -> Path | None:
 
 def _account_home(name: str) -> Path:
     account = auth.user_dir()
-    base = account if account is not None else REPO_ROOT / "server" / ".agent-homes"
+    base = account if account is not None else settings.agent_home_dir
     path = base / name
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
@@ -170,7 +178,7 @@ def api_protocol() -> str:
 
 def options() -> dict[str, Any]:
     """Which agents this account can use now, and why not otherwise."""
-    base = _requirements()
+    base = _requirements() if paper.sandboxed() else ""
     api = llm.api_config()
     out: dict[str, Any] = {}
 
@@ -182,7 +190,9 @@ def options() -> dict[str, Any]:
           bool(claude_binary()) and claude_code.auth_status()["logged_in"], llm.claude_model())
     entry("codex", base or ("" if codex_binary() else "Codex is not installed on the server"),
           codex_signed_in(), "")
-    entry("agy", base or agy.availability() or ("" if agy_binary() else "agy is not installed on the server"),
+    local = not paper.sandboxed()
+    entry("agy", base or ("agy can be used only on a Linux server with the sandbox" if local else "")
+          or agy.availability() or ("" if agy_binary() else "agy is not installed on the server"),
           agy.signed_in(), llm.agy_model())
     api_binary = claude_binary() if api.protocol == "anthropic" else codex_binary()
     entry("api", base or ("" if api_binary else f"{'Claude Code' if api.protocol == 'anthropic' else 'Codex'} is not installed on the server"),
@@ -345,6 +355,7 @@ class Run:
     saved_at: float = 0.0
     files_before: str = ""
     model: str = ""  # "" = the agent's default
+    work: str = ""  # the project's real path when running on this machine (no jail)
 
 
 _runs: dict[str, Run] = {}
@@ -374,19 +385,46 @@ def running(gen_id: str) -> str:
 INSTRUCTIONS = """You are the writing agent inside TeXDeck Papering, working on the user's LaTeX project in the current directory ({work}). Edit its files directly; the user watches the editor and the PDF beside it.
 
 The main file is {main}, built with {engine}. TeXDeck recompiles the project by itself after you finish, so you do not have to. If you want to check a build, run
-  latexmk -{engine_flag} -interaction=nonstopmode -halt-on-error -outdir=/tmp/build {main}
-and read /tmp/build/{stem}.log. Never write build output into the project, and never create hidden files or folders in it.
+{build}
+and read {build_dir}/{stem}.log. Never write build output into the project, and never create hidden files or folders in it.
 
-Keep the user's packages, macros and style; change only what the request needs. Work from the project's files: do not search the web (the text of the user's unpublished paper must not leave this machine in search queries) unless the user asks you to look something up, and do not inspect git history or processes. Write in the language of the surrounding text unless asked otherwise. The project has no internet access to private or local addresses, and nothing outside {work} is the user's.
+Keep the user's packages, macros and style; change only what the request needs. Work from the project's files: do not search the web (the text of the user's unpublished paper must not leave this machine in search queries) unless the user asks you to look something up, and do not inspect git history or processes. Write in the language of the surrounding text unless asked otherwise. {where}
 
 When you are done, reply with a short summary of what you changed (files and sections), in the language the user wrote to you in."""
 
 
-def _instructions(gen_id: str) -> str:
+@dataclass
+class _Places:
+    """Where the agent finds the project, builds, and the user's snips: fixed
+    paths in the jail, real ones on this machine."""
+    work: str
+    build: str
+    snips: str
+
+
+def _places(gen_id: str, sid: str) -> _Places:
+    if paper.sandboxed():
+        return _Places(_WORK_IN_JAIL, "/tmp/build", _SNIPS_IN_JAIL)
+    return _Places(str(paper.root(gen_id)), str(Path(tempfile.gettempdir()) / f"texdeck-build-{gen_id}"),
+                   str(_snip_dir(gen_id, sid)))
+
+
+def _instructions(gen_id: str, places: _Places) -> str:
     conf = paper.load_settings(gen_id)
-    flag = {"pdflatex": "pdf", "xelatex": "xelatex", "lualatex": "lualatex"}[conf["engine"]]
-    return INSTRUCTIONS.format(work=_WORK_IN_JAIL, main=conf["main"], engine=conf["engine"], engine_flag=flag,
-                               stem=Path(conf["main"]).stem)
+    stem = Path(conf["main"]).stem
+    if paper.compiler(conf["engine"]) == "tectonic":
+        tectonic = settings.tectonic_command
+        build = (f'  "{tectonic}" -X compile --untrusted --outdir={places.build} {conf["main"]}\n'
+                 f"(Tectonic, a XeTeX build that fetches packages itself; make {places.build} first)")
+    else:
+        flag = {"pdflatex": "pdf", "xelatex": "xelatex", "lualatex": "lualatex"}[conf["engine"]]
+        build = f"  latexmk -{flag} -interaction=nonstopmode -halt-on-error -outdir={places.build} {conf['main']}"
+    where = ("The project has no internet access to private or local addresses, and nothing outside "
+             f"{places.work} is the user's." if paper.sandboxed() else
+             f"You run on the user's own computer: read and change only files inside {places.work}, and nothing "
+             "outside it.")
+    return INSTRUCTIONS.format(work=places.work, main=conf["main"], engine=conf["engine"], build=build,
+                               build_dir=places.build, stem=stem, where=where)
 
 
 MAX_QUOTES = 12
@@ -467,7 +505,8 @@ def _save_snips(gen_id: str, sid: str, quotes: list[dict[str, Any]]) -> None:
         q["image"] = name
 
 
-def _context(gen_id: str, context: dict[str, Any], quotes: list[dict[str, Any]] | None = None) -> str:
+def _context(gen_id: str, context: dict[str, Any], quotes: list[dict[str, Any]] | None = None,
+             snips: str = _SNIPS_IN_JAIL) -> str:
     """What the user is looking at, prepended to each request."""
     lines = []
     path = str(context.get("path") or "")
@@ -482,7 +521,7 @@ def _context(gen_id: str, context: dict[str, Any], quotes: list[dict[str, Any]] 
                      "last build, so find its source before editing):")
         for q in quotes:
             if q.get("image"):
-                lines.append(f'<snip from="{q["label"]}" image="{_SNIPS_IN_JAIL}/{q["image"]}">\n'
+                lines.append(f'<snip from="{q["label"]}" image="{snips}/{q["image"]}">\n'
                              + (f"Text in the region: {q['text']}\n" if q["text"] else "") + "</snip>")
             else:
                 lines.append(f'<quote from="{q["label"]}">\n{q["text"]}\n</quote>')
@@ -532,15 +571,17 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
         items.append({"kind": "user", "text": prompt, "at": _now(), **({"model": model} if model else {}),
                       **({"quotes": shown} if shown else {})})
         run = Run(gen_id=gen_id, sid=session["id"], kind=kind, items=items, cli_id=session.get("cli_id", ""),
-                  files_before=paper.fingerprint(gen_id), model=model)
+                  files_before=paper.fingerprint(gen_id), model=model,
+                  work="" if paper.sandboxed() else str(paper.root(gen_id)))
         _runs[gen_id] = run
     _persist(run, force=True)
     full = prompt
-    ctx = _context(gen_id, context or {}, quotes)
+    places = _places(gen_id, session["id"])
+    ctx = _context(gen_id, context or {}, quotes, places.snips)
     if ctx:
         full = f"<context>\n{ctx}\n</context>\n\n{prompt}"
     if not run.cli_id and kind != "claude" and not (kind == "api" and api_protocol() == "anthropic"):
-        full = f"<instructions>\n{_instructions(gen_id)}\n</instructions>\n\n{full}"
+        full = f"<instructions>\n{_instructions(gen_id, places)}\n</instructions>\n\n{full}"
     _pool.submit(contextvars.copy_context().run, _execute, run, full)
     return run.sid
 
@@ -553,8 +594,22 @@ def stop(gen_id: str) -> None:
     _kill(run.proc)
 
 
+def _group() -> dict[str, Any]:
+    """Popen options that start the agent in a process group of its own, so Stop
+    ends it with everything it started."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
 def _kill(proc: subprocess.Popen[bytes] | None) -> None:
     if proc is None or proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+        if proc.poll() is None:
+            proc.kill()
         return
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -612,6 +667,10 @@ def _tool(run: Run, key: str, name: str, detail: str, status: str, output: str =
             run.items.append(found)
         found["status"] = status
         if detail:
+            # On this machine the agent sees real paths: show them from the project.
+            if run.work:
+                for prefix in (run.work + os.sep, Path(run.work).as_posix() + "/"):
+                    detail = detail.replace(prefix, "")
             found["detail"] = detail
         if output:
             found["output"] = output[-MAX_TOOL_OUTPUT:]
@@ -638,14 +697,16 @@ def _short_path(text: str) -> str:
 def _execute(run: Run, prompt: str) -> None:
     error = ""
     try:
-        args, stdin, env_home = _command(run, prompt)
-        run.proc = subprocess.Popen(args, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        launch = _command(run, prompt)
+        stdin, env_home = launch.stdin, launch.cleanup
+        run.proc = subprocess.Popen(launch.args, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=launch.cwd, env=launch.env,
+                                    **_group())
         if stdin is not None and run.proc.stdin is not None:
             try:
                 run.proc.stdin.write(stdin.encode("utf-8"))
                 run.proc.stdin.close()
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError):
                 pass
         stderr: list[bytes] = []
         reader = threading.Thread(target=lambda: stderr.append(run.proc.stderr.read() if run.proc and run.proc.stderr else b""),
@@ -732,46 +793,73 @@ def _engine(kind: str) -> str:
     return kind
 
 
-def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[], None] | None]:
-    """(argv, stdin text, cleanup)."""
+@dataclass
+class Launch:
+    args: list[str]
+    stdin: str | None  # the prompt, when the CLI reads it from stdin
+    cleanup: Callable[[], None] | None = None
+    cwd: Path | None = None  # on this machine: the project; the jail sets its own
+    env: dict[str, str] | None = None  # None: inherit (the jail clears it anyway)
+
+
+def _command(run: Run, prompt: str) -> Launch:
+    """How to start the run's CLI: in the jail (a Linux server), or straight on
+    this machine (the desktop app) with the same arguments and real paths."""
     gen_id = run.gen_id
     work = paper.root(gen_id)
     engine = _engine(run.kind)
+    local = not paper.sandboxed()
+    places = _places(gen_id, run.sid)
     snips = _snip_dir(gen_id, run.sid)
     extra = ["--ro-bind", str(snips), _SNIPS_IN_JAIL] if snips.is_dir() else []
+
+    def launch(binary: Path, home: Path, env: dict[str, str], args: list[str], stdin: str | None,
+               home_is_config: bool = True, local_env: dict[str, str] | None = None) -> Launch:
+        if local:
+            return Launch([str(binary), *args], stdin, None, work, {**os.environ, **(local_env or {})})
+        return Launch(jail(binary, home, work, env, home_is_config=home_is_config, extra=extra) + args, stdin)
+
     if engine == "claude":
         binary = claude_binary()
         if binary is None:
             raise AgentError("Claude Code is not installed on the server")
         home, is_config = claude_home(api=run.kind == "api")
         env = {"CLAUDE_CONFIG_DIR": _HOME_IN_JAIL} if is_config else {}
-        env.update({"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+        local_env = {"CLAUDE_CONFIG_DIR": str(home)} if is_config else {}
+        quiet = {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+        env.update(quiet)
+        local_env.update(quiet)
         model = run.model or llm.claude_model()
         if run.kind == "api":
             api = llm.api_config()
-            env.update({"ANTHROPIC_BASE_URL": api.base_url, "ANTHROPIC_API_KEY": api.api_key,
-                        "ANTHROPIC_MODEL": api.model, "ANTHROPIC_SMALL_FAST_MODEL": api.model})
+            keys = {"ANTHROPIC_BASE_URL": api.base_url, "ANTHROPIC_API_KEY": api.api_key,
+                    "ANTHROPIC_MODEL": api.model, "ANTHROPIC_SMALL_FAST_MODEL": api.model}
+            env.update(keys)
+            local_env.update(keys)
             model = api.model
         args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
-                "--append-system-prompt", _instructions(gen_id), "--strict-mcp-config", "--disable-slash-commands"]
+                "--append-system-prompt", _instructions(gen_id, places), "--strict-mcp-config",
+                "--disable-slash-commands"]
         if model and model != "default":
             args += ["--model", model]
         if run.cli_id:
             args += ["--resume", run.cli_id]
-        return jail(binary, home, work, env, home_is_config=is_config, extra=extra) + args, prompt, None
+        return launch(binary, home, env, args, prompt, is_config, local_env)
     if engine == "codex":
         binary = codex_binary()
         if binary is None:
             raise AgentError("Codex is not installed on the server")
         api = run.kind == "api"
+        home = codex_home(api=api)
         env = {"CODEX_HOME": _HOME_IN_JAIL}
+        local_env = {"CODEX_HOME": str(home)}
         args = ["exec"]
         if run.cli_id:
             args += ["resume"]
         args += ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"]
         if api:
             conf = llm.api_config()
-            env["TEXDECK_API_KEY"] = conf.api_key
+            env["TEXDECK_API_KEY"] = local_env["TEXDECK_API_KEY"] = conf.api_key
             args += ["-c", "model_provider=\"texdeck\"",
                      "-c", f"model_providers.texdeck={{name=\"API key\", base_url={json.dumps(conf.base_url)}, "
                            f"env_key=\"TEXDECK_API_KEY\", wire_api={json.dumps(settings.codex_api_wire)}}}",
@@ -779,11 +867,13 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
         elif run.model:
             args += ["-m", run.model]
         if not run.cli_id:
-            args += ["-C", _WORK_IN_JAIL]
+            args += ["-C", places.work]
         if run.cli_id:
             args += [run.cli_id]
         args += ["-"]
-        return jail(binary, codex_home(api=api), work, env, extra=extra) + args, prompt, None
+        return launch(binary, home, env, args, prompt, local_env=local_env)
+    if local:
+        raise AgentError("agy can be used only on a Linux server with the sandbox")
     binary = agy_binary()
     if binary is None:
         raise AgentError("agy is not installed on the server")
@@ -797,7 +887,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
     if run.cli_id:
         args += ["--conversation", run.cli_id]
     args.append("-p=" + prompt)
-    return jail(binary, agy.home(), work, {}, extra=extra) + args, None, None
+    return launch(binary, agy.home(), {}, args, None)
 
 
 # --------------------------------------------------------------------------
@@ -960,13 +1050,27 @@ def start_codex_login() -> dict[str, Any]:
         raise AgentError("Codex is not installed on the server")
     user = auth.current_user.get()
     cancel_codex_login()
-    args = jail(binary, codex_home(), None, {"CODEX_HOME": _HOME_IN_JAIL}) + ["login", "--device-auth"]
-    master, slave = pty.openpty()
-    proc = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
-    os.close(slave)
+    if paper.sandboxed():
+        args, env = jail(binary, codex_home(), None, {"CODEX_HOME": _HOME_IN_JAIL}), None
+    else:
+        args, env = [str(binary)], {**os.environ, "CODEX_HOME": str(codex_home())}
+    args += ["login", "--device-auth"]
+    if os.name == "nt":
+        proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                env=env, **_group())
+        out = proc.stdout
+        assert out is not None
+        read, close = (lambda: out.read1(4096)), out.close
+    else:
+        import pty  # POSIX only
+
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, env=env, **_group())
+        os.close(slave)
+        read, close = (lambda: os.read(master, 4096)), (lambda: os.close(master))
     login = _CodexLogin(proc=proc, user=user)
     _codex_logins[user] = login
-    threading.Thread(target=_watch_codex_login, args=(login, master), daemon=True).start()
+    threading.Thread(target=_watch_codex_login, args=(login, read, close), daemon=True).start()
     deadline = time.time() + 20
     while time.time() < deadline and not (login.url and login.code) and not login.done:
         time.sleep(0.2)
@@ -975,13 +1079,13 @@ def start_codex_login() -> dict[str, Any]:
     return codex_login_state()
 
 
-def _watch_codex_login(login: _CodexLogin, master: int) -> None:
+def _watch_codex_login(login: _CodexLogin, read: Callable[[], bytes], close: Callable[[], None]) -> None:
     buffer = ""
     try:
         while True:
             try:
-                chunk = os.read(master, 4096)
-            except OSError:
+                chunk = read()
+            except (OSError, ValueError):
                 break
             if not chunk:
                 break
@@ -991,7 +1095,7 @@ def _watch_codex_login(login: _CodexLogin, master: int) -> None:
             if not login.code and (m := _DEVICE_CODE_RE.search(buffer.split("code", 1)[-1])):
                 login.code = m.group(1)
     finally:
-        os.close(master)
+        close()
         code = login.proc.wait()
         login.done = True
         if code != 0 and not login.error:

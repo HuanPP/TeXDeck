@@ -124,7 +124,7 @@ def fake_cli(artifact_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     def command(run: paper_agent.Run, prompt: str):
         seen.append(run.cli_id)
-        return [sys.executable, str(script)], prompt, None
+        return paper_agent.Launch([sys.executable, str(script)], prompt)
 
     monkeypatch.setattr(paper_agent, "_command", command)
     monkeypatch.setattr(paper_agent, "options", lambda: {"agents": {k: {"available": True, "reason": ""} for k in paper_agent.KINDS}})
@@ -179,6 +179,43 @@ def test_one_run_per_project_and_stop(fake_cli: list[str]) -> None:
     _wait(gid)
     items = paper_agent.transcript(gid, paper_agent.list_sessions(gid)[0]["id"])
     assert {"kind": "error", "text": "Stopped"} in items
+
+
+def test_runs_straight_on_this_machine(artifact_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Without the sandbox (the desktop app) the CLI starts as found, in the
+    project folder, and the agent is told the real paths."""
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "off")
+    monkeypatch.setattr(paper.auth, "enabled", lambda: False)
+    monkeypatch.setattr(paper_agent.settings, "agent_home_dir", tmp_path / "homes")
+    shim = tmp_path / "codex"
+    shim.write_text("#!/usr/bin/env node\n")  # npm's script: fine here, refused by the jail
+    monkeypatch.setattr(paper_agent, "_which", lambda *a: str(shim))
+    assert paper_agent.codex_binary() == shim
+    agents = paper_agent.options()["agents"]
+    assert agents["codex"]["reason"] == "" and "Linux server" in agents["agy"]["reason"]
+    gid = paper.create("Local", owner="").id
+    sessions = [{"id": "abcdefabcdef", "agent": "codex", "cli_id": "", "title": "t", "created_at": 0, "updated_at": 0}]
+    paper_agent._save_sessions(gid, sessions)
+    (paper_agent._snip_dir(gid, "abcdefabcdef")).mkdir(parents=True)
+    run = paper_agent.Run(gen_id=gid, sid="abcdefabcdef", kind="codex", items=[])
+    launch = paper_agent._command(run, "hello")
+    assert launch.args[0] == str(shim) and "bwrap" not in " ".join(launch.args) and "pasta" not in launch.args
+    assert launch.cwd == paper.root(gid) and launch.env is not None
+    assert launch.env["CODEX_HOME"] == str(tmp_path / "homes" / "codex")
+    assert launch.args[launch.args.index("-C") + 1] == str(paper.root(gid))
+    places = paper_agent._places(gid, "abcdefabcdef")
+    text = paper_agent._instructions(gid, places)
+    assert str(paper.root(gid)) in text and "/work" not in text and "/tmp/build" not in text
+    assert "read and change only files inside" in text
+    assert places.snips == str(paper_agent._snip_dir(gid, "abcdefabcdef"))
+    run = paper_agent.Run(gen_id=gid, sid="abcdefabcdef", kind="agy", items=[])
+    with pytest.raises(paper_agent.AgentError):
+        paper_agent._command(run, "hello")  # agy only in the jail
+    # Tool details lose the project's real path.
+    run = paper_agent.Run(gen_id=gid, sid="abcdefabcdef", kind="codex", items=[], work=str(paper.root(gid)))
+    monkeypatch.setattr(paper_agent, "_persist", lambda run, force=False: None)
+    paper_agent._tool(run, "1", "read", str(paper.root(gid) / "main.tex"), "done")
+    assert run.items[0]["detail"] == "main.tex"
 
 
 def test_context_mentions_quotes_and_build_error(artifact_root: Path) -> None:

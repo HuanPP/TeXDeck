@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     agy_model: str = ""  # an id from `agy models`; "" leaves the CLI default
     agy_effort: str = ""  # "" leaves the CLI default; low/medium/high/xhigh/max
     bwrap_command: str = "bwrap"
+    # Papering compiles and runs agents in bwrap on a Linux server. "auto" does so
+    # when the tools are there, else (the desktop app, one user, their own
+    # files) runs them straight on this machine; with accounts it never does.
+    paper_sandbox: Literal["auto", "on", "off"] = "auto"
     # Papering's agent (app.paper_agent). Codex: the npm launcher or the binary.
     codex_command: str = "codex"
     # How Codex talks to an OpenAI-compatible API key. Codex dropped "chat"
@@ -39,6 +43,8 @@ class Settings(BaseSettings):
     # agy's own home without accounts (with accounts: accounts/<name>/agy). Never
     # the real home: its settings may let the agent run commands unasked.
     agy_home: Path = REPO_ROOT / "server" / ".agy-home"
+    # Agent CLI homes (Codex sign-in, API-key configs) when there are no accounts.
+    agent_home_dir: Path = REPO_ROOT / "server" / ".agent-homes"
     # The page's model choice and any API key entered there (written 0600).
     model_state_file: Path = REPO_ROOT / "server" / ".model-state.json"
     # What the model remembers about the user (app.memory); per account with accounts.

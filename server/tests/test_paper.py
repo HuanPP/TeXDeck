@@ -132,9 +132,9 @@ def test_routes_round_trip(artifact_root: Path) -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not (shutil.which("bwrap") and shutil.which("latexmk") and shutil.which("synctex")),
-                    reason="needs bwrap, latexmk and synctex")
-def test_compile_in_sandbox_and_synctex(artifact_root: Path) -> None:
+@pytest.mark.skipif(not (paper.find_bwrap() and shutil.which("latexmk")), reason="needs bwrap and latexmk")
+def test_compile_in_sandbox_and_synctex(artifact_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "on")
     meta = paper.create("Compile", owner="")
     state = paper.compile_project(meta.id)
     assert state.ok and state.pdf
@@ -146,6 +146,58 @@ def test_compile_in_sandbox_and_synctex(artifact_root: Path) -> None:
                       src["revision"])
     state = paper.compile_project(meta.id)
     assert not state.ok and "not found" in state.error
+
+
+TECTONIC = shutil.which(paper.settings.tectonic_command) or next(
+    (p for p in ("/data/texdeck-server/bin/tectonic",) if os.path.isfile(p)), None)
+
+
+def _local_roundtrip(gid: str) -> None:
+    """A two-file project builds on this machine and SyncTeX maps both ways,
+    including into the \\input file."""
+    paper.new_file(gid, "parts/two.tex")
+    src = paper.read_source(gid, "parts/two.tex")
+    paper.save_source(gid, "parts/two.tex", "Words from the second file.\n", src["revision"])
+    src = paper.read_source(gid, "main.tex")
+    paper.save_source(gid, "main.tex", src["text"].replace("Start writing here.", "Start writing here.\n\n\\input{parts/two}"),
+                      src["revision"])
+    state = paper.compile_project(gid)
+    assert state.ok and state.pdf, state.error or state.log[-2000:]
+    for path, line in (("main.tex", 15), ("parts/two.tex", 1)):
+        at = paper.forward(gid, path, line)
+        assert paper.inverse(gid, int(at["page"]), at["x"] + 2, at["y"] - 2) == {"path": path, "line": line}
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(TECTONIC is None, reason="needs tectonic")
+def test_compile_on_this_machine_with_tectonic(artifact_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "off")
+    monkeypatch.setattr(paper.settings, "tectonic_command", TECTONIC)
+    which = shutil.which
+    monkeypatch.setattr(paper.shutil, "which", lambda name, *a, **k: None if name in ("latexmk", "xelatex") else which(name))
+    meta = paper.create("Tectonic", owner="")
+    assert paper.compiler("xelatex") == "tectonic"
+    _local_roundtrip(meta.id)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("xelatex")), reason="needs latexmk and xelatex")
+def test_compile_on_this_machine_with_latexmk(artifact_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "off")
+    meta = paper.create("Latexmk", owner="")
+    assert paper.compiler("xelatex") == "latexmk"
+    _local_roundtrip(meta.id)
+
+
+def test_sandbox_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paper.auth, "enabled", lambda: True)
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "off")
+    assert paper.sandboxed()  # accounts: never straight on the machine
+    monkeypatch.setattr(paper.auth, "enabled", lambda: False)
+    assert not paper.sandboxed()
+    monkeypatch.setattr(paper.settings, "paper_sandbox", "auto")
+    monkeypatch.setattr(paper, "find_bwrap", lambda: None)
+    assert not paper.sandboxed()
 
 
 def test_stale_until_the_pdf_is_newer(artifact_root: Path) -> None:

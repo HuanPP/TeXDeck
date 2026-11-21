@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -65,8 +66,32 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+_PATH_MARK = "__TEXDECK_PATH__"
+
+
+def shell_path() -> None:
+    """A Mac app started from Finder gets PATH=/usr/bin:/bin:/usr/sbin:/sbin, so
+    TeX (MacTeX), Node and the agent CLIs from Homebrew or npm are not found.
+    Take the PATH the user's shell sets up, then the usual install folders."""
+    if sys.platform != "darwin":
+        return
+    found: list[str] = []
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    try:
+        out = subprocess.run([shell, "-ilc", f'printf "{_PATH_MARK}%s{_PATH_MARK}" "$PATH"'],
+                             capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL).stdout
+        if out.count(_PATH_MARK) >= 2:
+            found = out.split(_PATH_MARK)[1].split(":")
+    except (OSError, subprocess.SubprocessError):
+        logging.warning("Could not read the login shell's PATH", exc_info=True)
+    usual = ["/Library/TeX/texbin", "/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin")]
+    parts = os.environ.get("PATH", "").split(":") + found + usual
+    os.environ["PATH"] = ":".join(dict.fromkeys(p for p in parts if p))
+
+
 def configure(data: Path) -> None:
     root = bundle_dir()
+    shell_path()
     load_env_file(data / "texdeck.env")
     defaults = {
         "TEXDECK_TEMPLATES_DIR": root / "templates",
@@ -77,6 +102,8 @@ def configure(data: Path) -> None:
         "TEXDECK_MODEL_STATE_FILE": data / "model-state.json",
         "TEXDECK_MEMORY_FILE": data / "memory.json",
         "TEXDECK_CUSTOM_TEMPLATES_DIR": data / "custom-templates",
+        "TEXDECK_AGENT_HOME_DIR": data / "agent-homes",
+        "TEXDECK_AGY_HOME": data / "agy-home",
     }
     tectonic = root / "bin" / ("tectonic.exe" if os.name == "nt" else "tectonic")
     if tectonic.is_file():
@@ -119,6 +146,40 @@ def wait_healthy(url: str, timeout: float = 60.0) -> None:
     raise RuntimeError("TeXDeck server did not start")
 
 
+def smoke_papering(url: str) -> bool:
+    """CI: a Papering project builds with this machine's TeX (the bundled
+    Tectonic on a fresh runner), SyncTeX maps both ways, and the agent list
+    loads (the agent module imports on every platform)."""
+    import json
+    import urllib.parse
+
+    def call(method: str, path: str, data: bytes | None = None, kind: str = "") -> object:
+        req = urllib.request.Request(url + path, data, {"Content-Type": kind} if kind else {}, method=method)
+        with urllib.request.urlopen(req, timeout=900) as res:
+            body = res.read()
+            return json.loads(body) if body else None
+
+    form = urllib.parse.urlencode({"title": "Smoke", "language": "en"}).encode()
+    gid = call("POST", "api/papers", form, "application/x-www-form-urlencoded")["id"]
+    compiler = call("GET", f"api/papers/{gid}")["compiler"]
+    call("POST", f"api/papers/{gid}/compile")
+    deadline = time.time() + 900
+    build = call("GET", f"api/papers/{gid}/build")
+    while build.get("running") and time.time() < deadline:
+        time.sleep(2)
+        build = call("GET", f"api/papers/{gid}/build")
+    if not build.get("ok"):
+        print(f"SMOKE PAPER build failed with {compiler}: {build.get('error')}\n{build.get('log', '')[-3000:]}", flush=True)
+        return False
+    at = call("GET", f"api/papers/{gid}/forward?path=main.tex&line=15")
+    back = call("GET", f"api/papers/{gid}/inverse?page={int(at['page'])}&x={at['x'] + 2:.2f}&y={max(0.0, at['y'] - 2):.2f}")
+    agents = call("GET", f"api/papers/{gid}/agent")["agents"]
+    ok = back == {"path": "main.tex", "line": 15} and "codex" in agents
+    print(f"SMOKE PAPER {'OK' if ok else 'FAILED'} compiler={compiler} forward={at} inverse={back} "
+          f"agy={agents['agy']['reason']!r}", flush=True)
+    return ok
+
+
 def main() -> None:
     data = data_dir()
     setup_logging(data)
@@ -146,6 +207,12 @@ def main() -> None:
         with urllib.request.urlopen(f"{url}api/templates/{key}/preview.png", timeout=900) as res:
             ok = res.status == 200 and res.read(8) == b"\x89PNG\r\n\x1a\n"
         print(f"SMOKE {'OK' if ok else 'FAILED'} {key}", flush=True)
+        try:
+            paper = smoke_papering(url)
+        except Exception as exc:  # noqa: BLE001 - reported, fails the build
+            paper = False
+            print(f"SMOKE PAPER FAILED {exc!r}", flush=True)
+        ok = ok and paper
         server.should_exit = True
         thread.join(10)
         sys.exit(0 if ok else 1)

@@ -732,10 +732,16 @@ export default function PaperWorkspace() {
               <input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); localStorage.setItem(AUTO_KEY, e.target.checked ? "on" : "off"); }} />
               Auto
             </label>
-            <select aria-label="Compiler" value={project.settings.engine} onChange={(e) => setEngine(e.target.value as Engine)}
-              className="border border-[var(--color-border)] bg-white px-1 py-0.5">
-              {ENGINES.map((x) => <option key={x}>{x}</option>)}
-            </select>
+            {project.compiler === "tectonic" ? (
+              <span className="text-slate-500" title="TeXDeck's built-in TeX (XeTeX). Install TeX Live, MacTeX or MiKTeX to choose pdflatex or lualatex.">
+                Tectonic
+              </span>
+            ) : (
+              <select aria-label="Compiler" value={project.settings.engine} onChange={(e) => setEngine(e.target.value as Engine)}
+                className="border border-[var(--color-border)] bg-white px-1 py-0.5">
+                {ENGINES.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            )}
             <button type="button" aria-pressed={showLog} className={`${toolBtn} ${showLog ? "text-slate-900" : ""}`} disabled={!build?.log}
               onClick={() => setShowLog((v) => !v)}>Log</button>
             <button type="button" aria-pressed={snipping} disabled={!pdfFile || showLog}

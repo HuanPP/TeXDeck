@@ -25,8 +25,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import store
+from . import auth, store
 from .config import settings
+from .synctex import SyncTeX
 from .deck import _engine_runs
 
 ENGINES = ("pdflatex", "xelatex", "lualatex")
@@ -170,7 +171,8 @@ def resolve(gen_id: str, path: str, *, parents: bool = False) -> Path:
 
 def _read_regular(path: Path, limit: int) -> bytes:
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_BINARY", 0))
     except FileNotFoundError as exc:
         raise PaperError("File no longer exists", 404) from exc
     except OSError as exc:
@@ -476,8 +478,58 @@ def find_bwrap() -> str | None:
     return shutil.which(settings.bwrap_command) if os.name == "posix" else None
 
 
-def compile_args(gen_id: str, engine: str, main: str, force: bool) -> list[str]:
+def sandboxed() -> bool:
+    """Whether Papering runs TeX and agents in bwrap (a Linux server) or straight
+    on this machine (the desktop app: one user, their own files). With accounts
+    it is always the sandbox; asking for "off" there is refused."""
+    if settings.paper_sandbox == "on" or auth.enabled():
+        return True
+    if settings.paper_sandbox == "off":
+        return False
+    return bool(find_bwrap() and shutil.which("latexmk"))
+
+
+def _tectonic() -> str | None:
+    command = settings.tectonic_command
+    return shutil.which(command) or (command if Path(command).is_file() else None)
+
+
+def compiler(engine: str) -> str:
+    """What builds the project: "latexmk" (a TeX installation), "tectonic" (the
+    desktop app's own XeTeX, whatever the engine setting), or "" (neither)."""
+    if sandboxed():
+        return "latexmk" if shutil.which("latexmk") else ""
+    if shutil.which("latexmk") and shutil.which(engine):
+        return "latexmk"
+    return "tectonic" if _tectonic() else ""
+
+
+@dataclass
+class CompileCommand:
+    args: list[str]
+    cwd: Path | None
+    env: dict[str, str] | None
+    stem: str  # output names in the build folder: <stem>.pdf, .log, .synctex.gz
+    timeout: float
+
+
+def compile_args(gen_id: str, engine: str, main: str, force: bool) -> CompileCommand:
     flag = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}[engine]
+    tool = compiler(engine)
+    if not tool:
+        raise PaperError("Compiling needs bubblewrap and latexmk on the server" if sandboxed()
+                         else "No TeX found: install TeX Live, MacTeX or MiKTeX", 503)
+    out = build_dir(gen_id)
+    if not sandboxed():
+        if tool == "tectonic":
+            args = [_tectonic() or "tectonic", "-X", "compile", "--untrusted", "--synctex", "--keep-logs",
+                    "--keep-intermediates", f"--outdir={out}", main]
+            return CompileCommand(args, root(gen_id), None, PurePosixPath(main).stem, settings.tectonic_timeout_seconds)
+        args = ["latexmk", "-norc", flag, "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
+                "-synctex=1", "-latexoption=-no-shell-escape", "-jobname=document", f"-outdir={out}"]
+        env = {**os.environ, "openout_any": "p", "shell_escape": "f"}
+        return CompileCommand(args + (["-g"] if force else []) + [main], root(gen_id), env, "document",
+                              COMPILE_TIMEOUT[engine])
     latexmk = [
         "latexmk", "-norc", flag, "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
         "-synctex=1", "-latexoption=-no-shell-escape", "-jobname=document", f"-outdir={_BUILD_IN_JAIL}",
@@ -500,7 +552,7 @@ def compile_args(gen_id: str, engine: str, main: str, force: bool) -> list[str]:
         args += ["--ro-bind-try", extra, extra]
     args += [
         "--ro-bind", str(root(gen_id)), _SOURCE_IN_JAIL,
-        "--bind", str(build_dir(gen_id)), _BUILD_IN_JAIL,
+        "--bind", str(out), _BUILD_IN_JAIL,
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
         "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",
         "--setenv", "HOME", _BUILD_IN_JAIL,
@@ -511,7 +563,7 @@ def compile_args(gen_id: str, engine: str, main: str, force: bool) -> list[str]:
         "--setenv", "TEXMFVAR", f"{_BUILD_IN_JAIL}/.texmf-var",
         "--chdir", _SOURCE_IN_JAIL,
     ]
-    return args + latexmk
+    return CompileCommand(args + latexmk, None, None, "document", COMPILE_TIMEOUT[engine])
 
 
 def compile_project(gen_id: str) -> BuildState:
@@ -540,24 +592,27 @@ def compile_project(gen_id: str) -> BuildState:
     try:
         out = build_dir(gen_id)
         out.mkdir(mode=0o700, exist_ok=True)
-        args = compile_args(gen_id, conf["engine"], clean_path(conf["main"]), force=not previous.ok)
+        command = compile_args(gen_id, conf["engine"], clean_path(conf["main"]), force=not previous.ok)
         try:
             with _engine_runs:
-                proc = subprocess.run(args, capture_output=True, timeout=COMPILE_TIMEOUT[conf["engine"]], check=False)
+                proc = subprocess.run(command.args, cwd=command.cwd, env=command.env, capture_output=True,
+                                      timeout=command.timeout, check=False, **_no_window())
             output = (proc.stdout + b"\n" + proc.stderr).decode("utf-8", errors="replace")
             ok = proc.returncode == 0
         except subprocess.TimeoutExpired:
             output, ok = "Compilation timed out.", False
-        log_file = out / "document.log"
+        log_file = out / f"{command.stem}.log"
         log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.is_file() else output
+        if ok and not log_file.is_file():
+            log = output
         state.log = log[-200_000:]
-        built = out / "document.pdf"
+        built = out / f"{command.stem}.pdf"
         if ok and built.is_file() and not built.is_symlink():
             pdf = output_pdf(gen_id)
             tmp = pdf.with_name("output.pdf.tmp")
             shutil.copyfile(built, tmp)
             tmp.replace(pdf)
-            synctex = out / "document.synctex.gz"
+            synctex = out / f"{command.stem}.synctex.gz"
             if synctex.is_file() and not synctex.is_symlink():
                 shutil.copyfile(synctex, store.generation_dir(gen_id) / "output.synctex.gz")
             state.ok, state.pdf = True, str(pdf.stat().st_mtime_ns)
@@ -572,6 +627,11 @@ def compile_project(gen_id: str) -> BuildState:
     _write_json(store.generation_dir(gen_id) / "build.json",
                 {"ok": state.ok, "error": state.error, "log": state.log[-50_000:]})
     return BuildState(**asdict(state))
+
+
+def _no_window() -> dict[str, Any]:
+    """Keep Windows from flashing a console for each TeX run."""
+    return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
 
 _ERROR_RE = re.compile(r"^(?:\./)?(?:/source/)?([^:\n]+\.\w+):(\d+): (.+)$", re.M)
@@ -594,64 +654,66 @@ def first_error(log: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def _synctex(args: list[str]) -> str:
-    if not shutil.which("synctex"):
-        raise PaperError("SyncTeX is not installed on the server", 503)
-    try:
-        proc = subprocess.run(["synctex", *args], capture_output=True, timeout=5, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise PaperError("No matching position in the PDF", 404) from exc
-    return proc.stdout.decode("utf-8", errors="replace")
+_sync_cache: dict[str, tuple[int, SyncTeX]] = {}
+_sync_lock = threading.Lock()
 
 
-def _synctex_files(gen_id: str) -> tuple[Path, Path]:
+def _sync(gen_id: str) -> SyncTeX:
     gdir = store.generation_dir(gen_id)
-    pdf, sync = gdir / "output.pdf", gdir / "output.synctex.gz"
-    if not pdf.is_file() or not sync.is_file():
+    pdf, path = gdir / "output.pdf", gdir / "output.synctex.gz"
+    if not pdf.is_file() or not path.is_file():
         raise PaperError("Compile the project first", 404)
-    # synctex looks for <pdf stem>.synctex.gz beside the PDF.
-    return pdf, sync
+    stamp = path.stat().st_mtime_ns
+    with _sync_lock:
+        cached = _sync_cache.get(gen_id)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+    sync = SyncTeX.load(path)
+    with _sync_lock:
+        _sync_cache[gen_id] = (stamp, sync)
+    return sync
+
+
+def _project_name(gen_id: str, name: str) -> str | None:
+    """The project path of a SyncTeX input name: /source/./a.tex in the sandbox,
+    the absolute path (or a relative one) when built on this machine."""
+    text = name.replace("\\", "/")
+    fold = (lambda v: v.casefold()) if os.name == "nt" else (lambda v: v)
+    rest: str | None = None
+    for base in (_SOURCE_IN_JAIL, root(gen_id).as_posix(), str(root(gen_id).resolve().as_posix())):
+        for prefix in (base + "/./", base + "/"):
+            if fold(text).startswith(fold(prefix)):
+                rest = text[len(prefix):]
+                break
+        if rest is not None:
+            break
+    if rest is None:
+        if text.startswith("/") or re.match(r"^[A-Za-z]:/", text):
+            return None
+        rest = text[2:] if text.startswith("./") else text
+    try:
+        rel = clean_path(rest)
+        return rel if resolve(gen_id, rel).is_file() else None
+    except PaperError:
+        return None
 
 
 def forward(gen_id: str, path: str, line: int) -> dict[str, float]:
     """Source line -> {page, x, y} (PDF points from the top left)."""
     rel = clean_path(path)
-    pdf, _ = _synctex_files(gen_id)
-    out = _synctex(["view", "-i", f"{max(1, line)}:0:{_SOURCE_IN_JAIL}/./{rel}", "-o", str(pdf)])
-    if "Page:" not in out:
-        out = _synctex(["view", "-i", f"{max(1, line)}:0:{_SOURCE_IN_JAIL}/{rel}", "-o", str(pdf)])
-    page, y, x = _field(out, "Page"), _field(out, "y"), _field(out, "x")
-    if page is None or y is None:
+    sync = _sync(gen_id)
+    tags = sync.tags_for(lambda name: _project_name(gen_id, name) == rel)
+    found = sync.forward(tags, max(1, line)) if tags else None
+    if found is None:
         raise PaperError("No matching position in the PDF", 404)
-    return {"page": int(page), "x": x or 0.0, "y": y}
+    page, x, y = found
+    return {"page": page, "x": x, "y": y}
 
 
 def inverse(gen_id: str, page: int, x: float, y: float) -> dict[str, Any]:
     """PDF position (points from the top left) -> {path, line}."""
-    pdf, _ = _synctex_files(gen_id)
-    out = _synctex(["edit", "-o", f"{page}:{x:.2f}:{y:.2f}:{pdf}"])
-    match = re.search(r"^Input:(.*)$", out, re.M)
-    line = _field(out, "Line")
-    if not match or line is None or line < 1:
+    found = _sync(gen_id).inverse(page, x, y)
+    name = _project_name(gen_id, found[0]) if found else None
+    if found is None or name is None or found[1] < 1:
         raise PaperError("No matching source line", 404)
-    name = match.group(1).strip()
-    for prefix in (_SOURCE_IN_JAIL + "/./", _SOURCE_IN_JAIL + "/", "./"):
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    else:
-        raise PaperError("No matching source line", 404)
-    try:
-        if not resolve(gen_id, name).is_file():
-            raise PaperError("No matching source line", 404)
-    except PaperError as exc:
-        raise PaperError("No matching source line", 404) from exc
-    return {"path": clean_path(name), "line": int(line)}
-
-
-def _field(text: str, key: str) -> float | None:
-    match = re.search(rf"^{key}:([-\d.]+)$", text, re.M)
-    try:
-        return float(match.group(1)) if match else None
-    except ValueError:
-        return None
+    return {"path": name, "line": found[1]}

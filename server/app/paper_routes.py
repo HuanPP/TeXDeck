@@ -71,6 +71,8 @@ def get_paper(gen_id: str) -> dict[str, Any]:
     return {
         "meta": asdict(meta),
         "settings": paper.load_settings(gen_id),
+        # "tectonic": the desktop app's own XeTeX builds, whatever the engine setting.
+        "compiler": paper.compiler(paper.load_settings(gen_id)["engine"]),
         "entries": _call(paper.entries, gen_id),
         "build": {**_build(gen_id), "stale": paper.stale(gen_id)},
     }
