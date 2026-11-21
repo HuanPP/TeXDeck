@@ -70,6 +70,24 @@ function SessionMenu({ sessions, current, running, labels, onPick }: {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const KIND_KEY = "texdeck.paper.agent";
+const MODEL_KEY = "texdeck.paper.model.";
+
+// A borderless select: the agent and model pickers under the message box.
+function Pick({ label, value, options, onChange, disabled, title }: {
+  label: string; value: string; options: { value: string; label: string }[];
+  onChange: (value: string) => void; disabled?: boolean; title?: string;
+}) {
+  return (
+    <span className="relative inline-flex min-w-0 items-center">
+      <select aria-label={label} title={title} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}
+        className={`max-w-[11rem] appearance-none truncate bg-transparent py-1 pl-2 text-xs text-slate-600 outline-none ${
+          disabled ? "pr-2 text-slate-500" : "cursor-pointer pr-5 hover:bg-slate-100 hover:text-slate-900"}`}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {!disabled && <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-slate-400" />}
+    </span>
+  );
+}
 const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
 function ToolRow({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
@@ -182,6 +200,7 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   const { setPanelOpen } = useModel();
   const [state, setState] = useState<AgentState | null>(null);
   const [kind, setKind] = useState<AgentKind | null>(() => localStorage.getItem(KIND_KEY) as AgentKind | null);
+  const [picked, setModels] = useState<Partial<Record<AgentKind, string>>>({});
   const [session, setSession] = useState("");
   const [items, setItems] = useState<AgentItem[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -215,6 +234,10 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
   const current = state?.sessions.find((s) => s.id === session);
   const chosen: AgentKind = current?.agent ?? kind ?? state?.default ?? "claude";
   const option = state?.agents[chosen];
+  const models = option?.models ?? [];
+  const stored = picked[chosen] ?? localStorage.getItem(MODEL_KEY + chosen) ?? "";
+  const model = models.some((m) => m.value === stored) ? stored
+    : models.some((m) => m.value === option?.model) ? option!.model : models[0]?.value ?? "";
   const busy = !!running;
   const here = busy && running === session;
 
@@ -224,7 +247,8 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
     setSending(true);
     setError("");
     try {
-      const r = await startAgent(id, chosen, text, session === "new" ? "" : session, context());
+      const r = await startAgent(id, chosen, text, session === "new" ? "" : session, context(),
+        chosen === "api" || model === "default" ? "" : model);
       setPrompt("");
       stick.current = true;
       setSession(r.session);
@@ -262,21 +286,6 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
             onClick={() => void removeSession()}><Trash2 className="h-4 w-4" /></button>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-2 py-1 text-xs text-slate-500">
-        Agent
-        <select aria-label="Agent" value={chosen} disabled={!!current}
-          title={current ? "A session keeps the agent it started with" : undefined}
-          onChange={(e) => { setKind(e.target.value as AgentKind); localStorage.setItem(KIND_KEY, e.target.value); }}
-          className="min-w-0 flex-1 border border-[var(--color-border)] bg-white px-1 py-0.5 disabled:bg-slate-50">
-          {kinds.map((k) => (
-            <option key={k} value={k}>
-              {state.agents[k].label}{state.agents[k].model && state.agents[k].model !== "default" ? ` · ${state.agents[k].model}` : ""}
-              {state.agents[k].available ? "" : " (not connected)"}
-            </option>
-          ))}
-        </select>
-        {current && <span className="shrink-0 text-[10.5px] text-slate-400">fixed for this session</span>}
-      </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
@@ -302,25 +311,40 @@ export default function PaperAgent({ id, version, running, context, onOpenFile }
       </div>
 
       {error && <p role="alert" className="shrink-0 bg-red-50 px-3 py-1 text-xs text-red-700">{error}</p>}
-      <form className="shrink-0 border-t border-[var(--color-border)] p-2" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
-          placeholder={busy && !here ? "The agent is working in another session…" : "Ask the agent… (Enter to send, Shift+Enter for a new line)"}
-          aria-label="Message to the agent"
-          className="block w-full resize-none border border-[var(--color-border)] px-2 py-1.5 text-[13px] outline-none focus:border-[var(--color-primary)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
-          }} />
-        <div className="mt-1.5 flex items-center justify-end gap-2">
-          {busy ? (
-            <button type="button" className="btn-secondary flex items-center gap-1 px-3 py-1 text-xs" onClick={() => void stopAgent(id)}>
-              <Square className="h-3 w-3" /> Stop
-            </button>
-          ) : (
-            <button type="submit" className="btn-primary flex items-center gap-1 px-3 py-1 text-xs"
-              disabled={!prompt.trim() || sending || (!option?.available && !current)}>
-              <Send className="h-3 w-3" /> Send
-            </button>
-          )}
+      <form className="shrink-0 p-2" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+        <div className="border border-[var(--color-border)] bg-white focus-within:border-[var(--color-primary)]">
+          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
+            placeholder={busy && !here ? "The agent is working in another session…" : "Ask the agent… (Enter to send, Shift+Enter for a new line)"}
+            aria-label="Message to the agent"
+            className="block w-full resize-none border-0 bg-transparent px-2.5 pt-2 text-[13px] outline-none"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
+            }} />
+          <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
+            <Pick label="Agent" value={chosen} disabled={!!current}
+              title={current ? "A session keeps the agent it started with; start a new session to switch" : "Agent"}
+              options={kinds.map((k) => ({ value: k, label: state.agents[k].label + (state.agents[k].available ? "" : " (not connected)") }))}
+              onChange={(v) => { setKind(v as AgentKind); localStorage.setItem(KIND_KEY, v); }} />
+            {models.length > 0 && (
+              <Pick label="Model" value={model} options={models} disabled={chosen === "api"}
+                title={chosen === "api" ? "The API key's model (change it in the model menu)" : "Model"}
+                onChange={(v) => { setModels((m) => ({ ...m, [chosen]: v })); localStorage.setItem(MODEL_KEY + chosen, v); }} />
+            )}
+            <span className="flex-1" />
+            {busy ? (
+              <button type="button" title="Stop" aria-label="Stop"
+                className="flex h-7 items-center gap-1 bg-slate-700 px-2.5 text-xs text-white hover:bg-slate-900"
+                onClick={() => void stopAgent(id)}>
+                <Square className="h-3 w-3 fill-current" /> Stop
+              </button>
+            ) : (
+              <button type="submit" title="Send" aria-label="Send"
+                className="flex h-7 w-7 items-center justify-center bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-40"
+                disabled={!prompt.trim() || sending || (!option?.available && !current)}>
+                <Send className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </form>
     </div>

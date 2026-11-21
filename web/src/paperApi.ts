@@ -59,7 +59,10 @@ export const watchUrl = (id: string) =>
 // ---- Agent ----
 
 export type AgentKind = "claude" | "codex" | "agy" | "api";
-export type AgentOption = { label: string; available: boolean; reason: string; signed_in: boolean; model: string; protocol?: string };
+export type AgentOption = {
+  label: string; available: boolean; reason: string; signed_in: boolean; model: string; protocol?: string;
+  models?: { value: string; label: string }[];
+};
 export type CodexLogin = { active: boolean; url?: string; code?: string; error?: string; signed_in?: boolean };
 export type AgentSession = { id: string; agent: AgentKind; cli_id: string; title: string; created_at: number; updated_at: number };
 export type AgentState = {
@@ -77,8 +80,8 @@ export type AgentContext = { path?: string; line?: number; selection?: string };
 export const getAgent = (id: string) => requestJson<AgentState>(`${base(id)}/agent`);
 export const getTranscript = (id: string, sid: string) =>
   requestJson<{ items: AgentItem[]; version: number }>(`${base(id)}/agent/sessions/${sid}`);
-export const startAgent = (id: string, kind: AgentKind, prompt: string, session: string, context: AgentContext) =>
-  requestJson<{ session: string }>(`${base(id)}/agent`, json("POST", { kind, prompt, session, context }));
+export const startAgent = (id: string, kind: AgentKind, prompt: string, session: string, context: AgentContext, model = "") =>
+  requestJson<{ session: string }>(`${base(id)}/agent`, json("POST", { kind, prompt, session, context, model }));
 export const stopAgent = (id: string) => requestJson<void>(`${base(id)}/agent/stop`, { method: "POST" });
 export const deleteAgentSession = (id: string, sid: string) =>
   requestJson<void>(`${base(id)}/agent/sessions/${sid}`, { method: "DELETE" });

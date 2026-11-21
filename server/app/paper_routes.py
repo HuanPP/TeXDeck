@@ -294,12 +294,13 @@ class AgentBody(BaseModel):
     prompt: str
     session: str = ""
     context: dict[str, Any] = {}
+    model: str = ""
 
 
 @router.post("/api/papers/{gen_id}/agent", status_code=202)
 def agent_start(gen_id: str, body: AgentBody) -> dict[str, str]:
     _paper(gen_id)
-    sid = _agent(paper_agent.start, gen_id, body.kind, body.prompt, body.session, body.context)
+    sid = _agent(paper_agent.start, gen_id, body.kind, body.prompt, body.session, body.context, body.model)
     return {"session": sid}
 
 

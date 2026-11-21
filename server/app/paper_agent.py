@@ -122,6 +122,18 @@ def codex_signed_in() -> bool:
     return isinstance(data, dict) and bool(data.get("tokens") or data.get("OPENAI_API_KEY"))
 
 
+def codex_models() -> list[dict[str, str]]:
+    """The models Codex lists for this account's plan (it caches them at sign-in
+    and on each run), best first; [] before the first sign-in."""
+    try:
+        data = json.loads((codex_home() / "models_cache.json").read_text(encoding="utf-8"))
+        models = [m for m in data.get("models", []) if isinstance(m, dict) and m.get("visibility", "list") == "list"]
+    except (OSError, ValueError, AttributeError):
+        return []
+    models.sort(key=lambda m: m.get("priority", 99))
+    return [{"value": str(m["slug"]), "label": str(m.get("display_name") or m["slug"])} for m in models if m.get("slug")]
+
+
 def claude_home(api: bool = False) -> tuple[Path, bool]:
     """(folder, is_config_dir). With accounts: the account's CLAUDE_CONFIG_DIR.
     Without: the user's own ~/.claude login (bound as a home)."""
@@ -174,6 +186,11 @@ def options() -> dict[str, Any]:
     entry("api", base or ("" if api_binary else f"{'Claude Code' if api.protocol == 'anthropic' else 'Codex'} is not installed on the server"),
           bool(api.api_key), api.model)
     out["api"]["protocol"] = api.protocol
+    out["claude"]["models"] = [{"value": "default", "label": "Default"}] + claude_code.MODELS
+    out["codex"]["models"] = codex_models()
+    out["codex"]["model"] = out["codex"]["models"][0]["value"] if out["codex"]["models"] else ""
+    out["agy"]["models"] = (agy.list_models() if out["agy"]["available"] else []) or [{"value": "default", "label": "Default"}]
+    out["api"]["models"] = [{"value": api.model, "label": api.model}] if api.model else []
     # The agent matching the model in use, else the first one that is connected.
     preferred = {"chatgpt": "codex", "claude-code": "claude", "agy": "agy", "api": "api"}.get(llm.active_provider(), "claude")
     if not out[preferred]["available"]:
@@ -211,7 +228,15 @@ def jail(binary: Path, home: Path, work: Path | None, env: dict[str, str], *, ho
     bwrap += ["--ro-bind", str(_resolv_file()), "/etc/resolv.conf"]
     for var in ("/var/lib/texmf", "/var/cache/fontconfig"):
         bwrap += ["--ro-bind-try", var, var]
-    bwrap += ["--ro-bind", str(binary), _BIN_IN_JAIL]
+    # Codex ships as a folder (bin/codex beside its helper codex-code-mode-host,
+    # codex-path/ and codex-resources/) and finds the rest next to itself.
+    package = binary.parent.parent
+    if (package / "codex-package.json").is_file():
+        bwrap += ["--ro-bind", str(package), "/opt/agent"]
+        exe = "/opt/agent/" + binary.relative_to(package).as_posix()
+    else:
+        bwrap += ["--ro-bind", str(binary), _BIN_IN_JAIL]
+        exe = _BIN_IN_JAIL
     if home_is_config:
         bwrap += ["--bind", str(home), _HOME_IN_JAIL]
     else:  # the user's own ~/.claude and ~/.claude.json, without the rest of their home
@@ -232,7 +257,7 @@ def jail(binary: Path, home: Path, work: Path | None, env: dict[str, str], *, ho
     ]
     for key, value in env.items():
         bwrap += ["--setenv", key, value]
-    bwrap += ["--chdir", _WORK_IN_JAIL if work is not None else _HOME_IN_JAIL, _BIN_IN_JAIL]
+    bwrap += ["--chdir", _WORK_IN_JAIL if work is not None else _HOME_IN_JAIL, exe]
     routes = "".join(f"route add unreachable {net}\\n" for net in _BLOCKED)
     # One `ip -batch` (not one ip per route): bwrap misbehaves under this pasta
     # when it starts with a higher pid in the namespace.
@@ -316,6 +341,7 @@ class Run:
     usage: dict[str, int] = field(default_factory=lambda: {"input": 0, "output": 0})
     saved_at: float = 0.0
     files_before: str = ""
+    model: str = ""  # "" = the agent's default
 
 
 _runs: dict[str, Run] = {}
@@ -378,7 +404,8 @@ def _context(gen_id: str, context: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str, Any] | None = None) -> str:
+def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str, Any] | None = None,
+          model: str = "") -> str:
     """Start a run; returns the session id (new when `sid` is empty)."""
     prompt = prompt.strip()
     if not prompt:
@@ -387,6 +414,9 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
         raise AgentError("The request is too long")
     if kind not in KINDS:
         raise AgentError(f"Unknown agent: {kind}")
+    model = model.strip()
+    if model and (len(model) > 100 or not re.fullmatch(r"[\w.:/@\[\]-]+", model)):
+        raise AgentError("Invalid model name")
     status = options()["agents"][kind]
     if not status["available"]:
         raise AgentError(status["reason"] or f"{LABELS[kind]} is not signed in; connect it first")
@@ -405,9 +435,9 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
             sessions.insert(0, session)
             _save_sessions(gen_id, sessions)
         items = transcript(gen_id, session["id"])
-        items.append({"kind": "user", "text": prompt, "at": _now()})
+        items.append({"kind": "user", "text": prompt, "at": _now(), **({"model": model} if model else {})})
         run = Run(gen_id=gen_id, sid=session["id"], kind=kind, items=items, cli_id=session.get("cli_id", ""),
-                  files_before=paper.fingerprint(gen_id))
+                  files_before=paper.fingerprint(gen_id), model=model)
         _runs[gen_id] = run
     _persist(run, force=True)
     full = prompt
@@ -618,7 +648,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
         home, is_config = claude_home(api=run.kind == "api")
         env = {"CLAUDE_CONFIG_DIR": _HOME_IN_JAIL} if is_config else {}
         env.update({"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
-        model = llm.claude_model()
+        model = run.model or llm.claude_model()
         if run.kind == "api":
             api = llm.api_config()
             env.update({"ANTHROPIC_BASE_URL": api.base_url, "ANTHROPIC_API_KEY": api.api_key,
@@ -648,6 +678,8 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
                      "-c", f"model_providers.texdeck={{name=\"API key\", base_url={json.dumps(conf.base_url)}, "
                            f"env_key=\"TEXDECK_API_KEY\", wire_api={json.dumps(settings.codex_api_wire)}}}",
                      "-m", conf.model]
+        elif run.model:
+            args += ["-m", run.model]
         if not run.cli_id:
             args += ["-C", _WORK_IN_JAIL]
         if run.cli_id:
@@ -661,7 +693,7 @@ def _command(run: Run, prompt: str) -> tuple[list[str], str | None, Callable[[],
         raise AgentError("agy is not signed in; connect it from the model button at the top")
     args = ["--output-format", "stream-json", "--dangerously-skip-permissions", "--disable-slash-commands",
             "--print-timeout", f"{RUN_TIMEOUT_SECONDS}s"]
-    model = llm.agy_model()
+    model = run.model or llm.agy_model()
     if model and model != "default":
         args += ["--model", model]
     if run.cli_id:
