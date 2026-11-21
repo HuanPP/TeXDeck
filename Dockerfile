@@ -9,12 +9,13 @@ RUN npm run build
 # ---- Stage 2: runtime — Python + XeLaTeX ----
 FROM python:3.12-slim-bookworm
 
-# TeX Live with XeLaTeX plus everything the bundled templates load, and
-# Noto CJK so Chinese decks come out in Source Han faces rather than Fandol.
+# TeX Live with XeLaTeX plus everything the bundled templates load, latexmk for
+# Papering, and Noto CJK so Chinese decks come out in Source Han faces rather
+# than Fandol.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         texlive-xetex texlive-latex-recommended texlive-latex-extra \
-        texlive-pictures texlive-fonts-extra texlive-lang-chinese \
-        tex-gyre fonts-noto-cjk fontconfig \
+        texlive-pictures texlive-fonts-recommended texlive-fonts-extra texlive-lang-chinese \
+        texlive-plain-generic lmodern latexmk tex-gyre fonts-texgyre fonts-noto-cjk fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/texdeck

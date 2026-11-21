@@ -218,6 +218,14 @@ def test_runs_straight_on_this_machine(artifact_root: Path, monkeypatch: pytest.
     assert run.items[0]["detail"] == "main.tex"
 
 
+def test_session_title_is_one_line_cut_at_a_word() -> None:
+    assert paper_agent._title("Fix the\n  typo") == "Fix the typo"
+    long = "Look at the snip and tell me in one line which heading it shows and whether it is numbered at all"
+    title = paper_agent._title(long)
+    assert title.endswith("…") and len(title) <= 81 and title[:-1] == long[:len(title) - 1]
+    assert not title[:-1].endswith(" ")
+
+
 def test_context_mentions_quotes_and_build_error(artifact_root: Path) -> None:
     gid = paper.create("Ctx", owner="").id
     text = paper_agent._context(gid, {"path": "main.tex", "line": 12, "quotes": [

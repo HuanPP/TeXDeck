@@ -757,7 +757,7 @@ export default function PaperWorkspace() {
             )}
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col">
-          {build && !build.running && !build.ok && build.error && (
+          {build && !build.running && !build.ok && build.error && !showLog && (
             <div role="alert" className="absolute inset-x-3 bottom-3 z-20 flex max-h-32 items-start gap-2 overflow-auto border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700 shadow-lg">
               <span className="min-w-0 flex-1 break-words">
                 <span className="font-mono">{build.error}</span>

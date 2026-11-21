@@ -534,6 +534,15 @@ def _context(gen_id: str, context: dict[str, Any], quotes: list[dict[str, Any]] 
     return "\n".join(lines)
 
 
+def _title(prompt: str) -> str:
+    """A session's name: the first request, on one line, cut at a word with an ellipsis."""
+    text = " ".join(prompt.split())
+    if len(text) <= 80:
+        return text
+    cut = text[:80].rsplit(" ", 1)[0] if " " in text[:80] else text[:79]
+    return cut.rstrip(",.;:") + "…"
+
+
 def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str, Any] | None = None,
           model: str = "") -> str:
     """Start a run; returns the session id (new when `sid` is empty)."""
@@ -560,7 +569,7 @@ def start(gen_id: str, kind: str, prompt: str, sid: str = "", context: dict[str,
         if gen_id in _runs:
             raise AgentError("The agent is already working on this project")
         if session is None:
-            session = {"id": secrets.token_hex(6), "agent": kind, "cli_id": "", "title": prompt[:80],
+            session = {"id": secrets.token_hex(6), "agent": kind, "cli_id": "", "title": _title(prompt),
                        "created_at": _now(), "updated_at": _now()}
             sessions.insert(0, session)
             _save_sessions(gen_id, sessions)

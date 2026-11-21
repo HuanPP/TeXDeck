@@ -3,8 +3,8 @@
 <h1 align="center">TeXDeck</h1>
 
 <p align="center">
-  <b>放进一份 PDF：读懂它，备考它，再把它讲出来。</b><br>
-  和原文双向对照的学习笔记、盯着薄弱考点出题的模拟卷、Beamer 幻灯片，全部用 LaTeX 排版。<br>
+  <b>放进一份 PDF：读懂它，备考它，再把它讲出来。也可以写你自己的论文。</b><br>
+  和原文双向对照的学习笔记、盯着薄弱考点出题的模拟卷、Beamer 幻灯片，以及一个由编程 agent 陪你改稿的 LaTeX 工作区。<br>
   直接用你已经开通的 ChatGPT、Claude 或 Gemini 订阅。
 </p>
 
@@ -47,6 +47,10 @@
   <tr>
     <td width="22%"><b>Beamer 幻灯片</b></td>
     <td>TeXDeck 的老本行：放进 PDF，拿回一套完整的 Beamer，七套模板可选。点幻灯片上的字就能改，修改要求可以攒着一起提，还能导出 PPTX。</td>
+  </tr>
+  <tr>
+    <td width="22%"><b>写论文</b></td>
+    <td>一个 LaTeX 项目，编辑器旁边就是 PDF，再配上直接改文件的 Claude Code、Codex 或 Antigravity。可以把源码或 PDF 里的一句话指给 agent，也可以框选页面上的一块区域发给它。</td>
   </tr>
 </table>
 
@@ -111,6 +115,18 @@
 
 项目里没有提示词库。每套模板的 `main.tex` 都是一套完整的示例幻灯片，模型照着它写。做自己的模板：复制 `templates/academic`，改 `template.json` 里的 `key` 和 `name`，再改 `main.tex`。示例里放真图表，生成结果里就有真图表。
 
+## 写作
+
+<p align="center">
+  <img src="docs/papering.png" alt="Papering：左侧 agent 面板里有引用的句子和它做的修改，中间是 LaTeX 源码，右侧是编译出的 PDF" width="100%">
+</p>
+
+**Papering** 是一个 LaTeX 工作区：左边文件，中间编辑器，右边 PDF，三栏可以拖动调宽，窄屏时变成标签页。可以从空白文章（中文或英文）开始，也可以导入 zip，比如从 Overleaf 下载的项目。停止输入片刻后项目自动重新编译；出错时显示文件和行号，PDF 保留上一次成功的版本。双击 PDF 跳到对应的源码行，点准星按钮则从光标所在行跳到 PDF。PDF 和整个项目的 zip 都能下载。
+
+Agent 标签页在项目上运行一个编程 agent：Claude Code、Codex、Antigravity，或者经 Claude Code、Codex 调用的 API key。它直接改项目文件，编辑器里实时显示每处改动，agent 结束后项目自动重新编译。想让它看某处内容，在编辑器或 PDF 里选中文字后点 **Add to chat**，或者点 **Snip** 在 PDF 上框住一张图或一个公式；这段内容会以卡片形式随消息发出，卡片注明出处，精确到源码行。连续的工具调用折叠成一行，点开能看到每一步。会话保留历史记录，下次接着上次的上下文继续；同一个项目同一时间只有一个 agent 在工作。
+
+隔离程度取决于在哪里运行。在 Linux 服务器上，TeXDeck 在 [bubblewrap](https://github.com/containers/bubblewrap) 里编译，断网且禁止 shell escape；agent 运行在 bubblewrap 加 [pasta](https://passt.top) 里，只能看到项目和它自己的登录，连不到内网地址和云主机元数据服务。桌面版没有这层沙箱：装了 TeX（latexmk）就用你的 TeX，没装就用自带的 Tectonic，agent 命令行直接在你的电脑上启动，和你在终端里运行它一样。TeXDeck 会要求 agent 只在项目目录里活动，但没有手段强制，所以请按在终端里使用 Claude Code、Codex 的信任程度来用它。Antigravity 只在 Linux 服务器上提供，原因见[选模型](#选模型)。Codex 在面板里用设备码登录，Claude Code 沿用它自己的登录。
+
 ## 安装
 
 **桌面版**：从 [Releases](https://github.com/HuanPP/TeXDeck/releases/latest) 下载（macOS Apple 芯片、Windows、Linux），自带 TeX 引擎，不用另装 TeX。安装包没有签名：macOS 上右键选“打开”，Windows 上点“更多信息”，再点“仍要运行”。
@@ -122,7 +138,9 @@ git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
 docker compose up --build        # 然后打开 http://localhost:8000
 ```
 
-**源码运行**：需要 Python 3.12+、Node 20+，以及 XeLaTeX 或 [Tectonic](https://tectonic-typesetting.github.io)。
+不开账号时，镜像用自带的 TeX Live 编译 Papering 项目；开了注册以后，Papering 必须走 bubblewrap 沙箱，而容器里跑不了它。镜像里也没有装任何 agent 命令行。
+
+**源码运行**：需要 Python 3.12+、Node 20+，以及 XeLaTeX 或 [Tectonic](https://tectonic-typesetting.github.io)。Papering 还需要 latexmk；在服务器上，它的沙箱需要 `bwrap`、`pasta`（Debian 包名 `passt`）和 `ip`。
 
 ```bash
 uv venv .venv --python 3.12 && uv pip install -e server --python .venv/bin/python

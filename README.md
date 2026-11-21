@@ -3,8 +3,8 @@ English | [简体中文](README.zh-CN.md)
 <h1 align="center">TeXDeck</h1>
 
 <p align="center">
-  <b>Drop in a PDF. Study it, drill for the exam, then present it.</b><br>
-  Study notes linked to the source, mock exams that adapt to your weak topics, and Beamer decks, all typeset in LaTeX.<br>
+  <b>Drop in a PDF. Study it, drill for the exam, then present it. Or write your own paper.</b><br>
+  Study notes linked to the source, mock exams that adapt to your weak topics, Beamer decks, and a LaTeX workspace where a coding agent edits the paper with you.<br>
   Runs on the ChatGPT, Claude or Gemini plan you already pay for.
 </p>
 
@@ -47,6 +47,10 @@ English | [简体中文](README.zh-CN.md)
   <tr>
     <td width="22%"><b>Beamer decks</b></td>
     <td>The original TeXDeck: a PDF in, a finished Beamer deck out, in one of seven templates. Click any text on a slide to change it, queue requests, export to PPTX.</td>
+  </tr>
+  <tr>
+    <td width="22%"><b>Write papers</b></td>
+    <td>A LaTeX project with an editor and the PDF beside it, plus Claude Code, Codex or Antigravity editing the files. Point the agent at a sentence in the source or the PDF, or snip a region of a page.</td>
   </tr>
 </table>
 
@@ -111,6 +115,18 @@ Seven templates are bundled: Academic, Emerald, Graphite, Navy, Scholar, SimpleP
 
 There is no prompt library. Each template's `main.tex` is a complete example deck, and the model copies it. To make your own, copy `templates/academic`, change `key` and `name` in `template.json`, and edit `main.tex`. Real charts in the example mean real charts in the output.
 
+## Write
+
+<p align="center">
+  <img src="docs/papering.png" alt="Papering: the agent panel with a quoted sentence and its edits, the LaTeX source, and the compiled PDF" width="100%">
+</p>
+
+**Papering** is a LaTeX workspace: files on the left, the editor in the middle, the PDF on the right, with the panes resizable and turned into tabs on a narrow screen. Start from a blank article, in English or Chinese, or import a zip such as one downloaded from Overleaf. The project recompiles shortly after you stop typing; an error shows with its file and line while the last good PDF stays up. Double-click the PDF to jump to the source line, or press the crosshair to go from the cursor to the PDF. Download the PDF, or the project as a zip.
+
+The Agent tab runs a coding agent on the project: Claude Code, Codex, Antigravity, or an API key through Claude Code or Codex. It edits the files directly, the editor shows each change as it lands, and the project recompiles when the agent is done. To point it at something, select text in the editor or the PDF and choose **Add to chat**, or press **Snip** and drag a box over a figure or an equation: the passage goes with your message as a card that says where it came from, down to the source line. Runs of tool calls fold into one line you can open. Sessions keep their history and resume where they left off; one agent works on a project at a time.
+
+Where it runs decides how far it is fenced in. On a Linux server, TeXDeck compiles in [bubblewrap](https://github.com/containers/bubblewrap) with no network and no shell escape, and runs the agent in bubblewrap behind [pasta](https://passt.top), seeing only the project and its own sign-in, with no route to private addresses or the cloud metadata service. The desktop app has no such sandbox: it builds with your TeX installation (latexmk) if you have one, else with its own Tectonic, and starts the agent CLI on your computer as you would in a terminal. The agent is told to stay inside the project folder, but nothing enforces that, so give it the trust you would give Claude Code or Codex in a terminal. Antigravity is offered only on a Linux server, for the reason given under [Pick a model](#pick-a-model). Codex signs in from the panel with a device code; Claude Code uses its own login.
+
 ## Install
 
 **Desktop app.** Download it from [Releases](https://github.com/HuanPP/TeXDeck/releases/latest) (macOS Apple silicon, Windows, Linux). It bundles its own TeX engine, so you don't need a TeX install. The builds are unsigned: on macOS, right-click the app and choose Open; on Windows, choose More info, then Run anyway.
@@ -122,7 +138,9 @@ git clone https://github.com/HuanPP/TeXDeck.git && cd TeXDeck
 docker compose up --build        # then open http://localhost:8000
 ```
 
-**From source.** You need Python 3.12+, Node 20+, and XeLaTeX or [Tectonic](https://tectonic-typesetting.github.io).
+The image compiles Papering projects with its TeX Live when there are no accounts; with sign-up on, Papering needs the bubblewrap sandbox, which the container does not run. No agent CLIs are installed in the image.
+
+**From source.** You need Python 3.12+, Node 20+, and XeLaTeX or [Tectonic](https://tectonic-typesetting.github.io). Papering also wants latexmk; on a server, its sandbox needs `bwrap`, `pasta` (Debian package `passt`) and `ip`.
 
 ```bash
 uv venv .venv --python 3.12 && uv pip install -e server --python .venv/bin/python

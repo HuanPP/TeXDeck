@@ -143,7 +143,7 @@ function QuoteCard({ label, text, image, onRemove }: { label: string; text: stri
       <div className="flex min-w-0 items-center gap-1.5 px-2 py-1">
         <button type="button" aria-expanded={open} title={open ? "Hide" : "Show"}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left" onClick={() => setOpen((o) => !o)}>
-          {image ? <img src={image} alt="" className="h-5 max-w-12 shrink-0 border border-[var(--color-border)] object-cover" />
+          {image ? <img src={image} alt="" className="h-5 w-12 shrink-0 border border-[var(--color-border)] bg-white object-contain" />
             : <FileText className="h-3 w-3 shrink-0 text-sky-600" />}
           <span className="shrink-0 font-medium text-slate-700">{label}</span>
           {!open && !image && <span className="min-w-0 truncate text-slate-400">{first}</span>}
